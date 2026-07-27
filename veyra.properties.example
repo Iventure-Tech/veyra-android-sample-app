@@ -1,0 +1,15 @@
+# Veyra sample app credentials — copy this file to veyra.properties and fill in the
+# values issued to you during Veyra onboarding. veyra.properties is git-ignored; never
+# commit real credentials.
+
+# OAuth client credentials (issued by Veyra)
+veyra.clientId=your-client-id
+veyra.clientSecret=your-client-secret
+
+# Identifiers assigned to your app at onboarding
+veyra.paymentAppProviderId=your-payment-app-provider-id
+veyra.tokenRequestorId=your-token-requestor-id
+
+# Your Google Cloud project number (linked to this app in Play Console) — Play Integrity
+# verdicts are issued under it.
+veyra.cloudProjectNumber=your-cloud-project-number

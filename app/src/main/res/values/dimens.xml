@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="page_offset">24dp</dimen>
+    <dimen name="page_margin">32dp</dimen>
+    <dimen name="card_normal_elevation">12dp</dimen>
+    <dimen name="card_expanded_elevation">24dp</dimen>
+</resources>
+

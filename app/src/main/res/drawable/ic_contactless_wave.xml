@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Contactless payment waves icon - curved waves representing NFC -->
+    <!-- Top wave -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeWidth="3.5"
+        android:strokeColor="#64B5F6"
+        android:pathData="M5,5 Q12,3 12,7 Q12,11 19,9"/>
+    <!-- Second wave -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeWidth="3.5"
+        android:strokeColor="#64B5F6"
+        android:pathData="M6,8.5 Q12,6.5 12,10.5 Q12,14.5 18,12.5"/>
+    <!-- Third wave -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeWidth="3.5"
+        android:strokeColor="#64B5F6"
+        android:pathData="M7,12 Q12,10 12,14 Q12,18 17,16"/>
+    <!-- Bottom wave -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeWidth="3.5"
+        android:strokeColor="#64B5F6"
+        android:pathData="M8,15.5 Q12,13.5 12,17.5 Q12,21.5 16,19.5"/>
+</vector>
+

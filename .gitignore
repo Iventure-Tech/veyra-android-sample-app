@@ -1,0 +1,13 @@
+# Real credentials — copy veyra.properties.example to veyra.properties and fill in.
+veyra.properties
+
+# Gradle / build output
+.gradle/
+build/
+local.properties
+
+# IDE metadata
+.idea/
+*.iml
+.DS_Store
+captures/

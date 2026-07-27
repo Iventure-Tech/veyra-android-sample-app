@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pay entry card — deep-red gradient matching the wallet card art (card_gradient). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="135"
+        android:startColor="#0E0004"
+        android:centerColor="#680016"
+        android:endColor="#9C1528"
+        android:type="linear" />
+    <corners android:radius="20dp" />
+</shape>

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/gradient_black_background">
+
+    <!-- Result Icon Container -->
+    <LinearLayout
+        android:id="@+id/resultContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginTop="120dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Success/Error Icon Container with Circle Animation -->
+        <FrameLayout
+            android:id="@+id/resultIconContainer"
+            android:layout_width="120dp"
+            android:layout_height="120dp">
+            
+            <!-- Animated Circle that draws around the icon -->
+            <co.veyra.bank.softpos.AnimatedCircleView
+                android:id="@+id/animatedCircle"
+                android:layout_width="120dp"
+                android:layout_height="120dp" />
+            
+            <!-- Success/Error Icon -->
+            <ImageView
+                android:id="@+id/resultIcon"
+                android:layout_width="120dp"
+                android:layout_height="120dp"
+                android:src="@drawable/success_circle_with_tick"
+                android:contentDescription="Payment result"
+                tools:src="@drawable/success_circle_with_tick" />
+        </FrameLayout>
+
+        <!-- Result Text -->
+        <TextView
+            android:id="@+id/resultText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Payment Successful"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:layout_marginTop="32dp"
+            android:gravity="center" />
+
+        <!-- Result Message -->
+        <TextView
+            android:id="@+id/resultMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="18sp"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:textColor="@android:color/white" />
+
+        <!-- Amount Display (single TextView so currency + amount stay on one line) -->
+        <TextView
+            android:id="@+id/resultAmountDisplay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="₦ 0.00"
+            android:textSize="40sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:maxLines="1"
+            android:gravity="center"
+            android:layout_marginTop="32dp"
+            app:autoSizeTextType="uniform"
+            app:autoSizeMinTextSize="20sp"
+            app:autoSizeMaxTextSize="40sp" />
+    </LinearLayout>
+
+    <!-- Additional Details -->
+    <TextView
+        android:id="@+id/additionalDetails"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="14sp"
+        android:textColor="@android:color/white"
+        android:gravity="center"
+        android:layout_marginTop="32dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/resultContainer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- View Receipt button (shown after any completed transaction) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/viewReceiptButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/view_receipt"
+        android:textSize="16sp"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:textColor="@android:color/white"
+        android:visibility="gone"
+        android:layout_marginTop="24dp"
+        app:layout_constraintTop_toBottomOf="@id/additionalDetails"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Done — confirms the result and returns to Home -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/doneButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/done"
+        android:textSize="18sp"
+        android:layout_margin="24dp"
+        android:padding="16dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
+

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_edit_profile"
+        android:title="Edit Merchant Profile" />
+    <item
+        android:id="@+id/action_activate"
+        android:title="Activate Merchant" />
+    <item
+        android:id="@+id/action_deactivate"
+        android:title="Deactivate Merchant" />
+</menu>

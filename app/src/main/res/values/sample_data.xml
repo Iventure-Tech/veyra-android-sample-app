@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sample / demo prefill data — the SINGLE SOURCE for every default value the sample app
+  pre-fills into a form. Nothing sample-related should be hardcoded in Kotlin.
+
+  The demo user is ONE account holder that can both receive (SoftPOS) and pay (Wallet). They
+  are EITHER a Personal merchant OR a Business merchant — never both — so there is a single
+  set of identity values below. The ONLY thing specific to a business is the CAC number
+  (an individual does not have one). See co.veyra.bank.SampleData
+  (Merchant / PersonalMerchant / BusinessMerchant).
+-->
+<resources>
+
+    <!-- Common identity — used whether the user registers as Personal or Business, and for
+         both receiving (SoftPOS merchant) and paying (Wallet tokenisation).
+
+         Replace the placeholder identity with the test account details from your Veyra
+         onboarding pack — digitise/eligibility is checked against the issuer's test
+         records, so an unknown account number is declined. -->
+    <string name="sample_account_number">1234567890</string> <!-- your test account (NUBAN) -->
+    <string name="sample_institution_code">000000</string> <!-- your test institution code -->
+    <string name="sample_account_name">Ada Demo</string> <!-- = merchant name -->
+    <string name="sample_bvn">22222222222</string>
+    <string name="sample_email">ada.demo@example.com</string>
+    <string name="sample_wallet_account_id">ada.demo@example.com</string>
+    <string name="sample_mobile_number">2348000000000</string>
+
+    <string name="sample_acquirer_id">ACQ001</string>
+    <string name="sample_address_line1">20 Campbell Street</string>
+    <string name="sample_address_line2">Lagos Island</string>
+    <string name="sample_city">Lagos</string>
+    <string name="sample_state">Lagos</string>
+    <string name="sample_country">Nigeria</string>
+    <string name="sample_country_code">0566</string> <!-- ISO 4217 numeric, Nigeria -->
+
+    <!-- Business-only: the sole field an individual does not have. -->
+    <string name="sample_cac_number">RC-0000000</string>
+
+</resources>

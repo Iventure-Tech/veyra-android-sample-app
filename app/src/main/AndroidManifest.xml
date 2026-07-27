@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        Permissions and NFC/HCE features are merged from the SDK modules:
+        - softpos-sdk: INTERNET, NFC, location (payment_device_info)
+        - wallet-sdk: INTERNET, NFC, HCE feature + PaymentCardEmulationService
+
+        Reader mode (SoftPOS) needs no NFC intent filters or tech-filter meta-data —
+        tags are delivered via callback, not intents.
+    -->
+
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.VeyraBank"
+        tools:targetApi="31">
+
+        <!-- Neo-bank home: mode switch + entry to both flows -->
+        <activity
+            android:name="co.veyra.bank.HomeActivity"
+            android:exported="true"
+            android:theme="@style/Theme.VeyraBank">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Get paid (SoftPOS): amount entry → contactless waiting → result.
+             singleTask: VeyraSoftPOSSdk binds to the first activity instance
+             (lifecycle-driven reader arming), so re-entry must reuse it. -->
+        <activity
+            android:name="co.veyra.bank.softpos.GetPaidActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:parentActivityName="co.veyra.bank.HomeActivity"
+            android:theme="@style/Theme.SoftPOS" />
+
+        <!-- Pay (wallet): card carousel + digitisation/activation flows -->
+        <activity
+            android:name="co.veyra.bank.wallet.PayActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.HomeActivity"
+            android:theme="@style/Theme.VeyraWallet.NoActionBar" />
+
+        <activity
+            android:name="co.veyra.bank.wallet.ScanToPayActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.PayActivity"
+            android:theme="@style/Theme.VeyraWallet.NoActionBar" />
+
+        <!-- Portrait QR scanner: overrides the zxing-android-embedded default
+             CaptureActivity, which is declared sensorLandscape. -->
+        <activity
+            android:name="co.veyra.bank.wallet.PortraitCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:stateNotNeeded="true"
+            android:clearTaskOnLaunch="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <activity
+            android:name="co.veyra.bank.wallet.TokenizationRequestActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.PayActivity"
+            android:theme="@style/Theme.VeyraWallet" />
+
+        <activity
+            android:name="co.veyra.bank.wallet.AccountEligibilityActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.TokenizationRequestActivity"
+            android:theme="@style/Theme.VeyraWallet" />
+
+        <activity
+            android:name="co.veyra.bank.wallet.ActivationMethodSelectionActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.PayActivity"
+            android:theme="@style/Theme.VeyraWallet" />
+        <activity
+            android:name="co.veyra.bank.wallet.ActivationCodeRequestActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.ActivationMethodSelectionActivity"
+            android:theme="@style/Theme.VeyraWallet" />
+        <activity
+            android:name="co.veyra.bank.wallet.ActivationOtpActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.ActivationCodeRequestActivity"
+            android:theme="@style/Theme.VeyraWallet"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="co.veyra.bank.wallet.ActivationInfoActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.PayActivity"
+            android:theme="@style/Theme.VeyraWallet" />
+        <activity
+            android:name="co.veyra.bank.wallet.TransactionHistoryActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.PayActivity"
+            android:theme="@style/Theme.VeyraWallet.NoActionBar" />
+        <activity
+            android:name="co.veyra.bank.wallet.TransactionDetailActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.TransactionHistoryActivity"
+            android:theme="@style/Theme.VeyraWallet.NoActionBar" />
+        <activity
+            android:name="co.veyra.bank.wallet.ReceiptsActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.PayActivity"
+            android:theme="@style/Theme.VeyraWallet.NoActionBar" />
+        <activity
+            android:name="co.veyra.bank.wallet.ReceiptDetailActivity"
+            android:exported="false"
+            android:parentActivityName="co.veyra.bank.wallet.ReceiptsActivity"
+            android:theme="@style/Theme.VeyraWallet.NoActionBar" />
+
+        <!-- The wallet HCE service is declared in wallet-sdk's manifest and merged in.
+             Its enabled state is SDK-owned: enabled only while the wallet is in use. -->
+    </application>
+
+</manifest>

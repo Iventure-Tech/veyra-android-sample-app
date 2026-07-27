@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Credentials and onboarding identifiers (client_id, client_secret,
+         payment_app_provider_id, token_requestor_id, cloud_project_number) are injected
+         from veyra.properties at build time — see app/build.gradle and
+         veyra.properties.example. Only non-secret configuration lives here. -->
+
+    <string name="app_version">1.0.0</string>
+
+    <!-- Provision Context (optional) - Allowed values for digitize request provision_context (lists).
+         Country codes: ISO 3166-1 numeric, 4 digits e.g. 0566 (Nigeria), 0826 (UK). Not NGA/GBR. -->
+    <string-array name="allowed_acquirer_ids">
+        <item>ACQ001</item>
+    </string-array>
+    <string-array name="allowed_merchant_ids">
+        <item>MERCHANT01</item>
+    </string-array>
+    <string-array name="allowed_country_codes">
+        <item>0566</item>
+    </string-array>
+    <string-array name="allowed_mccs">
+        <item>5411</item>
+    </string-array>
+
+    <!-- supports_3ds for provision_channel_context -->
+    <bool name="supports_3ds">false</bool>
+
+    <!-- device_type for digitize request (MOBILE, TABLET, WATCH, OTHER) -->
+    <string name="device_type">MOBILE</string>
+
+    <!-- wallet_provider_tokenization_recommendation_standard_version for digitize request -->
+    <string name="wallet_provider_tokenization_recommendation_standard_version">1.0</string>
+</resources>

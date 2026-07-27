@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="14dp"
+    android:paddingBottom="14dp">
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintDimensionRatio="1.6:1"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:cardCornerRadius="20dp"
+        app:cardElevation="18dp"
+        app:strokeWidth="0dp">
+
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/cardContentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/card_gradient"
+            android:padding="20dp">
+
+            <!-- Decorative circle 1: large, bleeds off top-right corner -->
+            <View
+                android:id="@+id/decoCircle1"
+                android:layout_width="170dp"
+                android:layout_height="170dp"
+                android:background="@drawable/card_deco_circle"
+                android:layout_marginTop="-60dp"
+                android:layout_marginEnd="-60dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
+
+            <!-- Decorative circle 2: smaller, offset inward -->
+            <View
+                android:id="@+id/decoCircle2"
+                android:layout_width="85dp"
+                android:layout_height="85dp"
+                android:background="@drawable/card_deco_circle"
+                android:layout_marginTop="22dp"
+                android:layout_marginEnd="4dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
+
+            <!-- TOP ROW: gold chip · bank name watermark · contactless -->
+            <LinearLayout
+                android:id="@+id/topRow"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent">
+
+                <ImageView
+                    android:id="@+id/chipImageView"
+                    android:layout_width="44dp"
+                    android:layout_height="32dp"
+                    android:src="@drawable/ic_chip"
+                    android:contentDescription="Chip"
+                    app:tint="#E8C98A" />
+
+                <TextView
+                    android:id="@+id/bankNameWatermark"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="VEYRA"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:alpha="0.35"
+                    android:gravity="center"
+                    android:letterSpacing="0.35"
+                    android:fontFamily="sans-serif-medium" />
+
+                <ImageView
+                    android:id="@+id/contactlessIcon"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_contactless"
+                    android:contentDescription="Contactless"
+                    android:alpha="0.7" />
+
+            </LinearLayout>
+
+            <!-- Card number: vertically centred between top and bottom rows -->
+            <TextView
+                android:id="@+id/cardNumberTextView"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="19sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:ellipsize="none"
+                android:singleLine="true"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/topRow"
+                app:layout_constraintBottom_toTopOf="@id/bottomRow"
+                tools:text="4111  ••••  ••••  1234" />
+
+            <!-- BOTTOM ROW: cardholder | expiry | network logo -->
+            <LinearLayout
+                android:id="@+id/bottomRow"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="bottom"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent">
+
+                <!-- Cardholder name stack -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/cardHolderLabelTextView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="CARDHOLDER"
+                        android:textColor="@android:color/white"
+                        android:textSize="9sp"
+                        android:alpha="0.55"
+                        android:letterSpacing="0.1" />
+
+                    <TextView
+                        android:id="@+id/cardHolderNameTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@android:color/white"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:layout_marginTop="2dp"
+                        tools:text="JOHN DOE" />
+
+                </LinearLayout>
+
+                <!-- Expiry stack -->
+                <LinearLayout
+                    android:id="@+id/expiryDateContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="14dp">
+
+                    <TextView
+                        android:id="@+id/expiryLabelTextView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="EXPIRES"
+                        android:textColor="@android:color/white"
+                        android:textSize="9sp"
+                        android:alpha="0.55"
+                        android:letterSpacing="0.1" />
+
+                    <TextView
+                        android:id="@+id/expiryDateTextView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@android:color/white"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:layout_marginTop="2dp"
+                        tools:text="12/25" />
+
+                </LinearLayout>
+
+                <!-- Payment network logo (Mastercard-style circles) -->
+                <ImageView
+                    android:id="@+id/networkLogo"
+                    android:layout_width="42dp"
+                    android:layout_height="26dp"
+                    android:src="@drawable/ic_payment_network"
+                    android:contentDescription="Payment network"
+                    android:scaleType="fitCenter" />
+
+            </LinearLayout>
+
+            <!-- Pending activation badge: centred, floats above bottom row -->
+            <TextView
+                android:id="@+id/pendingActivationBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="9sp"
+                android:textAllCaps="true"
+                android:letterSpacing="0.1"
+                android:visibility="gone"
+                android:background="@drawable/card_badge"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:layout_marginBottom="8dp"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintBottom_toTopOf="@id/bottomRow"
+                tools:text="ACTIVATION REQUIRED" />
+
+            <!-- NFC ready indicator -->
+            <TextView
+                android:id="@+id/nfcActiveIndicator"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✓ Ready for payment"
+                android:textColor="@android:color/white"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:background="@drawable/card_badge"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:alpha="0"
+                android:visibility="gone"
+                android:layout_marginBottom="8dp"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintBottom_toTopOf="@id/bottomRow" />
+
+            <!-- Zero-size stub kept for adapter ViewBinding compatibility -->
+            <TextView
+                android:id="@+id/lastFourDigitsTextView"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

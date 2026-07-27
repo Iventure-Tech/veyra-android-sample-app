@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="24dp"
+    android:paddingBottom="24dp"
+    android:clickable="true"
+    android:focusable="true">
+
+<com.google.android.material.card.MaterialCardView
+    android:layout_width="0dp"
+    android:layout_height="0dp"
+    android:minHeight="220dp"
+    app:cardCornerRadius="20dp"
+    app:cardElevation="8dp"
+    app:strokeWidth="1dp"
+    app:strokeColor="#33FFFFFF"
+    android:alpha="0.7"
+    app:layout_constraintDimensionRatio="1.6:1"
+    app:layout_constraintWidth_percent="0.85"
+    app:layout_constraintBottom_toBottomOf="parent"
+    app:layout_constraintEnd_toEndOf="parent"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintTop_toTopOf="parent"
+    app:layout_constraintVertical_bias="0.5">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/default_card_gradient"
+        android:padding="20dp">
+
+        <!-- Chip Icon -->
+        <ImageView
+            android:id="@+id/chipImageView"
+            android:layout_width="36dp"
+            android:layout_height="28dp"
+            android:src="@android:drawable/ic_menu_myplaces"
+            android:contentDescription="Chip"
+            app:tint="#80FFFFFF"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Card Number Placeholder -->
+        <TextView
+            android:id="@+id/cardNumberTextView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="•••• •••• •••• ••••"
+            android:textColor="#80FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1"
+            android:layout_marginTop="20dp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/chipImageView"
+            tools:text="•••• •••• •••• ••••" />
+
+        <!-- Cardholder Name -->
+        <TextView
+            android:id="@+id/cardHolderNameTextView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="CARDHOLDER NAME"
+            android:textColor="#80FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            app:layout_constraintEnd_toStartOf="@id/expiryDateTextView"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/cardNumberTextView"
+            tools:text="CARDHOLDER NAME" />
+
+        <!-- Expiry Date -->
+        <TextView
+            android:id="@+id/expiryDateTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MM/YY"
+            android:textColor="#80FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/cardHolderNameTextView"
+            tools:text="MM/YY" />
+
+        <!-- Add Icon - Centered -->
+        <ImageView
+            android:id="@+id/addIcon"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@android:drawable/ic_input_add"
+            android:contentDescription="Add card"
+            android:background="@drawable/add_icon_background"
+            app:tint="@android:color/white"
+            android:padding="10dp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/cardHolderNameTextView"
+            app:layout_constraintBottom_toTopOf="@id/addCardHint"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="6dp" />
+
+        <!-- Subtle hint text -->
+        <TextView
+            android:id="@+id/addCardHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tap to add card"
+            android:textColor="#B3FFFFFF"
+            android:textSize="11sp"
+            android:layout_marginBottom="12dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/addIcon" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</com.google.android.material.card.MaterialCardView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Get paid entry card — near-black, echoing the SoftPOS white-on-black flow. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/bank_card_dark" />
+    <stroke android:width="1dp" android:color="@color/bank_hairline" />
+    <corners android:radius="20dp" />
+</shape>

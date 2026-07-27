@@ -1,0 +1,98 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// Credentials and onboarding identifiers come from veyra.properties (git-ignored).
+// Copy veyra.properties.example to veyra.properties and fill in your values.
+def veyraProps = new Properties()
+def veyraPropsFile = rootProject.file('veyra.properties')
+if (veyraPropsFile.exists()) {
+    veyraPropsFile.withInputStream { veyraProps.load(it) }
+}
+def veyraProp = { String key ->
+    def value = veyraProps.getProperty(key)?.trim()
+    if (!value || value.startsWith('your-')) {
+        logger.warn("veyra.properties: '${key}' is not set — copy veyra.properties.example " +
+                "to veyra.properties and fill in the values from your Veyra onboarding.")
+        return ''
+    }
+    return value
+}
+
+android {
+    namespace 'co.veyra.bank'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "co.veyra.bank"
+        // softpos-sdk requires 28 (wallet-only integrations can go down to 24)
+        minSdk 28
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        // Injected as string resources so the rest of the app reads them like any other
+        // config value (see VeyraBank.kt).
+        resValue "string", "client_id", veyraProp('veyra.clientId')
+        resValue "string", "client_secret", veyraProp('veyra.clientSecret')
+        resValue "string", "payment_app_provider_id", veyraProp('veyra.paymentAppProviderId')
+        resValue "string", "token_requestor_id", veyraProp('veyra.tokenRequestorId')
+        resValue "string", "cloud_project_number", veyraProp('veyra.cloudProjectNumber')
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Unsigned release APKs cannot be installed; the debug keystore here is for
+            // local evaluation only — use your own signing config for anything real.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    // Single entry point: pulls softpos-sdk, wallet-sdk and the shared core artifacts
+    // transitively from the Veyra Maven repository (declared in settings.gradle).
+    implementation 'co.veyra:veyra-sdk:1.0.1'
+
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.10.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
+    implementation 'androidx.viewpager2:viewpager2:1.0.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // QR code (receipts: softpos flow renders, wallet flow scans)
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    implementation 'com.google.zxing:core:3.5.2'
+
+    // JSON (activation method persistence in the wallet flow)
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+}
