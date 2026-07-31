@@ -264,7 +264,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
     Environment.TEST,
     paymentAppProviderId = "your-provider-id",
     tokenRequestorId = "50100000001",
-    deviceType = DeviceType.MOBILE,
     allowedCountryCodes = listOf("0566"),      // ISO 3166-1 numeric, 4 digits
     clientId = "your-client-id",
     clientSecret = "your-client-secret"
@@ -285,7 +284,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `environment` | **Mandatory** | `Environment.TEST` or `LIVE`. |
 | `paymentAppProviderId` | **Mandatory** | Your payment-app provider identifier, assigned by Veyra. Sent in every tokenisation and eligibility request. |
 | `tokenRequestorId` | **Mandatory** | Token requestor ID assigned by the scheme. |
-| `deviceType` | **Mandatory** | Device form factor: `DeviceType.MOBILE`, `TABLET`, `WATCH` or `OTHER`. |
 | `allowedCountryCodes` | **Mandatory** (may be empty) | Provision context: ISO 3166-1 **numeric, 4-digit** codes (`"0566"` Nigeria, `"0826"` UK) — never alpha codes. |
 | `clientId` / `clientSecret` | **Mandatory** for TEST/LIVE | OAuth client credentials — `initialize` throws if missing. |
 | `enableNfc(Boolean)` | Optional | Enable NFC/HCE at init. Default `true`. |
@@ -310,7 +308,9 @@ Server hosts and endpoint paths are resolved by the SDK from the environment —
 
 ### Device type
 
-You pass one of the `DeviceType` constants to the wallet config builder: `MOBILE`, `TABLET`, `WATCH`, `OTHER`.
+**Detected, not configured** — the SDK detects the device form factor itself (Wear OS →
+`WATCH`, smallest screen width ≥ 600dp → `TABLET`, otherwise `MOBILE`) and reports it in
+digitise requests. There is no configuration parameter for it.
 
 ---
 

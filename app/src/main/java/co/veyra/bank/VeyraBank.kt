@@ -41,15 +41,11 @@ object VeyraBank {
         val tokenRequestorId = requireNotNull(context.getString(R.string.token_requestor_id).takeIf { it.isNotBlank() }) {
             "veyra.tokenRequestorId must be set in veyra.properties (copy veyra.properties.example)"
         }
-        val deviceType = requireNotNull(context.getString(R.string.device_type).takeIf { it.isNotBlank() }) {
-            "device_type must be set in res/values/config.xml"
-        }
         val resources = context.resources
         return VeyraWalletSdkConfig.builder(
             co.veyra.common.Environment.TEST,
             paymentAppProviderId,
             tokenRequestorId,
-            deviceType,
             allowedCountryCodes = resources.getStringArray(R.array.allowed_country_codes).filter { it.isNotBlank() },
             clientId = context.getString(R.string.client_id).takeIf { it.isNotBlank() },
             clientSecret = context.getString(R.string.client_secret).takeIf { it.isNotBlank() }
