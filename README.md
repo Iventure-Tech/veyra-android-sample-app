@@ -14,6 +14,16 @@ The full **[Developer Guide](DEVELOPER-GUIDE.md)** — platform requirements, in
 variants, the complete public API reference with samples, and the response-code catalogue
 with per-outcome guidance — lives in this repository.
 
+> **Building with React Native? Do not integrate these AARs directly — use the official
+> React Native SDK (`veyra-sdk-react-native`) instead.** The SDK arms and disarms the
+> device's NFC payment modes automatically by following native screen (Activity) lifecycle.
+> A React Native app runs its entire UI in a single Activity, so JavaScript navigation
+> never triggers those lifecycle signals — after a user leaves your payment screen, the
+> device can silently **stay armed as a payment card** until the app is backgrounded or the
+> screen locks. The React Native SDK bridges screen focus into the SDK's mode management so
+> arming and release follow your JS screens correctly. See
+> https://github.com/Iventure-Tech/veyra-react-native-sample-app.
+
 ## Prerequisites
 
 - Android Studio (or the Android SDK + JDK 17) and a physical NFC-capable device running
