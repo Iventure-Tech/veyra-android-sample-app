@@ -18,9 +18,8 @@ with per-outcome guidance — lives in this repository.
 
 - Android Studio (or the Android SDK + JDK 17) and a physical NFC-capable device running
   Android 9+ (API 28) — NFC and device attestation don't work on the emulator.
-- **Veyra onboarding credentials**: OAuth client id/secret, payment app provider id, token
-  requestor id, and your Google Cloud project number (Play Integrity). The app talks to the
-  Veyra TEST environment.
+- **Veyra onboarding credentials**: OAuth client id/secret, payment app provider id, and
+  token requestor id. The app talks to the Veyra TEST environment.
 - The test account details from your onboarding pack (the prefill identity in
   `app/src/main/res/values/sample_data.xml` is a placeholder — digitisation is checked
   against the issuer's test records).

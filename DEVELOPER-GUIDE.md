@@ -205,7 +205,7 @@ val sdk = VeyraWalletSdk.initialize(context, walletConfig, activity = this)
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(context, config, activity?)` | `context` — app context; `config` — `VeyraWalletSdkConfig`; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. Throws `IllegalArgumentException` when `clientId`/`clientSecret` are missing for TEST/LIVE, or `cloudProjectNumber` is not set. |
+| `initialize(context, config, activity?)` | `context` — app context; `config` — `VeyraWalletSdkConfig`; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. Throws `IllegalArgumentException` when `clientId`/`clientSecret` are missing for TEST/LIVE. |
 | `getInstance()` | — | Current instance or `null`. |
 | `tokenisationService` | — | The wallet service — every wallet operation hangs off it. |
 | `getTokenRequestorId()` | — | The token requestor ID from config. |
@@ -255,7 +255,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
     tokenRequestorId = "50100000001",
     deviceType = DeviceType.MOBILE,
     allowedCountryCodes = listOf("0566"),      // ISO 3166-1 numeric, 4 digits
-    cloudProjectNumber = 123456789012L,        // YOUR app's Google Cloud project number
     clientId = "your-client-id",
     clientSecret = "your-client-secret"
 )
@@ -277,7 +276,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `tokenRequestorId` | **Mandatory** | Token requestor ID assigned by the scheme. |
 | `deviceType` | **Mandatory** | Device form factor: `DeviceType.MOBILE`, `TABLET`, `WATCH` or `OTHER`. |
 | `allowedCountryCodes` | **Mandatory** (may be empty) | Provision context: ISO 3166-1 **numeric, 4-digit** codes (`"0566"` Nigeria, `"0826"` UK) — never alpha codes. |
-| `cloudProjectNumber` | **Mandatory** | Your app's **own** Google Cloud project number (Play Console → project number). Device attestation is issued under it. |
 | `clientId` / `clientSecret` | **Mandatory** for TEST/LIVE | OAuth client credentials — `initialize` throws if missing. |
 | `enableNfc(Boolean)` | Optional | Enable NFC/HCE at init. Default `true`. |
 | `appVersion(String)` | Optional | App version sent in digitise requests (falls back to your package version). |

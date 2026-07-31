@@ -44,9 +44,6 @@ object VeyraBank {
         val deviceType = requireNotNull(context.getString(R.string.device_type).takeIf { it.isNotBlank() }) {
             "device_type must be set in res/values/config.xml"
         }
-        val cloudProjectNumber = requireNotNull(context.getString(R.string.cloud_project_number).takeIf { it.isNotBlank() }?.toLongOrNull()) {
-            "veyra.cloudProjectNumber must be set in veyra.properties (your Google Cloud project number)"
-        }
         val resources = context.resources
         return VeyraWalletSdkConfig.builder(
             co.veyra.common.Environment.TEST,
@@ -54,7 +51,6 @@ object VeyraBank {
             tokenRequestorId,
             deviceType,
             allowedCountryCodes = resources.getStringArray(R.array.allowed_country_codes).filter { it.isNotBlank() },
-            cloudProjectNumber = cloudProjectNumber,
             clientId = context.getString(R.string.client_id).takeIf { it.isNotBlank() },
             clientSecret = context.getString(R.string.client_secret).takeIf { it.isNotBlank() }
         )

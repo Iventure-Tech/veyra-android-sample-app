@@ -9,7 +9,3 @@ veyra.clientSecret=your-client-secret
 # Identifiers assigned to your app at onboarding
 veyra.paymentAppProviderId=your-payment-app-provider-id
 veyra.tokenRequestorId=your-token-requestor-id
-
-# Your Google Cloud project number (linked to this app in Play Console) — Play Integrity
-# verdicts are issued under it.
-veyra.cloudProjectNumber=your-cloud-project-number

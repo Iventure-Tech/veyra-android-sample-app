@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Credentials and onboarding identifiers (client_id, client_secret,
-         payment_app_provider_id, token_requestor_id, cloud_project_number) are injected
-         from veyra.properties at build time — see app/build.gradle and
-         veyra.properties.example. Only non-secret configuration lives here. -->
+         payment_app_provider_id, token_requestor_id) are injected from veyra.properties
+         at build time — see app/build.gradle and veyra.properties.example. Only
+         non-secret configuration lives here. -->
 
     <string name="app_version">1.0.0</string>
 

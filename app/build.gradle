@@ -38,7 +38,6 @@ android {
         resValue "string", "client_secret", veyraProp('veyra.clientSecret')
         resValue "string", "payment_app_provider_id", veyraProp('veyra.paymentAppProviderId')
         resValue "string", "token_requestor_id", veyraProp('veyra.tokenRequestorId')
-        resValue "string", "cloud_project_number", veyraProp('veyra.cloudProjectNumber')
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -75,7 +74,7 @@ android {
 dependencies {
     // Single entry point: pulls softpos-sdk, wallet-sdk and the shared core artifacts
     // transitively from the Veyra Maven repository (declared in settings.gradle).
-    implementation 'co.veyra:veyra-sdk:1.0.1'
+    implementation 'co.veyra:veyra-sdk:1.0.2'
 
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
