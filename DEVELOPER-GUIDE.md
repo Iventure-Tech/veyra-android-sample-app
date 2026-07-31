@@ -49,7 +49,12 @@ android:networkSecurityConfig="@xml/network_security_config"
 
 ### Maven
 
-Register the Veyra repository in `settings.gradle` (`dependencyResolutionManagement`) or, on older layouts, the `repositories` block of your root `build.gradle`:
+The Veyra repository is **authenticated** — use the repository credentials issued to you at
+onboarding (keep them out of version control, e.g. in a git-ignored properties file; the
+sample app reads them from `veyra.properties`).
+
+Register the repository in `settings.gradle` (`dependencyResolutionManagement`) or, on older
+layouts, the `repositories` block of your root `build.gradle`:
 
 ```gradle
 // settings.gradle
@@ -57,9 +62,15 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://repo.veyra.co/releases' }
+        maven {
+            url 'https://repo.veyra.co/releases'
+            credentials {
+                username = veyraRepoUsername   // from your onboarding pack
+                password = veyraRepoPassword   // never commit these
+            }
+        }
         // Pre-release builds only, when Veyra asks you to verify a fix ahead of a release:
-        // maven { url 'https://repo.veyra.co/snapshots' }
+        // maven { url 'https://repo.veyra.co/snapshots' } (same credentials block)
     }
 }
 ```

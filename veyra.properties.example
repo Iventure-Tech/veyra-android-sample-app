@@ -2,6 +2,11 @@
 # values issued to you during Veyra onboarding. veyra.properties is git-ignored; never
 # commit real credentials.
 
+# Veyra Maven repository credentials (repo.veyra.co — issued by Veyra; used by
+# settings.gradle to resolve the SDK artifacts)
+veyra.repoUsername=your-repo-username
+veyra.repoPassword=your-repo-password
+
 # OAuth client credentials (issued by Veyra)
 veyra.clientId=your-client-id
 veyra.clientSecret=your-client-secret

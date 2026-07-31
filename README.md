@@ -18,8 +18,9 @@ with per-outcome guidance — lives in this repository.
 
 - Android Studio (or the Android SDK + JDK 17) and a physical NFC-capable device running
   Android 9+ (API 28) — NFC and device attestation don't work on the emulator.
-- **Veyra onboarding credentials**: OAuth client id/secret, payment app provider id, and
-  token requestor id. The app talks to the Veyra TEST environment.
+- **Veyra onboarding credentials**: Maven repository username/password (the SDK repository
+  is authenticated), OAuth client id/secret, payment app provider id, and token requestor
+  id. The app talks to the Veyra TEST environment.
 - The test account details from your onboarding pack (the prefill identity in
   `app/src/main/res/values/sample_data.xml` is a placeholder — digitisation is checked
   against the issuer's test records).
@@ -45,7 +46,8 @@ with per-outcome guidance — lives in this repository.
    or open the project in Android Studio and press Run.
 
 The SDK artifacts resolve from the Veyra Maven repository
-(`https://repo.veyra.co/releases`) — no local files, no extra setup.
+(`https://repo.veyra.co/releases`) using the repository credentials in your
+`veyra.properties` — no local files, no extra setup.
 
 ## Where things are
 

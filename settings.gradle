@@ -6,12 +6,26 @@ pluginManagement {
     }
 }
 
+// The Veyra repository requires the consumer credentials issued at onboarding —
+// copy veyra.properties.example to veyra.properties and fill them in.
+def veyraProps = new Properties()
+def veyraPropsFile = new File(rootDir, 'veyra.properties')
+if (veyraPropsFile.exists()) {
+    veyraPropsFile.withInputStream { veyraProps.load(it) }
+}
+
 dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Veyra SDK artifacts
-        maven { url 'https://repo.veyra.co/releases' }
+        // Veyra SDK artifacts (authenticated)
+        maven {
+            url 'https://repo.veyra.co/releases'
+            credentials {
+                username = veyraProps.getProperty('veyra.repoUsername') ?: ''
+                password = veyraProps.getProperty('veyra.repoPassword') ?: ''
+            }
+        }
     }
 }
 
