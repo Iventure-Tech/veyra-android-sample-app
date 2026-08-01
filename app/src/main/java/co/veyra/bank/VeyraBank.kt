@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.appcompat.app.AppCompatActivity
 import co.veyra.sdk.VeyraSdk
 import co.veyra.sdk.VeyraSdkConfig
+import co.veyra.softpos.payment.sdk.VeyraSoftPOSSdk
 import co.veyra.softpos.payment.sdk.VeyraSoftPosSdkConfig
 import co.veyra.wallet.sdk.VeyraWalletSdkConfig
 
@@ -17,13 +18,11 @@ object VeyraBank {
         VeyraSdk.initialize(activity, VeyraSdkConfig(softposConfig(activity), walletConfig(activity)))
 
     /**
-     * Whether a merchant is registered — read from the app's own [MerchantPrefs] record so
-     * Home can gate the "Get paid" card without initialising the SoftPOS SDK (initialising
-     * would bind the SDK's reader lifecycle to Home; only payment screens should do that).
-     * The record is re-synced from `MerchantService.isRegistered()` whenever the Get-paid
-     * screen opens.
+     * Whether a merchant is registered — the SDK's init-free read, so Home can gate the
+     * "Get paid" card without initialising the SoftPOS SDK (initialising binds the SDK's
+     * reader lifecycle to the initialising screen; only payment screens should do that).
      */
-    fun isMerchantRegistered(context: Context): Boolean = MerchantPrefs.isRegistered(context)
+    fun isMerchantRegistered(context: Context): Boolean = VeyraSoftPOSSdk.isMerchantRegistered(context)
 
     fun softposConfig(context: Context): VeyraSoftPosSdkConfig =
         VeyraSoftPosSdkConfig.builder(

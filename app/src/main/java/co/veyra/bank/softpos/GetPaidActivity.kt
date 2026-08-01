@@ -287,13 +287,6 @@ class GetPaidActivity : AppCompatActivity() {
         co.veyra.bank.VeyraBank.ensureInitialized(this)
         sdk = VeyraSoftPOSSdk.initialize(this, co.veyra.bank.VeyraBank.softposConfig(this))
 
-        // Re-sync the app's own registration record from the SDK (Home gates its Get-paid
-        // card on this record without initialising the SoftPOS SDK — see MerchantPrefs).
-        co.veyra.bank.MerchantPrefs.update(
-            this,
-            registered = sdk.merchantService.isRegistered(),
-            business = !sdk.merchantService.getStoredMerchantData()?.cacNumber.isNullOrBlank(),
-        )
 
         container = findViewById(R.id.container)
 
@@ -1196,12 +1189,6 @@ class GetPaidActivity : AppCompatActivity() {
                 registerButton.isEnabled = true
                 registerProgressBar.visibility = View.GONE
                 if (response.success) {
-                    // Record the outcome for Home's Get-paid gate (see MerchantPrefs).
-                    co.veyra.bank.MerchantPrefs.update(
-                        this,
-                        registered = true,
-                        business = !merchantTypeIsPersonal,
-                    )
                     Toast.makeText(this, getString(R.string.registration_successful), Toast.LENGTH_LONG).show()
                     showPage(PAGE_AMOUNT_ENTRY)
                 } else {

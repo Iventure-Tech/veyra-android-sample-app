@@ -407,7 +407,9 @@ sdk.merchantService.getBanks { banks ->
 
 | Method | Description |
 |---------|-------------|
-| `isRegistered(): Boolean` | `true` when a complete merchant (ID, terminal, name, acquirer, MCC, country) is stored on this device. Gate your Get-paid entry on it. |
+| `isRegistered(): Boolean` | `true` when a complete merchant (ID, terminal, name, acquirer, MCC, country) is stored on this device. |
+| **`VeyraSoftPOSSdk.isMerchantRegistered(context)`** (static) | The same check **without initialising the SDK** — no lifecycle binding, no NFC arming. Gate your Home screen's Get-paid entry on this (initialise the SDK only on payment screens). |
+| **`VeyraSoftPOSSdk.storedMerchant(context)`** (static) | Init-free read of the persisted `StoredMerchantData` (or `null`) — e.g. for pre-filling or merchant-type checks before any payment screen exists. |
 | `isMerchantActive(): Boolean` | `true` when the last known backend status is `ACTIVE` (a merchant with no status yet counts active). Payments are refused for inactive merchants. |
 | `refreshStatus()` | Refresh the backend status immediately (the SDK also polls it periodically while your app is foregrounded). Call at the activation moment. |
 | `activate { response -> }` / `deactivate { response -> }` | Activate / deactivate this merchant on the backend. Callback gets `MerchantStatusResponse(merchantId, merchantStatus)` or `null` on failure. |
