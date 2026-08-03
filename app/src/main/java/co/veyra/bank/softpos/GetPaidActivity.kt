@@ -311,8 +311,6 @@ class GetPaidActivity : AppCompatActivity() {
             else -> showPage(PAGE_MERCHANT_TYPE_SELECTION)
         }
 
-        // Handle NFC intent if app was launched via NFC
-        handleIntent(intent)
     }
 
     /** Runs a merchant activate/deactivate requested from Home, then finishes back to Home. */
@@ -1377,14 +1375,7 @@ class GetPaidActivity : AppCompatActivity() {
     
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent) // Important: update the intent
-        // Forward NFC intent to SDK
-        sdk.handleNfcIntent(intent)
-    }
-    
-    private fun handleIntent(intent: Intent) {
-        // Forward NFC intent to SDK
-        sdk.handleNfcIntent(intent)
+        setIntent(intent) // singleTask: keep getIntent() pointing at the latest launch
     }
     
     private fun showViewReceiptButton() {

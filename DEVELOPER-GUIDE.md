@@ -200,7 +200,6 @@ val sdk = VeyraSoftPOSSdk.initialize(this, softposConfig)
 | `merchantService` | — | Merchant registration, status, profile, banks. |
 | `transactionService` | — | Merchant transaction history + receipts (all rails). |
 | `cpmCustomerQrService` | — | Charge a scanned customer payment QR. |
-| `handleNfcIntent(intent)` | `intent` from `onNewIntent()` | Legacy NFC-intent forwarding. Not needed with reader mode; kept for backwards compatibility. |
 
 The reader arms on resume and disarms on pause automatically. If NFC is unavailable or off, the SDK shows its own prompt dialogs at initialise.
 
