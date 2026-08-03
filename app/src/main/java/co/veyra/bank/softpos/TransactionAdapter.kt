@@ -19,6 +19,7 @@ class TransactionAdapter(
         val amountText: TextView = view.findViewById(R.id.amountText)
         val statusText: TextView = view.findViewById(R.id.statusText)
         val refText: TextView = view.findViewById(R.id.refText)
+        val railText: TextView = view.findViewById(R.id.railText)
         val timeText: TextView = view.findViewById(R.id.timeText)
     }
 
@@ -32,6 +33,9 @@ class TransactionAdapter(
         val item = items[position]
         holder.amountText.text = CurrencyUtils.formatAmount(item.amount, item.currencyCode)
         holder.refText.text = item.merchantTransactionReference
+        // Which rail took the payment — the SDK derives the wording, so Tap/QR/Scan read the
+        // same here as on iOS and React Native.
+        holder.railText.text = item.railLabel
         holder.timeText.text = item.transactionTime ?: "—"
         holder.statusText.text = item.transactionStatus.name
         holder.statusText.setTextColor(

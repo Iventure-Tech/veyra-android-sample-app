@@ -97,13 +97,10 @@ class CardAdapter : ListAdapter<CardItem, RecyclerView.ViewHolder>(CardDiffCallb
         private var gestureDetector: GestureDetector? = null
         
         fun bind(token: Token, position: Int, pendingActivation: Boolean = false) {
-            // Don't show long GUID under cardholder – use friendly label
-            val nameDisplay = when {
-                token.cardHolderName.isBlank() -> "CARDHOLDER"
-                token.cardHolderName.length > 28 || token.cardHolderName.contains("-") -> "CARDHOLDER"
-                else -> token.cardHolderName.uppercase()
-            }
-            binding.cardHolderNameTextView.text = nameDisplay
+            // The SDK derives the card's display name — scheme label + masked last four, e.g.
+            // "AFRIGO ****1234" — so it is already short and safe to render as-is. Blank only on
+            // cards digitised before the SDK supplied it.
+            binding.cardHolderNameTextView.text = token.cardHolderName.ifBlank { "CARDHOLDER" }
             binding.cardNumberTextView.text = token.getMaskedPAN()
             // Expiry: show month and year only (MM/YY)
             val expiryDateDisplay = formatExpiryMonthYear(token.expiryDate)

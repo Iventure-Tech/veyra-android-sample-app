@@ -17,9 +17,9 @@
          Replace the placeholder identity with the test account details from your Veyra
          onboarding pack — digitise/eligibility is checked against the issuer's test
          records, so an unknown account number is declined. -->
-    <string name="sample_account_number">1234567890</string> <!-- your test account (NUBAN) -->
-    <string name="sample_institution_code">000000</string> <!-- your test institution code -->
-    <string name="sample_account_name">Ada Demo</string> <!-- = merchant name -->
+    <string name="sample_account_number">1234567890</string> <!-- 1234567890 your test account (NUBAN) -->
+    <string name="sample_institution_code">090325</string> <!-- 000000 your test institution code -->
+    <string name="sample_account_name">Ada Demo</string> <!--Ada Demo = merchant name -->
     <string name="sample_bvn">22222222222</string>
     <string name="sample_email">ada.demo@example.com</string>
     <string name="sample_wallet_account_id">ada.demo@example.com</string>

@@ -147,6 +147,8 @@
     <string name="no_transactions">No transactions yet</string>
     <string name="reference">Reference</string>
     <string name="transaction_id">Transaction ID</string>
+    <string name="cardholder">Cardholder</string>
+    <string name="paid_via">Paid Via</string>
     <string name="response_code">Response Code</string>
     <string name="status">Status</string>
     <string name="amount">Amount</string>

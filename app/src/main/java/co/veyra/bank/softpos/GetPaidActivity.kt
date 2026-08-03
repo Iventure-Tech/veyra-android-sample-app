@@ -514,7 +514,12 @@ class GetPaidActivity : AppCompatActivity() {
                 pageCpmConfirm.findViewById<TextView>(R.id.cpmConfirmAmountDisplay).text =
                     scanned?.let { CurrencyUtils.formatAmount(it.amountMinorUnits, it.currencyNumeric4) } ?: ""
                 pageCpmConfirm.findViewById<TextView>(R.id.cpmConfirmCardText).text =
-                    scanned?.let { "Card •••• ${it.dpan.takeLast(4)} · amount read from the customer's QR" } ?: ""
+                    scanned?.let {
+                        // The QR carries the card's display name ("AFRIGO ****1234"); older QRs
+                        // carry none, so fall back to the last four.
+                        val card = it.cardholderName ?: "Card •••• ${it.dpan.takeLast(4)}"
+                        "$card · amount read from the customer's QR"
+                    } ?: ""
             }
         }
         if (page != PAGE_QR_WAITING) stopQrContextPayment()
@@ -554,6 +559,10 @@ class GetPaidActivity : AppCompatActivity() {
         pageTransactionDetail.findViewById<TextView>(R.id.detailReferenceValue).text = tx.merchantTransactionReference
         pageTransactionDetail.findViewById<TextView>(R.id.detailTransactionId).text = getString(R.string.transaction_id)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTransactionIdValue).text = tx.transactionId ?: "—"
+        // Which rail took the payment (Tap / QR / Scan) — every rail records its own, so a QR
+        // payment must never read as a tap. Wording comes from the SDK, shared across platforms.
+        pageTransactionDetail.findViewById<TextView>(R.id.detailRail).text = getString(R.string.paid_via)
+        pageTransactionDetail.findViewById<TextView>(R.id.detailRailValue).text = tx.railLabel
         pageTransactionDetail.findViewById<TextView>(R.id.detailAmount).text = getString(R.string.amount)
         pageTransactionDetail.findViewById<TextView>(R.id.detailAmountValue).text = CurrencyUtils.formatAmount(tx.amount, tx.currencyCode)
         pageTransactionDetail.findViewById<TextView>(R.id.detailStatus).text = getString(R.string.status)
@@ -562,6 +571,10 @@ class GetPaidActivity : AppCompatActivity() {
         pageTransactionDetail.findViewById<TextView>(R.id.detailResponseCodeValue).text = tx.responseCode ?: "—"
         pageTransactionDetail.findViewById<TextView>(R.id.detailTime).text = getString(R.string.time)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTimeValue).text = tx.transactionTime ?: "—"
+        // EMV tag 5F20 as the card presented it (a Veyra token shows e.g. "AFRIGO ****1234").
+        // Null on QR-MPM, where the merchant never reads the card, and on pre-5F20 rows.
+        pageTransactionDetail.findViewById<TextView>(R.id.detailCardholder).text = getString(R.string.cardholder)
+        pageTransactionDetail.findViewById<TextView>(R.id.detailCardholderValue).text = tx.cardholderName ?: "—"
         // Only show View Receipt for final statuses (approved, declined, failed) - not for pending
         pageTransactionDetail.findViewById<MaterialButton>(R.id.viewReceiptButtonDetail)?.visibility =
             if (tx.transactionStatus == TransactionStatus.PENDING) View.GONE else View.VISIBLE
@@ -1391,6 +1404,12 @@ class GetPaidActivity : AppCompatActivity() {
                 receiptPageQrImage.setImageBitmap(bitmap)
                 receiptPageQrImage.visibility = View.VISIBLE
                 pageReceipt.findViewById<TextView>(R.id.receiptHint).visibility = View.VISIBLE
+                // The paying card as it presented itself (EMV 5F20) — shown on the merchant's
+                // copy only; absent on QR-MPM, where the merchant never reads the card.
+                pageReceipt.findViewById<TextView>(R.id.receiptCardholder).apply {
+                    text = result.cardholderName
+                    visibility = if (result.cardholderName.isNullOrBlank()) View.GONE else View.VISIBLE
+                }
             } else {
                 receiptPageQrImage.visibility = View.GONE
                 pageReceipt.findViewById<TextView>(R.id.receiptHint).text = getString(R.string.receipt_not_available)

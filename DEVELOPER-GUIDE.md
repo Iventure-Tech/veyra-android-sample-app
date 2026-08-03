@@ -542,7 +542,7 @@ Decode and validate a scanned payload. **A throw means "not a payment QR"** — 
 
 | Returns | Fields |
 |---|---|
-| `ScannedCpmQr` | `dpan` (customer token PAN — display last 4), `amountMinorUnits` (the QR's own amount — confirm, never re-key), `currencyNumeric4` (e.g. `"0566"`), `tokenExpiryYymm` |
+| `ScannedCpmQr` | `dpan` (customer token PAN — display last 4), `amountMinorUnits` (the QR's own amount — confirm, never re-key), `currencyNumeric4` (e.g. `"0566"`), `tokenExpiryYymm`, `cardholderName` (the paying card's display name, e.g. `AFRIGO ****1234` — the same value a tap presents; **display only**, it rides outside the QR's cryptogram, so never branch a payment decision on it; null when the QR carries none) |
 
 #### `cpmCustomerQrService.charge`
 
@@ -578,8 +578,15 @@ The SDK records every payment it takes — tap, get-paid QR and customer-QR char
 val transactions = sdk.transactionService.getLastTransactions(50)   // most recent first, all rails
 val tx = sdk.transactionService.getTransaction(reference)           // or null
 // TransactionInfo: merchantTransactionReference, amount (minor units), transactionStatus
-// (APPROVED / DECLINED / PENDING / FAILED), responseCode, transactionTime, currencyCode, transactionId
+// (APPROVED / DECLINED / PENDING / FAILED), responseCode, transactionTime, currencyCode,
+// transactionId, cardholderName (EMV 5F20 as the card presented it — null on QR-MPM),
+// rail ("TAP" / "QR_MPM" / "QR_CPM"), railLabel ("Tap" / "QR" / "Scan")
 ```
+
+Each row records the rail that actually took the payment. Display `railLabel` — the SDK derives it
+so the same rail reads identically on Android, iOS and React Native, and an unrecognised rail code
+passes through unchanged rather than being shown as some other rail. Branch on `rail`, not on the
+label.
 
 `PENDING` means the outcome is not yet known (the SDK keeps polling and updates the stored row); `FAILED` means the payment never reached the server. Hide receipt affordances while a row is `PENDING`.
 
@@ -824,7 +831,7 @@ val active = tokens.firstOrNull { it.isActive }
 payButtons.isEnabled = active?.requiresOnline != true
 ```
 
-`Token`: `tokenId`, `tokenUniqueReference`, `devicePAN`, `cardHolderName`, `expiryDate`, `cardScheme`, `cardType`, `isActive` (the card payments use), `activationMethods` (non-null while activation is pending), `transactions` (last 3), `requiresOnline` (see below), helpers `getMaskedPAN()` / `getLastFourDigits()`.
+`Token`: `tokenId`, `tokenUniqueReference`, `devicePAN`, `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `expiryDate`, `cardScheme`, `cardType`, `isActive` (the card payments use), `activationMethods` (non-null while activation is pending), `transactions` (last 3), `requiresOnline` (see below), helpers `getMaskedPAN()` / `getLastFourDigits()`.
 
 **`requiresOnline`** — `true` when the card cannot pay until the wallet has been **online** to refresh it. Render the card greyed-out and non-tappable and prompt the user to connect; the flag derives fresh on every read and clears on its own once the SDK's automatic refresh succeeds. There is no manual "refresh keys" call — key management is entirely SDK-owned.
 
@@ -1084,6 +1091,7 @@ Two kinds of surface, marked throughout:
 | Message prefix | Match with |
 |---|---|
 | `ONLINE_REQUIRED:` | `error.message?.contains("ONLINE_REQUIRED") == true` |
+| `AMOUNT_EXCEEDS_CARD_LIMIT:` | `error.message?.contains("AMOUNT_EXCEEDS_CARD_LIMIT") == true` |
 | `TOKEN_NOT_ACTIVE:` | `error.message?.contains("TOKEN_NOT_ACTIVE") == true` |
 | `CDCVM required:` | You skipped `authenticateForScannedPayment` (one authentication per payment / per QR render). Authenticate, then retry. |
 | `Authentication cancelled:` / `Authentication failed:` | Stay on the confirm screen; let the user retry. |
@@ -1196,6 +1204,7 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | Scan rejected (`EXPIRED` / `BAD_SIGNATURE` / …) | Wallet MPM scan | Yes (fresh scan) | End the flow; ask the merchant for a fresh code. Never show a rejected payment on a confirm screen. |
 | `Authentication cancelled:` / `Authentication failed:` | Wallet payments | Yes | Nothing was sent. Stay on the confirm screen; let the user retry the biometric. |
 | `ONLINE_REQUIRED:` | Wallet payments | After going online | Prompt to connect; the SDK refreshes the card itself. Pre-empt with `requiresOnline` (grey the card out). |
+| `AMOUNT_EXCEEDS_CARD_LIMIT:` | Wallet payments | **Not by retrying** | The amount is larger than this card can carry in one payment. Going online does **not** help — offer a smaller amount or another card. |
 | `TOKEN_NOT_ACTIVE:` | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
 | `CDCVM required:` | Wallet QR payments | Yes | Call `authenticateForScannedPayment` first — one authentication per payment / per QR render. |
 | Digitise `"DECLINED"` | Add card | Per `message` | Show the server's message; the flow ends. Common cause: the account falls outside your provision-context allow-lists. |
@@ -1215,7 +1224,7 @@ data class Token(
     val tokenId: String,                    // the card's identity for getToken / setActiveToken
     val tokenUniqueReference: String?,      // the server-side identity for activation / deactivation / history
     val devicePAN: String,
-    val cardHolderName: String,
+    val cardHolderName: String,           // "AFRIGO ****1234" — scheme + masked last four, not a person
     val expiryDate: String,                 // "MM/YY"
     val cvv: String?,
     val cardType: CardType,                 // DEBIT, CREDIT
@@ -1353,7 +1362,10 @@ data class TransactionInfo(                 // history row
     val amount: Long,                       // minor units
     val transactionStatus: TransactionStatus,   // APPROVED / DECLINED / PENDING / FAILED
     val responseCode: String?, val transactionTime: String?,     // "yyyy-MM-dd HH:mm:ss"
-    val currencyCode: String?, val transactionId: String?
+    val currencyCode: String?, val transactionId: String?,
+    val cardholderName: String?,            // EMV 5F20, e.g. "AFRIGO ****1234"; null on QR-MPM
+    val rail: String,                       // "TAP" / "QR_MPM" / "QR_CPM" — use for logic
+    val railLabel: String                   // "Tap" / "QR" / "Scan" — use for display
 )
 
 data class TransactionReceiptResult(
@@ -1377,7 +1389,9 @@ data class PaymentContextStatus(
 data class ScannedCpmQr(
     val dpan: String, val tokenExpiryYymm: String?,
     val amountMinorUnits: Long,             // the QR's own, cryptogram-bound amount
-    val currencyNumeric4: String, /* … */
+    val currencyNumeric4: String,
+    val cardholderName: String?,           // "AFRIGO ****1234" — display only, outside the cryptogram
+    /* … */
 )
 data class PaymentResponse(val responseCode: String?, val merchantStatus: String?, val transactionId: String?, /* … */)
 ```

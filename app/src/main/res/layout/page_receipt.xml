@@ -51,6 +51,16 @@
     </FrameLayout>
 
     <TextView
+        android:id="@+id/receiptCardholder"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:visibility="gone"
+        android:textSize="14sp"
+        android:textColor="@android:color/white"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
         android:id="@+id/receiptHint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

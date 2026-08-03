@@ -83,6 +83,22 @@
                 android:fontFamily="monospace" />
 
             <TextView
+                android:id="@+id/detailRail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#AAAAAA"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/detailRailValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textColor="@android:color/white"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
                 android:id="@+id/detailAmount"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -141,6 +157,22 @@
 
             <TextView
                 android:id="@+id/detailTimeValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textColor="@android:color/white"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/detailCardholder"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#AAAAAA"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/detailCardholderValue"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textSize="16sp"
