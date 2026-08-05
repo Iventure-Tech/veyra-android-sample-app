@@ -440,7 +440,7 @@ sdk.merchantService.updateMerchant(
 
 #### `makeCardPayment`
 
-Arm the reader for one sale and wait for the customer's tap. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only real outcomes (approved / declined / pending / error) end the payment.
+Arm the reader for one sale and wait for the customer's tap. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only real outcomes (approved / declined / pending / failed) end the payment.
 
 ```kotlin
 val request = TransactionRequest.Builder(
@@ -906,6 +906,13 @@ sdk.tokenisationService.setActiveToken(
     onActivationFailed = { message ->
         // e.g. "Card needs to be re-digitized. Please remove and add again."
         runOnUiThread { showError(message); refreshCards() }
+    },
+    // Payments refused before anything was sent (1.0.12+) — see "Refused payments" below.
+    onRequireOnline = { event ->
+        runOnUiThread { showError("Connect to the internet to pay ${event.amountMinorUnits}") }
+    },
+    onAmountExceedCardLimit = { event ->
+        runOnUiThread { showError("That amount is too large for this card — try another card") }
     }
 )
 ```
@@ -1102,13 +1109,23 @@ Two kinds of surface, marked throughout:
 
 Terminal outcomes only — unsupported cards and lost contact **never** produce one of these; they fire the re-tap hints and the reader stays armed.
 
+> **Read `response_status`, not the code (STORY-98 / ISSUE-140).** Every payment outcome now carries a
+> triple: `response_code` (what the wire said), `response_status` (**what to do**) and
+> `response_status_reason` (why). Branch on `response_status` only — `APPROVED`, `DECLINED`, `FAILED`
+> or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
+> derives a status from the code, and neither should your app: a code you do not recognise is not a
+> decline. `"99"` is retired — an unheard outcome is now `68` (no reply), `06` (the hop we called
+> failed) or `96` (the SDK/service itself threw), all `PENDING`, while `91` (never connected) and
+> `25` (no such transaction) are `FAILED`, meaning nothing happened and a retry is safe.
+
+
 | Code | Meaning | Terminal? | What to do |
 |---|---|---|---|
 | `"00"` | Approved | Yes | Success screen + receipt (look it up by your echoed `merchantTransactionReference`). |
 | `"05"` | Declined by the issuer/server | Yes | Show decline; try another card. A stale customer QR also surfaces as `"05"` on the CPM rail — if the customer's code sat on screen a while, ask them to regenerate and rescan. |
 | `"06"` | Failed before reaching the issuer — validation, cancellation, merchant not active, wrong mode, read failure after the online boundary | Yes (no money moved) | Fix the input/config and re-initiate; `message` says which check failed. Cancellation returns `"06"` with message `"Payment cancelled"`. |
-| `"99"` | Pending — sent to the issuer, no response received (timeout/network) | Callback fires, outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
-| `"91"` | Issuer unavailable | Same as `"99"` | Same — poll, don't retry-charge. |
+| `"68"` (was `"99"`) | Pending — sent, no reply received (timeout/network) | Callback fires, outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
+| `"91"` | Never connected — the request provably never left | **`FAILED`** — nothing happened, retry is safe | Same — poll, don't retry-charge. |
 | `"12"` / `"14"` / `"51"` / `"54"` | Invalid transaction / invalid card / insufficient funds / expired card | Yes | Hard declines — show the reason, try another card. |
 | `"96"` | System malfunction — **ambiguous**: the payment may have failed *or* succeeded with the response lost | Yes, but unresolved | Don't assume failure: poll the transaction status briefly before telling the merchant it failed. |
 
@@ -1123,6 +1140,25 @@ When the customer's phone is tapped on a terminal, the wallet's `onTransactionCo
 | `"ERROR"` | The tap could not be processed | Ask the user to tap again. |
 
 The SDK also vibrates the phone itself — once on success, twice on decline/error — so your UI feedback is supplementary.
+
+### Refused payments — `onRequireOnline` and `onAmountExceedCardLimit` (1.0.12+)
+
+A payment can be refused **before anything is sent**, when the card's payment keys cannot carry the amount. This is not a terminal decline and has no response code: on the tap rail it ends the tap at the protocol level, so `onTransactionCompleted` fires with `"DECLINED"` and these callbacks tell you *why*.
+
+They are two callbacks rather than one because the advice differs, and giving the payer the wrong one wastes their time:
+
+| Callback | Meaning | What to tell the payer |
+|---|---|---|
+| `onRequireOnline` | The card's keys need refreshing and the wallet could not reach the server | "Connect to the internet and try again" — this genuinely fixes it |
+| `onAmountExceedCardLimit` | The amount is over the card's per-payment cap | "Pay a smaller amount or use another card". **Never say "go online"** — a refreshed key carries the same cap, so they would connect, retry and fail identically |
+
+Both carry `amountMinorUnits` (name the amount that failed) and `rail` (`"TAP"`, `"CPM_QR"` or `"MPM_QR"`). `onAmountExceedCardLimit` also carries `cardLimitMinorUnits` — the cap, when the SDK can read it, or `null`; show the figure only when it is non-null rather than printing a guess.
+
+**Timing on the tap rail.** `onRequireOnline` arrives at the earliest moment it is actually true: immediately if the device is already offline, otherwise only after the SDK's automatic background refresh has failed. If that refresh succeeds — the usual case on a working connection, within about a second — **nothing fires** and the next tap simply works. So treat the absence of this callback after a declined tap as "ask them to tap again", not as an error.
+
+**These describe the payment, not the card.** `Token.requiresOnline` answers a different question — "can this card pay *anything* offline?" — and stays `false` for a card that can still make smaller payments. Show a message about the payment that just failed; don't grey the card out on the strength of one refused amount.
+
+On iOS the same two signals are delivered by `observePaymentRefusals`; both fire from the QR rails only, since iOS has no tap-to-pay. On React Native they arrive as `requireOnline` / `amountExceedCardLimit` phases of the `walletTap` event.
 
 ### QR context lifecycle — `contextStatus().state`
 
@@ -1196,7 +1232,7 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 |---|---|---|---|
 | Tap code `"05"` / status `DECLINED` | Merchant tap / rails | Yes (new attempt) | Show decline; try another card or rail. |
 | Tap code `"06"` / status `FAILED` | Merchant tap | Yes | Nothing reached the issuer — fix what `message` names (input, config, merchant inactive, wrong mode) and re-initiate. |
-| Tap code `"99"` / `"91"` / status `PENDING` | Merchant tap | **No — never re-charge** | Outcome unknown at the issuer. Show "processing"; the SDK polls and resolves the history row. Re-charging risks a double charge. |
+| Status `PENDING` (codes `68`/`06`/`96`/`09`) | Merchant tap | **No — never re-charge** | Outcome unknown at the issuer. Show "processing"; the SDK polls and resolves the history row. Re-charging risks a double charge. |
 | Code `"96"` | Any rail | **No — not yet** | Ambiguous: may have succeeded with the response lost. Poll briefly (context status / transaction status / reconcile) before reporting failure. |
 | `EXPIRED` context / `onExpired` fired | Get-paid QR | Yes | The QR died unpaid (never recorded). Blank it, offer a fresh one. |
 | `inspect` throws (customer QR) | Merchant CPM scan | Yes | Not a payment QR — transient hint, stay armed for another scan. |
