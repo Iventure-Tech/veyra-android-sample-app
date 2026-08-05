@@ -1177,11 +1177,24 @@ Four things worth knowing before you rely on it:
 
 #### When the SDK could not start a payment at all
 
-`sdkErrorCode` is set when nothing was ever attempted — request validation, no merchant profile, a
-mode/arming refusal, a card that could not be read — or when the SDK itself failed. There is **no**
-response code and **no** status in that case, deliberately: a response code asserts that a payment was
-attempted and something answered or failed to, so a fabricated one would invite you to retry something
-that never left the device (and put a made-up code on a receipt). Fix the input and re-initiate.
+`sdkErrorCode` is set when nothing was ever attempted — request validation, cancellation, merchant not
+active or not fully onboarded, a mode/arming refusal — or when the SDK itself failed. The codes name the
+cause: `INVALID_REQUEST`, `PAYMENT_CANCELLED`, `TRANSACTION_IN_PROGRESS`, `MERCHANT_NOT_ACTIVE`,
+`MERCHANT_PROFILE_INCOMPLETE`, `NFC_MODE_REFUSED`. Fix the input and re-initiate — nothing needs
+reconciling, because nothing was sent.
+
+Branch on `sdkErrorCode != null` **before** you look at the code. For compatibility the SDK still puts
+the legacy `"06"` in `transactionCode` on these responses by default; opt in to the honest shape — an
+**empty** code and no status — with:
+
+```kotlin
+CardPaymentService.typedPreDispatchErrors = true
+```
+
+The typed shape is deliberate: a response code asserts that a payment was attempted and something
+answered or failed to, so a fabricated one invites you to retry something that never left the device
+(and puts a made-up code on a receipt). New integrations should opt in from day one; the legacy `"06"`
+exists only so that apps written before this field keep behaving exactly as they did.
 
 ### Wallet tap outcome — `onTransactionCompleted`
 
