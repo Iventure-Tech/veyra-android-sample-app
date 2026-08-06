@@ -774,7 +774,7 @@ sdk.tokenisationService.requestActivationCode(
 }
 ```
 
-`ActivationCodeResponse`: `tokenUniqueReference`, `expirationDateTime` (ISO-8601 — drive your countdown from it), `status` (`SUCCESS` / `FAILURE`), `message`. **Check `status` even inside a successful result.** Codes are limited-attempt and rate-limited — see [Response codes](#response-codes--error-handling).
+`ActivationCodeResponse`: `tokenUniqueReference`, `expirationDateTime` (ISO-8601 — drive your countdown from it), `status` (`SUCCESS` / `FAILURE`), `message`, `failureCode` (typed `ActivationFailureCode`, null on success) + `failureCodeRaw`. **Check `status` even inside a successful result**, and branch on `failureCode`, never on `message`: `CODE_REQUEST_RATE_LIMITED` means disable "resend" until later but keep the flow open; `ACTIVATION_LOCKED` is terminal — end the flow and point the user at their issuer. Codes are limited-attempt and rate-limited — see [Response codes](#response-codes--error-handling).
 
 #### `activate`
 
@@ -784,13 +784,26 @@ Submit the code the customer received. Success when `status == "SUCCESS"`.
 sdk.tokenisationService.activate(tokenUniqueReference = ref, activationCode = code) { result ->
     result.fold(
         onSuccess = { response ->
-            if (response.status?.uppercase() == "SUCCESS") navigateToWallet()
-            else showError(response.message ?: "Wrong code — try again")
+            when {
+                response.status?.uppercase() == "SUCCESS" -> navigateToWallet()
+                response.failureCode == ActivationFailureCode.CODE_INVALID ->
+                    showError("Wrong code — ${response.attemptsRemaining} attempts left")
+                response.failureCode == ActivationFailureCode.MAX_ATTEMPTS_EXCEEDED -> {
+                    // The cycle is closed. On RecommendDelete.MUST delete the token and restart
+                    // the add-card flow; on MAY, deletion is advisory.
+                    endActivationCycle(response.recommendDelete)
+                }
+                response.failureCode == ActivationFailureCode.ACTIVATION_LOCKED -> showLockedTerminal()
+                response.failureCode == ActivationFailureCode.CODE_EXPIRED -> offerResend()
+                else -> showError(response.message ?: "Wrong code — try again")
+            }
         },
         onFailure = { e -> showError(e.message) }
     )
 }
 ```
+
+`ActivateResponse` failure fields (all null on success): `failureCode` — typed `ActivationFailureCode`, one of `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `NO_PENDING_ACTIVATION`, `CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, or `UNKNOWN` for a code newer than this SDK (raw value in `failureCodeRaw`); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `RecommendDelete.MUST` / `MAY` after an exhausted cycle (delete the dead token rather than leaving it in the card list), null otherwise (raw in `recommendDeleteRaw`).
 
 #### `observeActivation` (+ pause / resume / stop)
 
@@ -803,7 +816,7 @@ For the out-of-band methods (call centre / website / issuer app) the activation 
 | `onTimeout` | After 5 minutes without activation — show a fallback message (the SDK keeps checking in the background thereafter). |
 | `onError` | Optional — each failed check (polling continues). |
 
-Wire the lifecycle: `pauseActivationObserver(ref)` when the screen backgrounds, `resumeActivationObserver(ref)` on return (the timeout clock keeps running while paused — if it lapsed, `onTimeout` fires immediately), `stopActivationObserver(ref)` when the screen is dismissed. Extras: `checkTokenStatus(ref) { Result<Boolean> }` for a one-shot check, `hasActivationObserver(ref)`.
+Wire the lifecycle: `pauseActivationObserver(ref)` when the screen backgrounds, `resumeActivationObserver(ref)` on return (the timeout clock keeps running while paused — if it lapsed, `onTimeout` fires immediately), `stopActivationObserver(ref)` when the screen is dismissed. Extras: `tokenStatus(ref) { Result<TokenStatus> }` for a one-shot five-valued check (`ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `DEACTIVATED` / `EXPIRED`, plus `UNKNOWN` for a value newer than this SDK — lets you say "suspended — contact your bank" vs "pending — enter your code" vs "expired — re-add the card"), `checkTokenStatus(ref) { Result<Boolean> }` (deprecated — flattens the same read to a boolean), `hasActivationObserver(ref)`.
 
 ```kotlin
 sdk.tokenisationService.observeActivation(
@@ -843,7 +856,7 @@ A card is not simply "there or not" — it can be awaiting activation, frozen fo
 |---|---|---|---|---|
 | 1 | **Needs activation** | `token.activationMethods != null` | Show the card with an **"Activate"** badge/button that launches the [activation flow](#activation). Pay actions hidden. | `activate` succeeding, or `observeActivation` firing `onActivated`. |
 | 2 | **Requires online** | `requiresOnline == true` | **Grey the card out and make it non-tappable**; overlay a "Connect to the internet" hint; disable every pay affordance (tap surface, scan-to-pay, show-QR buttons). | Nothing you call — the SDK refreshes the card itself the next time the device is online. Re-read the list and the flag has cleared. |
-| 3 | **Inactive server-side** (suspended, expired) | `token.isActive == false` (and a pay attempt refuses with `TOKEN_NOT_ACTIVE:`) | Grey the card out with an **"Unavailable — contact your bank"** indicator; disable pay affordances. Don't offer retry — the state is issuer-controlled. | A later automatic status sync seeing the card active again. |
+| 3 | **Inactive server-side** (suspended, expired) | `token.isActive == false`, with `token.status` saying **why** (`SUSPENDED` / `PENDING_ACTIVATION` / `EXPIRED` — a pay attempt refuses with the typed `WalletRefusalException.TokenNotActive`) | Grey the card out; word the indicator from `status` — "Suspended — contact your bank" vs "Expired — re-add the card". Disable pay affordances; don't offer retry — the state is issuer-controlled. | A later automatic status sync seeing the card active again. |
 | 4 | **Payable** | None of the above | Normal rendering; pay affordances enabled for the active card. | — |
 
 Two rules make this robust:
@@ -872,7 +885,12 @@ fun bind(card: Token) {
         !card.isActive -> {                   // 3. suspended/inactive server-side
             cardView.alpha = 0.4f
             cardView.isClickable = false
-            stateHint.text = "Card unavailable — contact your bank"
+            stateHint.text = when (card.status) {   // say why, not just that
+                TokenStatus.SUSPENDED -> "Card suspended — contact your bank"
+                TokenStatus.EXPIRED -> "Card expired — re-add it"
+                TokenStatus.PENDING_ACTIVATION -> "Activate this card to use it"
+                else -> "Card unavailable — contact your bank"
+            }
         }
         else -> renderNormally(card)          // 4. payable
     }
@@ -1257,17 +1275,21 @@ Exactly three values on both eligibility and digitise responses:
 
 Digitise failures additionally carry `error.code`: `CONFIG_ERROR` (fix your configuration), `TOKENIZATION_ERROR` (server refused — show message), `UNEXPECTED_ERROR` (retry later).
 
-### Activation — `status` + failure messages
+### Activation — `status` + `failureCode`
 
-`ActivationCodeResponse.status` / `ActivateResponse.status` are `"SUCCESS"` / `"FAILURE"` — **check `status` even when the call itself succeeds.** On failure the reason is in `message`. Known server messages (observable strings — the SDK adds no codes):
+`ActivationCodeResponse.status` / `ActivateResponse.status` are `"SUCCESS"` / `"FAILURE"` — **check `status` even when the call itself succeeds.** On failure, branch on the typed `failureCode` (`message` is display text — never string-match it):
 
-| Message | Meaning | What to do |
+| `failureCode` | Meaning | What to do |
 |---|---|---|
-| *"Activation code expired. Request a new activation code."* | Code lapsed; attempts may remain | Offer "resend code". |
-| *"Maximum activation code attempts exceeded."* | The 3-attempt limit for this code is exhausted | The code is dead — request a fresh one; warn the user to check the contact carefully. |
-| *"Too many activation code requests for this token. Try again later."* | Re-request rate cap (per token, per hour) | Disable "resend" with a cool-down message. |
-| *"No pending activation for this token. Request an activation code first."* | No live code (never requested, or the pending window lapsed) | Request a code first. |
-| *"Activation is locked for this token after repeated failed attempts. Contact your issuer."* | Locked after repeated exhausted cycles | Stop the flow — the issuer must unlock; direct the user to their bank. |
+| `CODE_EXPIRED` | Code lapsed; attempts may remain | Offer "resend code". |
+| `CODE_INVALID` | Wrong code, attempts remain | Stay on entry; show `attemptsRemaining`. |
+| `MAX_ATTEMPTS_EXCEEDED` | The 3-attempt limit for this code is exhausted | The cycle is closed; honour `recommendDelete` (`MUST`: delete the token and restart add-card; `MAY`: advisory). |
+| `CODE_REQUEST_RATE_LIMITED` | Re-request rate cap (per token, per hour) | Disable "resend" with a cool-down message — do **not** end the flow. |
+| `NO_PENDING_ACTIVATION` | No live code (never requested, or the pending window lapsed) | Request a code first. |
+| `ACTIVATION_LOCKED` | Locked after repeated exhausted cycles | Terminal — hide both retry and resend; the issuer must unlock; direct the user to their bank. |
+| `TOKEN_NOT_FOUND` / `TOKEN_NOT_ACTIVATABLE` | No activatable token behind the reference | End the flow; re-digitise or contact the issuer. |
+| `INVALID_REQUEST` / `ACTIVATION_FAILED` | Malformed request / server-side activation error | Show `message`; safe to retry `ACTIVATION_FAILED` later. |
+| `UNKNOWN` | A code newer than this SDK | Show `message`; log `failureCodeRaw`. |
 
 ### Card lifecycle statuses
 
@@ -1306,12 +1328,25 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | `"05"` on a customer-QR charge | Merchant CPM | Yes (fresh QR) | Could be a stale/hoarded QR: ask the customer to regenerate and rescan before treating it as a funds decline. |
 | Scan rejected (`EXPIRED` / `BAD_SIGNATURE` / …) | Wallet MPM scan | Yes (fresh scan) | End the flow; ask the merchant for a fresh code. Never show a rejected payment on a confirm screen. |
 | `Authentication cancelled:` / `Authentication failed:` | Wallet payments | Yes | Nothing was sent. Stay on the confirm screen; let the user retry the biometric. |
-| `ONLINE_REQUIRED:` | Wallet payments | After going online | Prompt to connect; the SDK refreshes the card itself. Pre-empt with `requiresOnline` (grey the card out). |
-| `AMOUNT_EXCEEDS_CARD_LIMIT:` | Wallet payments | **Not by retrying** | The amount is larger than this card can carry in one payment. Going online does **not** help — offer a smaller amount or another card. |
-| `TOKEN_NOT_ACTIVE:` | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
+| `WalletRefusalException.OnlineRequired` (message prefix `ONLINE_REQUIRED:`) | Wallet payments | After going online | Prompt to connect; the SDK refreshes the card itself. Pre-empt with `requiresOnline` (grey the card out). |
+| `WalletRefusalException.AmountExceedsCardLimit` (message prefix `AMOUNT_EXCEEDS_CARD_LIMIT:`) | Wallet payments | **Not by retrying** | The amount is larger than this card can carry in one payment. Going online does **not** help — offer a smaller amount or another card. |
+| `WalletRefusalException.TokenNotActive` (message prefix `TOKEN_NOT_ACTIVE:`) | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
+
+The three pre-proof refusals above are **typed exceptions** — `when` on the `WalletRefusalException` subtype instead of string-matching the message (the message prefixes are unchanged, so existing string checks keep working):
+
+```kotlin
+onFailure = { e ->
+    when (e) {
+        is WalletRefusalException.OnlineRequired -> promptToConnect()
+        is WalletRefusalException.AmountExceedsCardLimit -> offerSmallerAmountOrOtherCard()
+        is WalletRefusalException.TokenNotActive -> showCardUnavailable()
+        else -> showError(e.message)
+    }
+}
+```
 | `CDCVM required:` | Wallet QR payments | Yes | Call `authenticateForScannedPayment` first — one authentication per payment / per QR render. |
 | Digitise `"DECLINED"` | Add card | Per `message` | Show the server's message; the flow ends. Common cause: the account falls outside your provision-context allow-lists. |
-| Activation `"FAILURE"` | Activation | Per `message` | Branch on the [known messages](#activation--status--failure-messages): resend on expiry, cool-down on the rate cap, stop entirely on lockout ("contact your issuer"). |
+| Activation `"FAILURE"` | Activation | Per `failureCode` | Branch on the typed [`failureCode`](#activation--status--failurecode): resend on `CODE_EXPIRED`, cool-down on `CODE_REQUEST_RATE_LIMITED`, stop entirely on `ACTIVATION_LOCKED` ("contact your issuer"). |
 | `SdkModeException` | Combined apps | Yes (after mode settles) | The other mode's payment is mid-flight — prompt to finish/cancel it. |
 
 ---
