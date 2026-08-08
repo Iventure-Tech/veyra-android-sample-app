@@ -32,7 +32,7 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 | `minSdk` | **28** (Android 9) | **24** (Android 7.0) |
 | `compileSdk` | 34 | 34 |
 | NFC hardware | Required for tap acceptance | Required for tap-to-pay (QR rails work without) |
-| Google Play services | Recommended (device attestation via Play Integrity; the SDK degrades gracefully without it) | Required for attested operations (add card, key refresh) |
+| Google Play services | Not required — the SoftPOS SDK performs no Play Integrity calls | Required for attested operations (add card, key refresh) |
 | Permissions | `INTERNET`, `NFC`, location (merged from the SDK manifests; location is a *runtime* permission — request it before opening your tap screen) | `INTERNET`, `NFC` (merged) |
 
 The SDK manifests merge everything they need into your app (permissions, the NFC feature flag, the wallet HCE service, backup-exclusion rules). Your app must add on `<application>`:
@@ -125,7 +125,6 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.google.code.gson:gson:2.10.1'
-    implementation 'com.google.android.play:integrity:1.3.0'
     implementation 'io.opentelemetry:opentelemetry-sdk:1.47.0'
     implementation 'io.opentelemetry:opentelemetry-exporter-otlp:1.47.0'
     implementation 'io.opentelemetry:opentelemetry-exporter-sender-okhttp:1.47.0'
