@@ -578,7 +578,8 @@ The SDK records every payment it takes — tap, get-paid QR and customer-QR char
 val transactions = sdk.transactionService.getLastTransactions(50)   // most recent first, all rails
 val tx = sdk.transactionService.getTransaction(reference)           // or null
 // TransactionInfo: merchantTransactionReference, amount (minor units), transactionStatus
-// (APPROVED / DECLINED / PENDING / FAILED), responseCode, transactionTime, currencyCode,
+// (APPROVED / DECLINED / PENDING / FAILED), responseCode, responseStatusReason (the stated
+// cause, e.g. "INSUFFICIENT_FUNDS" — display, never parse), transactionTime, currencyCode,
 // transactionId, cardholderName (EMV 5F20 as the card presented it — null on QR-MPM),
 // rail ("TAP" / "QR_MPM" / "QR_CPM"), railLabel ("Tap" / "QR" / "Scan")
 ```
@@ -1061,7 +1062,7 @@ The card's full local history across every rail (tap, scanned QR, shown QR), mos
 val transactions = sdk.tokenisationService.getTransactions(tokenUniqueReference, 50)
 ```
 
-`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `null` on legacy rows — treat as indeterminate), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`.
+`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`.
 
 #### `reconcilePendingTransactions`
 
@@ -1499,7 +1500,9 @@ data class TransactionInfo(                 // history row
     val merchantTransactionReference: String,
     val amount: Long,                       // minor units
     val transactionStatus: TransactionStatus,   // APPROVED / DECLINED / PENDING / FAILED
-    val responseCode: String?, val transactionTime: String?,     // "yyyy-MM-dd HH:mm:ss"
+    val responseCode: String?,
+    val responseStatusReason: String?,      // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse
+    val transactionTime: String?,           // "yyyy-MM-dd HH:mm:ss"
     val currencyCode: String?, val transactionId: String?,
     val cardholderName: String?,            // EMV 5F20, e.g. "AFRIGO ****1234"; null on QR-MPM
     val rail: String,                       // "TAP" / "QR_MPM" / "QR_CPM" — use for logic

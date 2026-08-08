@@ -250,6 +250,54 @@
                             android:textColor="@android:color/white" />
                     </LinearLayout>
 
+                    <!-- Outcome cause + response code, verbatim from the resolving rail;
+                         absent fields (legacy/unresolved rows) show nothing rather than a guess. -->
+                    <LinearLayout
+                        android:id="@+id/rowReason"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingTop="14dp"
+                        android:paddingBottom="14dp"
+                        android:visibility="gone">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/tx_detail_reason"
+                            android:textSize="14sp"
+                            android:textColor="#777777" />
+                        <TextView
+                            android:id="@+id/txDetailReason"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="@android:color/white" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/rowResponseCode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingTop="14dp"
+                        android:paddingBottom="14dp"
+                        android:visibility="gone">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/tx_detail_response_code"
+                            android:textSize="14sp"
+                            android:textColor="#777777" />
+                        <TextView
+                            android:id="@+id/txDetailResponseCode"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="@android:color/white" />
+                    </LinearLayout>
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

@@ -569,6 +569,10 @@ class GetPaidActivity : AppCompatActivity() {
         pageTransactionDetail.findViewById<TextView>(R.id.detailStatusValue).text = tx.transactionStatus.name
         pageTransactionDetail.findViewById<TextView>(R.id.detailResponseCode).text = getString(R.string.response_code)
         pageTransactionDetail.findViewById<TextView>(R.id.detailResponseCodeValue).text = tx.responseCode ?: "—"
+        // The outcome's stated cause, verbatim from the backend (e.g. INSUFFICIENT_FUNDS);
+        // unresolved/legacy rows carry none.
+        pageTransactionDetail.findViewById<TextView>(R.id.detailReason).text = getString(R.string.tx_detail_reason)
+        pageTransactionDetail.findViewById<TextView>(R.id.detailReasonValue).text = tx.responseStatusReason ?: "—"
         pageTransactionDetail.findViewById<TextView>(R.id.detailTime).text = getString(R.string.time)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTimeValue).text = tx.transactionTime ?: "—"
         // EMV tag 5F20 as the card presented it (a Veyra token shows e.g. "AFRIGO ****1234").
@@ -989,8 +993,20 @@ class GetPaidActivity : AppCompatActivity() {
         // Hide View Receipt when showing new result
         viewReceiptButton.visibility = View.GONE
         
-        when (response.transactionCode) {
-            "00" -> {
+        // STORY-89: branch on the outcome the SDK was TOLD, not on a code we recognise. The old
+        // `when (response.transactionCode)` had to know "99" meant pending — a code the SDK invented
+        // because it had nowhere to put a status — and read anything unfamiliar as a failure, so a
+        // still-settling `09`/`68`/`96` looked like a refusal to the cashier.
+        val outcome = response.responseStatus?.name ?: when (response.transactionCode) {
+            // Rows/responses from a build older than STORY-89 keep working.
+            "00" -> "APPROVED"
+            "06", "09", "68", "96", "99" -> "PENDING"
+            "91", "25" -> "FAILED"
+            "" -> "FAILED" // no code at all: the payment never started (see response.sdkErrorCode)
+            else -> "DECLINED"
+        }
+        when (outcome) {
+            "APPROVED" -> {
                 lastSuccessfulResponse = response
                 showPaymentResult(
                     isSuccess = true,
@@ -1005,7 +1021,7 @@ class GetPaidActivity : AppCompatActivity() {
                 )
                 showViewReceiptButton()
             }
-            "99" -> {
+            "PENDING" -> {
                 lastSuccessfulResponse = null
                 // Pending - no response from issuer (timeout/network), status unknown - no receipt yet
                 showPaymentResult(
@@ -1017,7 +1033,7 @@ class GetPaidActivity : AppCompatActivity() {
                 )
                 // Do NOT show View Receipt - transaction not final, status may change after polling
             }
-            "05", "06" -> {
+            "DECLINED", "FAILED" -> {
                 lastSuccessfulResponse = null
                 // Transaction declined or failed (explicit server response)
                 showPaymentResult(

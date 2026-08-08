@@ -112,6 +112,16 @@ class TransactionDetailActivity : AppCompatActivity() {
             binding.rowMerchantLocation.visibility = View.VISIBLE
             binding.txDetailMerchantLocation.text = it
         }
+        // Outcome cause + response code, verbatim from the rail that resolved this row;
+        // legacy/unresolved rows carry neither and show nothing rather than a guess.
+        tx.responseStatusReason?.takeIf { it.isNotBlank() }?.let {
+            binding.rowReason.visibility = View.VISIBLE
+            binding.txDetailReason.text = it
+        }
+        tx.responseCode?.takeIf { it.isNotBlank() }?.let {
+            binding.rowResponseCode.visibility = View.VISIBLE
+            binding.txDetailResponseCode.text = it
+        }
     }
 
     private fun entryMethodLabel(entryMethod: String?): String? = when (entryMethod) {

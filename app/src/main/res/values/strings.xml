@@ -178,6 +178,8 @@
     <!-- Wallet transaction detail -->
     <string name="tx_detail_paid_by">Paid by</string>
     <string name="tx_detail_location">Location</string>
+    <string name="tx_detail_reason">Reason</string>
+    <string name="tx_detail_response_code">Response code</string>
     <string name="entry_method_tap">Tapped</string>
     <string name="entry_method_qr_generated">Generated QR</string>
     <string name="entry_method_qr_scanned">Scanned QR</string>
