@@ -196,12 +196,25 @@ class GetPaidActivity : AppCompatActivity() {
     /** The scanned CPM QR awaiting merchant confirmation on [PAGE_CPM_CONFIRM]. */
     private var pendingCpmScan: co.veyra.softpos.payment.sdk.cpm.ScannedCpmQr? = null
 
+
+    /** While a CPM charge is in flight the confirm page shows progress instead of buttons. */
+    private fun setCpmConfirmCharging(charging: Boolean) {
+        val buttons = if (charging) View.GONE else View.VISIBLE
+        pageCpmConfirm.findViewById<MaterialButton>(R.id.cpmConfirmChargeButton).visibility = buttons
+        pageCpmConfirm.findViewById<MaterialButton>(R.id.cpmConfirmCancelButton).visibility = buttons
+        pageCpmConfirm.findViewById<View>(R.id.cpmChargingIndicator).visibility =
+            if (charging) View.VISIBLE else View.GONE
+    }
+
     private fun chargeCpm(scanned: co.veyra.softpos.payment.sdk.cpm.ScannedCpmQr) {
         currentAmountMinorUnits = scanned.amountMinorUnits
         currentPaymentCurrencyCode = scanned.currencyNumeric4
         // App-supplied reference (tap idiom) so the CPM result can offer the
         // receipt — the recorded transaction is keyed under it.
         val reference = "${System.currentTimeMillis()}_${(1000..9999).random()}"
+        // The whole round trip happens behind this page: swap the buttons for a visible
+        // processing state so the merchant sees the charge is in flight (iOS parity).
+        setCpmConfirmCharging(true)
         lifecycleScope.launch {
             try {
                 val response = sdk.cpmCustomerQrService.charge(scanned, reference)
@@ -510,6 +523,7 @@ class GetPaidActivity : AppCompatActivity() {
             }
             PAGE_CPM_CONFIRM -> {
                 pageCpmConfirm.visibility = View.VISIBLE
+                setCpmConfirmCharging(false)
                 val scanned = pendingCpmScan
                 pageCpmConfirm.findViewById<TextView>(R.id.cpmConfirmAmountDisplay).text =
                     scanned?.let { CurrencyUtils.formatAmount(it.amountMinorUnits, it.currencyNumeric4) } ?: ""
