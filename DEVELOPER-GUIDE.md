@@ -472,6 +472,7 @@ try {
 | `onCardContactLost` | Optional | Contact lost before completion — reader **stays armed**; show "hold steady" and wait for a re-tap. |
 | `onUnsupportedCard` | Optional | Non-payment target / unreadable card — reader **stays armed**; show "card not supported, try another". |
 | `onCardReadingComplete` / `onSendingRequestOnline` / `onReceivingOnlineResponse` | Optional | Progress hooks: card read finished; online request sent; online response received. |
+| `onCreditConfirmation` | Optional | `(CreditConfirmation) -> Unit`, main thread. Fires when the funds of an **approved** sale are confirmed in the merchant's bank account (`status = "RECEIVED"`), or once with `"UNABLE_TO_CONFIRM"` if 30 days pass unconfirmed. Settlement news only — it never changes the payment outcome. The SDK owns the polling (exponential backoff); registered SDK-wide (replaces any previous registration), so it can fire for a sale from an earlier session — match by `reference`. The payload also carries `creditTransactionId`, `amountMinorUnits`, `bankReference` and `creditedAt` (populated on `RECEIVED`). Fires only when the payment response said the merchant's bank supports confirmation. **Platform note:** the background credit-confirmation poll exists on Android only — on iOS the equivalent surface is a manual fetch (`transactions.creditConfirmation(...)`), and on React Native the corresponding event fires on Android only. |
 
 **`TransactionRequest.Builder`:**
 
@@ -580,7 +581,11 @@ val tx = sdk.transactionService.getTransaction(reference)           // or null
 // (APPROVED / DECLINED / PENDING / FAILED), responseCode, responseStatusReason (the stated
 // cause, e.g. "INSUFFICIENT_FUNDS" — display, never parse), transactionTime, currencyCode,
 // transactionId, cardholderName (EMV 5F20 as the card presented it — null on QR-MPM),
-// rail ("TAP" / "QR_MPM" / "QR_CPM"), railLabel ("Tap" / "QR" / "Scan")
+// rail ("TAP" / "QR_MPM" / "QR_CPM"), railLabel ("Tap" / "QR" / "Scan"),
+// creditTransactionId (the merchant-bank credit's identifier — null unless approved and
+// supported), creditConfirmationStatus ("RECEIVED" once the merchant's bank confirmed the
+// funds, "UNABLE_TO_CONFIRM" only as the 30-day give-up; null while unconfirmed — show
+// nothing or "not confirmed yet", never "not received")
 ```
 
 Each row records the rail that actually took the payment. Display `railLabel` — the SDK derives it
@@ -1492,7 +1497,9 @@ data class TransactionResponse(             // tap terminal outcome (makeCardPay
     val cardExpiry: String?,                // YYMM
     val merchantTransactionReference: String?,  // your echoed reference — receipt lookup key
     val transactionType: String?, val maskedTokenLast4: String?,
-    val merchantStatus: String?, val transactionId: String?, val aid: String?
+    val merchantStatus: String?, val transactionId: String?, val aid: String?,
+    val creditTransactionId: String?,           // merchant-bank credit id (approved + supported only)
+    val isCreditConfirmationSupported: Boolean? // true ⇒ the SDK will poll and fire onCreditConfirmation
 )
 
 data class TransactionInfo(                 // history row
@@ -1505,7 +1512,18 @@ data class TransactionInfo(                 // history row
     val currencyCode: String?, val transactionId: String?,
     val cardholderName: String?,            // EMV 5F20, e.g. "AFRIGO ****1234"; null on QR-MPM
     val rail: String,                       // "TAP" / "QR_MPM" / "QR_CPM" — use for logic
-    val railLabel: String                   // "Tap" / "QR" / "Scan" — use for display
+    val railLabel: String,                  // "Tap" / "QR" / "Scan" — use for display
+    val creditTransactionId: String?,       // merchant-bank credit id; null unless approved + supported
+    val creditConfirmationStatus: String?   // "RECEIVED" / final "UNABLE_TO_CONFIRM"; null while unconfirmed
+)
+
+data class CreditConfirmation(              // onCreditConfirmation payload (settlement news, not an outcome)
+    val reference: String,                  // the sale's merchantTransactionReference — match on this
+    val creditTransactionId: String?,
+    val status: String,                     // "RECEIVED" (funds landed) / "UNABLE_TO_CONFIRM" (30-day give-up)
+    val amountMinorUnits: Long?,            // credited amount as the bank reported it (RECEIVED only)
+    val bankReference: String?,             // the merchant bank's own reference (RECEIVED only)
+    val creditedAt: String?                 // when the bank posted the credit (RECEIVED only)
 )
 
 data class TransactionReceiptResult(

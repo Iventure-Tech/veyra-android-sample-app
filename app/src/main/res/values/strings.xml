@@ -179,6 +179,9 @@
     <string name="tx_detail_paid_by">Paid by</string>
     <string name="tx_detail_location">Location</string>
     <string name="tx_detail_reason">Reason</string>
+    <string name="tx_detail_merchant_credit">Merchant credit</string>
+    <string name="funds_received_by_merchant_bank">Funds received by merchant bank</string>
+    <string name="credit_could_not_be_confirmed">Bank credit could not be confirmed</string>
     <string name="tx_detail_response_code">Response code</string>
     <string name="entry_method_tap">Tapped</string>
     <string name="entry_method_qr_generated">Generated QR</string>

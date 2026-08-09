@@ -164,6 +164,22 @@
                 android:layout_marginBottom="16dp" />
 
             <TextView
+                android:id="@+id/detailCredit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#AAAAAA"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/detailCreditValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textColor="@android:color/white"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
                 android:id="@+id/detailTime"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

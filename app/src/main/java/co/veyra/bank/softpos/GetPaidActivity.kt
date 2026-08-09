@@ -587,6 +587,11 @@ class GetPaidActivity : AppCompatActivity() {
         // unresolved/legacy rows carry none.
         pageTransactionDetail.findViewById<TextView>(R.id.detailReason).text = getString(R.string.tx_detail_reason)
         pageTransactionDetail.findViewById<TextView>(R.id.detailReasonValue).text = tx.responseStatusReason ?: "—"
+        // Whether the merchant's bank has confirmed receiving the funds. Null while
+        // unconfirmed (and on unsupported banks/older rows) — shown as an em-dash, never as an
+        // alarming "not received"; RECEIVED/UNABLE_TO_CONFIRM are the only stored values.
+        pageTransactionDetail.findViewById<TextView>(R.id.detailCredit).text = getString(R.string.tx_detail_merchant_credit)
+        pageTransactionDetail.findViewById<TextView>(R.id.detailCreditValue).text = tx.creditConfirmationStatus ?: "—"
         pageTransactionDetail.findViewById<TextView>(R.id.detailTime).text = getString(R.string.time)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTimeValue).text = tx.transactionTime ?: "—"
         // EMV tag 5F20 as the card presented it (a Veyra token shows e.g. "AFRIGO ****1234").
@@ -968,6 +973,13 @@ class GetPaidActivity : AppCompatActivity() {
                 // steady re-tap and keep waiting.
                 onCardContactLost = {
                     runOnUiThread { showReTapHint(getString(R.string.card_hold_steady)) }
+                },
+                // The SDK polls the beneficiary bank after an approved sale (when the
+                // payment response says confirmation is supported) and pushes the answer here —
+                // possibly minutes later, possibly for a sale from an earlier session, so match by
+                // the reference. Settlement news only; the payment outcome is already on screen.
+                onCreditConfirmation = { confirmation ->
+                    runOnUiThread { showCreditConfirmation(confirmation) }
                 }
             )
         } catch (e: co.veyra.core.SdkModeException) {
@@ -978,6 +990,21 @@ class GetPaidActivity : AppCompatActivity() {
         }
     }
     
+    /**
+     * Surface the credit-receipt confirmation the SDK's background polling delivered.
+     * "RECEIVED" means the funds are in the merchant's settlement account — shown the same way
+     * other asynchronous notices are (a toast, so it lands whichever page is up); the final
+     * "UNABLE_TO_CONFIRM" give-up shows the couldn't-confirm copy, never "not received".
+     */
+    private fun showCreditConfirmation(confirmation: co.veyra.softpos.payment.sdk.merchant.CreditConfirmation) {
+        val message = if (confirmation.status == "RECEIVED") {
+            getString(R.string.funds_received_by_merchant_bank)
+        } else {
+            getString(R.string.credit_could_not_be_confirmed)
+        }
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
     /**
      * A tap could not be turned into a transaction through no fault of the merchant (an
      * unsupported/non-payment card, or lost contact). The SDK keeps the payment armed, so
