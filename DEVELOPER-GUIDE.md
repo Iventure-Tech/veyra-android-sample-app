@@ -472,7 +472,7 @@ try {
 | `onCardContactLost` | Optional | Contact lost before completion — reader **stays armed**; show "hold steady" and wait for a re-tap. |
 | `onUnsupportedCard` | Optional | Non-payment target / unreadable card — reader **stays armed**; show "card not supported, try another". |
 | `onCardReadingComplete` / `onSendingRequestOnline` / `onReceivingOnlineResponse` | Optional | Progress hooks: card read finished; online request sent; online response received. |
-| `onCreditConfirmation` | Optional | `(CreditConfirmation) -> Unit`, main thread. Fires when the funds of an **approved** sale are confirmed in the merchant's bank account (`status = "RECEIVED"`), or once with `"UNABLE_TO_CONFIRM"` if 30 days pass unconfirmed. Settlement news only — it never changes the payment outcome. The SDK owns the polling (exponential backoff); registered SDK-wide (replaces any previous registration), so it can fire for a sale from an earlier session — match by `reference`. The payload also carries `creditTransactionId`, `amountMinorUnits`, `bankReference` and `creditedAt` (populated on `RECEIVED`). Fires only when the payment response said the merchant's bank supports confirmation. **Platform note:** the background credit-confirmation poll exists on Android only — on iOS the equivalent surface is a manual fetch (`transactions.creditConfirmation(...)`), and on React Native the corresponding event fires on Android only. |
+| `onCreditConfirmation` | Optional | `(CreditConfirmation) -> Unit`, main thread. Fires when the funds of an **approved** sale are confirmed in the merchant's bank account (`status = "RECEIVED"`), or once with `"UNABLE_TO_CONFIRM"` if 30 days pass unconfirmed. Settlement news only — it never changes the payment outcome. The SDK owns the polling (exponential backoff); registered SDK-wide (replaces any previous registration), so it can fire for a sale from an earlier session — match by `reference`. The payload also carries `creditTransactionId`, `amountMinorUnits`, `bankReference` and `creditedAt` (populated on `RECEIVED`). Fires only when the backend said the merchant's bank supports confirmation — and for sales on **every rail** (tap, customer-QR charge, merchant-presented QR), since the sweep works off the stored rows. **Recommended pattern — wait on the result screen:** when an approved `TransactionResponse` carries `isCreditConfirmationSupported == true`, show a status line on the payment-result screen ("Confirming credit with merchant bank…") and flip it from this callback — "Funds received by merchant bank" on `RECEIVED`, "Bank credit could not be confirmed" only on the final give-up (see the sample's `GetPaidActivity`). For an approved **merchant-QR (MPM)** sale the settle itself can't say whether confirmation is supported (its rail carries no credit fields — the SDK learns them from the transaction-status rail moments later), so watch the stored row (`getTransaction(ref)`) for `isCreditConfirmationSupported`/`creditConfirmationStatus` instead, as the sample does. **The polling is SDK-owned and app-scoped, never screen-scoped**: leaving the result screen changes nothing — the SDK keeps polling while the app runs, persists the answer onto the stored row, and any transaction view re-reading the store shows the updated state on return. **Platform note:** every merchant rail supports credit confirmation, and the SDK polls on every platform; the only asymmetries are that iOS has no tap rail, that its sweep runs while the app is alive (no OS background execution — it suspends and resumes with the app), and that on React Native this *event* fires on Android only (render the stored row on iOS). |
 
 **`TransactionRequest.Builder`:**
 
@@ -583,7 +583,10 @@ val tx = sdk.transactionService.getTransaction(reference)           // or null
 // transactionId, cardholderName (EMV 5F20 as the card presented it — null on QR-MPM),
 // rail ("TAP" / "QR_MPM" / "QR_CPM"), railLabel ("Tap" / "QR" / "Scan"),
 // creditTransactionId (the merchant-bank credit's identifier — null unless approved and
-// supported), creditConfirmationStatus ("RECEIVED" once the merchant's bank confirmed the
+// supported), isCreditConfirmationSupported (true ⇒ the SDK is polling the confirmation rail
+// for this sale — a result screen should show "confirming credit…" until the status resolves;
+// on MPM rows it can be null for a few seconds after the settle while the SDK learns it),
+// creditConfirmationStatus ("RECEIVED" once the merchant's bank confirmed the
 // funds, "UNABLE_TO_CONFIRM" only as the 30-day give-up; null while unconfirmed — show
 // nothing or "not confirmed yet", never "not received")
 ```
@@ -1514,6 +1517,7 @@ data class TransactionInfo(                 // history row
     val rail: String,                       // "TAP" / "QR_MPM" / "QR_CPM" — use for logic
     val railLabel: String,                  // "Tap" / "QR" / "Scan" — use for display
     val creditTransactionId: String?,       // merchant-bank credit id; null unless approved + supported
+    val isCreditConfirmationSupported: Boolean?, // true ⇒ SDK is polling; show "confirming credit…" until resolved
     val creditConfirmationStatus: String?   // "RECEIVED" / final "UNABLE_TO_CONFIRM"; null while unconfirmed
 )
 

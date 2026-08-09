@@ -182,6 +182,7 @@
     <string name="tx_detail_merchant_credit">Merchant credit</string>
     <string name="funds_received_by_merchant_bank">Funds received by merchant bank</string>
     <string name="credit_could_not_be_confirmed">Bank credit could not be confirmed</string>
+    <string name="confirming_credit_with_merchant_bank">Confirming credit with merchant bank…</string>
     <string name="tx_detail_response_code">Response code</string>
     <string name="entry_method_tap">Tapped</string>
     <string name="entry_method_qr_generated">Generated QR</string>

@@ -91,6 +91,7 @@ class GetPaidActivity : AppCompatActivity() {
     private lateinit var resultText: TextView
     private lateinit var resultMessage: TextView
     private lateinit var resultAmountDisplay: TextView
+    private lateinit var creditConfirmationLine: TextView
     private lateinit var additionalDetails: TextView
     private lateinit var doneButton: MaterialButton
     private lateinit var viewReceiptButton: MaterialButton
@@ -153,6 +154,8 @@ class GetPaidActivity : AppCompatActivity() {
     private lateinit var pageQrWaiting: View
     private lateinit var qrAmountDisplay: TextView
     private var qrPaymentJob: Job? = null
+    // The MPM result page's credit-confirmation watch (see watchCreditConfirmationForQr).
+    private var creditWatchJob: Job? = null
     // Kept so the QR page can stop the SDK-owned expiry watch on teardown.
     private var contextClient: co.veyra.softpos.payment.sdk.context.ContextPaymentClient? = null
 
@@ -170,6 +173,12 @@ class GetPaidActivity : AppCompatActivity() {
     private var currentPaymentCurrencyCode: String = "0566"
     private var lastOriginalTransactionReference: String = ""
     private var lastSuccessfulResponse: TransactionResponse? = null
+
+    // The sale the result page is waiting on beneficiary credit confirmation for.
+    // Set when an APPROVED response says the merchant's bank supports confirmation; cleared when
+    // the confirmation arrives. onCreditConfirmation events for any other reference (a sale from
+    // an earlier session) fall back to the toast.
+    private var awaitingCreditConfirmationRef: String? = null
     
     // Auto-navigation handler
     private val handler = Handler(Looper.getMainLooper())
@@ -272,6 +281,11 @@ class GetPaidActivity : AppCompatActivity() {
         // merchant touches nothing, matching the iOS sample.
         private const val AUTO_NAVIGATE_DELAY_MS = 5000L
         private const val QR_POLL_INTERVAL_MS = 2500L
+        // How the MPM result page watches the stored row for credit-confirmation
+        // state (the supported flag lands within the SDK reconciler's first status probe;
+        // the confirmation itself whenever the merchant's bank answers).
+        private const val CREDIT_WATCH_INTERVAL_MS = 3000L
+        private const val CREDIT_WATCH_MAX_CHECKS = 60
     }
 
     /** Runtime location access so payment_device_info can include lat/lng (manifest alone is not enough). */
@@ -399,6 +413,7 @@ class GetPaidActivity : AppCompatActivity() {
         resultText = pagePaymentResult.findViewById(R.id.resultText)
         resultMessage = pagePaymentResult.findViewById(R.id.resultMessage)
         resultAmountDisplay = pagePaymentResult.findViewById(R.id.resultAmountDisplay)
+        creditConfirmationLine = pagePaymentResult.findViewById(R.id.creditConfirmationLine)
         additionalDetails = pagePaymentResult.findViewById(R.id.additionalDetails)
         doneButton = pagePaymentResult.findViewById(R.id.doneButton)
         viewReceiptButton = pagePaymentResult.findViewById(R.id.viewReceiptButton)
@@ -843,6 +858,9 @@ class GetPaidActivity : AppCompatActivity() {
                             amountMinorUnits = currentAmountMinorUnits,
                             details = "Ref: ${created.txRef}\nResponse: ${status.responseCode ?: "-"}",
                         )
+                        // An approved MPM sale waits on credit confirmation too —
+                        // driven off the SDK's stored row, see watchCreditConfirmationForQr.
+                        if (status.isApproved) watchCreditConfirmationForQr(created.txRef)
                         // showPage cleared any pending auto-return; re-arm it for this outcome.
                         scheduleAutoNavigate()
                         break
@@ -855,6 +873,50 @@ class GetPaidActivity : AppCompatActivity() {
                         break
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * MPM leg: an approved QR sale waits on beneficiary credit confirmation like a tap,
+     * but the plumbing differs — the contexts endpoint carries no credit fields, so the SDK's
+     * settle reconciler learns `isCreditConfirmationSupported` from the transaction-status rail
+     * moments after the settle, and the background credit sweep then confirms the credit onto the
+     * stored row. Neither leg pushes a callback the app registered for this sale (the
+     * `onCreditConfirmation` param belongs to `makeCardPayment`), so the result page watches the
+     * SDK's own stored row: first for the supported flag (shows the waiting line), then for the
+     * terminal confirmation state (flips it). Leaving the result page ends the watch — a later
+     * confirmation still lands in history and as the SDK-wide toast/callback where registered.
+     */
+    private fun watchCreditConfirmationForQr(ref: String) {
+        creditWatchJob?.cancel()
+        creditWatchJob = lifecycleScope.launch {
+            var waiting = false
+            repeat(CREDIT_WATCH_MAX_CHECKS) {
+                if (currentPage != PAGE_PAYMENT_RESULT) return@launch
+                val row = sdk.transactionService.getTransaction(ref)
+                val confirmation = row?.creditConfirmationStatus
+                when {
+                    confirmation != null -> {
+                        val received = confirmation == "RECEIVED"
+                        creditConfirmationLine.text = getString(
+                            if (received) R.string.funds_received_by_merchant_bank
+                            else R.string.credit_could_not_be_confirmed
+                        )
+                        creditConfirmationLine.setTextColor(
+                            getColor(if (received) R.color.success_green else R.color.error_red)
+                        )
+                        creditConfirmationLine.visibility = View.VISIBLE
+                        return@launch
+                    }
+                    !waiting && row?.isCreditConfirmationSupported == true -> {
+                        waiting = true
+                        creditConfirmationLine.text = getString(R.string.confirming_credit_with_merchant_bank)
+                        creditConfirmationLine.setTextColor(getColor(R.color.warning_orange))
+                        creditConfirmationLine.visibility = View.VISIBLE
+                    }
+                }
+                delay(CREDIT_WATCH_INTERVAL_MS)
             }
         }
     }
@@ -992,17 +1054,34 @@ class GetPaidActivity : AppCompatActivity() {
     
     /**
      * Surface the credit-receipt confirmation the SDK's background polling delivered.
-     * "RECEIVED" means the funds are in the merchant's settlement account — shown the same way
-     * other asynchronous notices are (a toast, so it lands whichever page is up); the final
+     * "RECEIVED" means the funds are in the merchant's settlement account; the final
      * "UNABLE_TO_CONFIRM" give-up shows the couldn't-confirm copy, never "not received".
+     *
+     * When it is the sale the result page is waiting on (the approval said the merchant's bank
+     * supports confirmation, so the page shows "Confirming credit with merchant bank…"), the
+     * confirmation flips that same line in place. Anything else — a sale from an earlier
+     * session, or the merchant already navigated away — lands as a toast, so the news still
+     * arrives whichever page is up.
      */
     private fun showCreditConfirmation(confirmation: co.veyra.softpos.payment.sdk.merchant.CreditConfirmation) {
-        val message = if (confirmation.status == "RECEIVED") {
+        val received = confirmation.status == "RECEIVED"
+        val message = if (received) {
             getString(R.string.funds_received_by_merchant_bank)
         } else {
             getString(R.string.credit_could_not_be_confirmed)
         }
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        val waitedOn = confirmation.reference == awaitingCreditConfirmationRef
+        if (waitedOn && currentPage == PAGE_PAYMENT_RESULT) {
+            awaitingCreditConfirmationRef = null
+            creditConfirmationLine.text = message
+            creditConfirmationLine.setTextColor(
+                getColor(if (received) R.color.success_green else R.color.error_red)
+            )
+            creditConfirmationLine.visibility = View.VISIBLE
+        } else {
+            if (waitedOn) awaitingCreditConfirmationRef = null
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        }
     }
 
     /**
@@ -1060,6 +1139,16 @@ class GetPaidActivity : AppCompatActivity() {
                         response.merchantTransactionReference?.let { append("Reference: $it\n") }
                     }
                 )
+                // The approval said the merchant's bank supports credit confirmation —
+                // the SDK is now polling in the background, so the result page waits: show the
+                // confirming line and let onCreditConfirmation flip it when the answer arrives.
+                if (response.isCreditConfirmationSupported == true) {
+                    awaitingCreditConfirmationRef =
+                        response.merchantTransactionReference ?: lastOriginalTransactionReference
+                    creditConfirmationLine.text = getString(R.string.confirming_credit_with_merchant_bank)
+                    creditConfirmationLine.setTextColor(getColor(R.color.warning_orange))
+                    creditConfirmationLine.visibility = View.VISIBLE
+                }
                 showViewReceiptButton()
             }
             "PENDING" -> {
@@ -1111,6 +1200,13 @@ class GetPaidActivity : AppCompatActivity() {
         amountMinorUnits: Long,
         details: String
     ) {
+        // A new result supersedes any credit-confirmation wait from the previous sale —
+        // the approved branch re-shows the line when this sale supports it,
+        // and the MPM watch is re-armed per settle.
+        awaitingCreditConfirmationRef = null
+        creditWatchJob?.cancel()
+        creditConfirmationLine.visibility = View.GONE
+
         when (isSuccess) {
             true -> {
                 resultIcon.setImageResource(R.drawable.success_tick_only)

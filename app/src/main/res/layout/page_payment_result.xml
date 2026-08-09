@@ -80,6 +80,20 @@
             app:autoSizeTextType="uniform"
             app:autoSizeMinTextSize="20sp"
             app:autoSizeMaxTextSize="40sp" />
+
+        <!-- Beneficiary credit confirmation: shown on an approved sale whose
+             merchant bank supports confirmation — waits, then flips when the SDK's
+             onCreditConfirmation arrives -->
+        <TextView
+            android:id="@+id/creditConfirmationLine"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="15sp"
+            android:textColor="@color/warning_orange"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- Additional Details -->
