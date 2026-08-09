@@ -143,8 +143,8 @@ class ScanToPayActivity : AppCompatActivity() {
             setTextColor(getColor(if (success) R.color.success_green else R.color.error_red))
         }
         findViewById<TextView>(R.id.resultMessage).text = message
-        // Any terminal outcome auto-returns to the main menu after a short window,
-        // mirroring the SoftPOS Get-paid result. Done returns immediately.
+        // Any terminal outcome holds here, then returns to the main menu, mirroring the SoftPOS
+        // Get-paid result. Done returns immediately, throughout the hold.
         scheduleAutoReturn()
     }
 
@@ -178,7 +178,11 @@ class ScanToPayActivity : AppCompatActivity() {
     }
 
     private companion object {
-        /** Idle window before a completed scan-to-pay returns to the main menu. */
-        const val AUTO_RETURN_DELAY_MS = 5000L
+        /**
+         * How long a completed scan-to-pay holds its result before returning to the main menu;
+         * Done dismisses immediately throughout. 60s, matching the SoftPOS Get-paid result page:
+         * the payer should be able to read their own outcome rather than have it snatched away.
+         */
+        const val AUTO_RETURN_DELAY_MS = 60_000L
     }
 }

@@ -239,6 +239,10 @@ class GetPaidActivity : AppCompatActivity() {
                     details = response.transactionId?.let { "Transaction: $it" } ?: "",
                 )
                 scheduleAutoNavigate()
+                // An approved CPM sale can wait on beneficiary credit confirmation just like tap
+                // and MPM — the same stored-row watch, which cancels the hold above if the
+                // merchant's bank turns out to support it.
+                if (response.responseCode == "00") watchCreditConfirmationForQr(reference)
             } catch (e: Exception) {
                 showPage(PAGE_PAYMENT_RESULT)
                 // Transport failure — nothing recorded, so no receipt.
@@ -277,15 +281,17 @@ class GetPaidActivity : AppCompatActivity() {
         private const val PAGE_QR_WAITING = 10
         // Full-page CPM charge confirmation.
         private const val PAGE_CPM_CONFIRM = 11
-        // Terminal outcomes (approved included) auto-return to Home after 5s if the
-        // merchant touches nothing, matching the iOS sample.
-        private const val AUTO_NAVIGATE_DELAY_MS = 5000L
+        // Terminal outcomes (approved, declined and failed alike) hold the result page for this
+        // long and then return to Home on their own; Done dismisses immediately at any point.
+        // 60s: a cashier needs long enough to read the outcome to the customer, and an approved
+        // sale may still be waiting on the merchant bank's credit confirmation.
+        private const val AUTO_NAVIGATE_DELAY_MS = 60_000L
         private const val QR_POLL_INTERVAL_MS = 2500L
         // How the MPM result page watches the stored row for credit-confirmation
         // state (the supported flag lands within the SDK reconciler's first status probe;
-        // the confirmation itself whenever the merchant's bank answers).
+        // the confirmation itself whenever the merchant's bank answers). The watch runs while
+        // the result page is up.
         private const val CREDIT_WATCH_INTERVAL_MS = 3000L
-        private const val CREDIT_WATCH_MAX_CHECKS = 60
     }
 
     /** Runtime location access so payment_device_info can include lat/lng (manifest alone is not enough). */
@@ -858,11 +864,15 @@ class GetPaidActivity : AppCompatActivity() {
                             amountMinorUnits = currentAmountMinorUnits,
                             details = "Ref: ${created.txRef}\nResponse: ${status.responseCode ?: "-"}",
                         )
+                        // showPage cleared any pending auto-return; re-arm the 60s hold for this
+                        // outcome — approved or not.
+                        scheduleAutoNavigate()
                         // An approved MPM sale waits on credit confirmation too —
                         // driven off the SDK's stored row, see watchCreditConfirmationForQr.
+                        // The settle itself can't say whether the bank supports confirmation, so
+                        // the hold above runs meanwhile; the watch cancels it the moment the
+                        // stored row says the bank does support it.
                         if (status.isApproved) watchCreditConfirmationForQr(created.txRef)
-                        // showPage cleared any pending auto-return; re-arm it for this outcome.
-                        scheduleAutoNavigate()
                         break
                     }
                     status.state == "EXPIRED" -> {
@@ -887,13 +897,19 @@ class GetPaidActivity : AppCompatActivity() {
      * SDK's own stored row: first for the supported flag (shows the waiting line), then for the
      * terminal confirmation state (flips it). Leaving the result page ends the watch — a later
      * confirmation still lands in history and as the SDK-wide toast/callback where registered.
+     *
+     * The watch also owns this page's *hold*, and only the hold — it never touches the SDK's
+     * polling, which is app-scoped and runs whatever screen is up. The settle armed the normal
+     * 60s hold; the moment the row says the bank supports confirmation the hold is CANCELLED
+     * (the page must not vanish mid-wait), and once the answer is on screen a fresh 60s hold
+     * starts. A row that never says "supported" simply lets the original hold expire — no
+     * separate flag-unknown state.
      */
     private fun watchCreditConfirmationForQr(ref: String) {
         creditWatchJob?.cancel()
         creditWatchJob = lifecycleScope.launch {
             var waiting = false
-            repeat(CREDIT_WATCH_MAX_CHECKS) {
-                if (currentPage != PAGE_PAYMENT_RESULT) return@launch
+            while (currentPage == PAGE_PAYMENT_RESULT) {
                 val row = sdk.transactionService.getTransaction(ref)
                 val confirmation = row?.creditConfirmationStatus
                 when {
@@ -907,10 +923,14 @@ class GetPaidActivity : AppCompatActivity() {
                             getColor(if (received) R.color.success_green else R.color.error_red)
                         )
                         creditConfirmationLine.visibility = View.VISIBLE
+                        // The answer is on screen: start a FRESH 60s hold from here.
+                        scheduleAutoNavigate()
                         return@launch
                     }
                     !waiting && row?.isCreditConfirmationSupported == true -> {
                         waiting = true
+                        // The flag turned true — cancel the hold; the page waits for the bank.
+                        cancelAutoNavigate()
                         creditConfirmationLine.text = getString(R.string.confirming_credit_with_merchant_bank)
                         creditConfirmationLine.setTextColor(getColor(R.color.warning_orange))
                         creditConfirmationLine.visibility = View.VISIBLE
@@ -1078,6 +1098,9 @@ class GetPaidActivity : AppCompatActivity() {
                 getColor(if (received) R.color.success_green else R.color.error_red)
             )
             creditConfirmationLine.visibility = View.VISIBLE
+            // The answer is on screen: start a FRESH hold (the wait had cancelled the one the
+            // approval armed), then auto-return as usual. Done still dismisses immediately.
+            scheduleAutoNavigate()
         } else {
             if (waitedOn) awaitingCreditConfirmationRef = null
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -1142,6 +1165,8 @@ class GetPaidActivity : AppCompatActivity() {
                 // The approval said the merchant's bank supports credit confirmation —
                 // the SDK is now polling in the background, so the result page waits: show the
                 // confirming line and let onCreditConfirmation flip it when the answer arrives.
+                // Setting awaitingCreditConfirmationRef is what suppresses the hold below, so the
+                // page cannot auto-return out from under the wait.
                 if (response.isCreditConfirmationSupported == true) {
                     awaitingCreditConfirmationRef =
                         response.merchantTransactionReference ?: lastOriginalTransactionReference
@@ -1189,8 +1214,12 @@ class GetPaidActivity : AppCompatActivity() {
             }
         }
 
-        // Auto-return to Home after the delay — every terminal outcome, approved included.
-        scheduleAutoNavigate()
+        // Hold the result for AUTO_NAVIGATE_DELAY_MS then return to Home — the default for EVERY
+        // terminal outcome, approved/pending/declined/failed alike (Done dismisses immediately
+        // throughout). The single exception is a sale waiting on beneficiary credit confirmation:
+        // that page must not vanish mid-wait, so it holds indefinitely and showCreditConfirmation()
+        // starts a fresh hold once the answer is on screen.
+        if (awaitingCreditConfirmationRef == null) scheduleAutoNavigate()
     }
     
     private fun showPaymentResult(
