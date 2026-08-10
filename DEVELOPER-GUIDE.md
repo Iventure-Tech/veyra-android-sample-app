@@ -472,7 +472,7 @@ try {
 | `onCardContactLost` | Optional | Contact lost before completion — reader **stays armed**; show "hold steady" and wait for a re-tap. |
 | `onUnsupportedCard` | Optional | Non-payment target / unreadable card — reader **stays armed**; show "card not supported, try another". |
 | `onCardReadingComplete` / `onSendingRequestOnline` / `onReceivingOnlineResponse` | Optional | Progress hooks: card read finished; online request sent; online response received. |
-| `onCreditConfirmation` | Optional | `(CreditConfirmation) -> Unit`, main thread. Fires when the funds of an **approved** sale are confirmed in the merchant's bank account (`status = "RECEIVED"`), or once with `"UNABLE_TO_CONFIRM"` if 30 days pass unconfirmed. Settlement news only — it never changes the payment outcome. The SDK owns the polling (exponential backoff); registered SDK-wide (replaces any previous registration), so it can fire for a sale from an earlier session — match by `reference`. The payload also carries `creditTransactionId`, `amountMinorUnits`, `bankReference` and `creditedAt` (populated on `RECEIVED`). Fires only when the backend said the merchant's bank supports confirmation — and for sales on **every rail** (tap, customer-QR charge, merchant-presented QR), since the sweep works off the stored rows. **Recommended pattern — wait on the result screen:** when an approved `TransactionResponse` carries `isCreditConfirmationSupported == true`, show a status line on the payment-result screen ("Confirming credit with merchant bank…") and flip it from this callback — "Funds received by merchant bank" on `RECEIVED`, "Bank credit could not be confirmed" only on the final give-up (see the sample's `GetPaidActivity`). For an approved **merchant-QR (MPM)** sale the settle itself can't say whether confirmation is supported (its rail carries no credit fields — the SDK learns them from the transaction-status rail moments later), so watch the stored row (`getTransaction(ref)`) for `isCreditConfirmationSupported`/`creditConfirmationStatus` instead, as the sample does. **The polling is SDK-owned and app-scoped, never screen-scoped**: leaving the result screen changes nothing — the SDK keeps polling while the app runs, persists the answer onto the stored row, and any transaction view re-reading the store shows the updated state on return. **Platform note:** every merchant rail supports credit confirmation, and the SDK polls on every platform; the only asymmetries are that iOS has no tap rail, that its sweep runs while the app is alive (no OS background execution — it suspends and resumes with the app), and that on React Native this *event* fires on Android only (render the stored row on iOS). |
+| `onCreditConfirmation` | Optional | `(CreditConfirmation) -> Unit`, main thread. Fires when the funds of an **approved** sale are confirmed in the merchant's bank account (`status = "RECEIVED"`), or once with `"UNABLE_TO_CONFIRM"` if 30 days pass unconfirmed. Settlement news only — it never changes the payment outcome. The SDK owns the polling (exponential backoff); registered SDK-wide (replaces any previous registration), so it can fire for a sale from an earlier session — match by `reference`. The payload also carries `creditTransactionId`, `amountMinorUnits`, `bankReference` and `creditedAt` (populated on `RECEIVED`). Fires only when the backend said the merchant's bank supports confirmation — and for sales on **every rail** (tap, customer-QR charge, merchant-presented QR), since the sweep works off the stored rows. **Recommended pattern — wait on the result screen:** when an approved `TransactionResponse` carries `isCreditConfirmationSupported == true`, show a status line on the payment-result screen ("Confirming credit with merchant bank…") and flip it from this callback — "Funds received by merchant bank" on `RECEIVED`, "Bank credit could not be confirmed" only on the final give-up (see the sample's `GetPaidActivity`). For an approved **merchant-QR (MPM)** sale the settle itself can't say whether confirmation is supported (its rail carries no credit fields — the SDK learns them from the transaction-status rail moments later), so watch the stored row (`getTransaction(ref)`) for `isCreditConfirmationSupported`/`creditConfirmationStatus` instead, as the sample does. **The polling is SDK-owned and app-scoped, never screen-scoped**: leaving the result screen changes nothing — the SDK keeps polling while the app runs, persists the answer onto the stored row, and any transaction view re-reading the store shows the updated state on return. **Platform note:** every merchant rail supports credit confirmation; the SDK polls on every platform and the callback/event fires on every platform (native iOS: `transactions.onCreditConfirmation`; React Native: `merchant.onCreditConfirmation`, now on iOS as well as Android). The remaining asymmetries are that iOS has no tap rail and that its sweep runs while the app is alive (no OS background execution — it suspends and resumes with the app). Registration is single-listener everywhere: **last registration wins**. |
 
 **Holding the result screen (your app's decision, never the SDK's).** A terminal outcome is a destination, not a notification. The sample holds its result page for **60 seconds** — approved, declined, pending and failed alike — with **Done** visible for the whole hold and dismissing immediately to the get-paid screen; when the hold expires the page returns Home on its own. The single exception is an approved sale whose `isCreditConfirmationSupported` is (or later becomes) `true`: **cancel** the hold so the page cannot vanish while the merchant's bank is still being asked, show "Confirming credit with merchant bank…", and start a **fresh 60 seconds** once the confirmation is on screen (the merchant-QR rail learns the flag moments after the settle, so the cancel can happen while the hold is already running). The non-terminal events above (`onUnsupportedCard`, `onCardContactLost`) are not results — they hold nothing and dismiss nothing: the waiting screen stays up, armed for a re-tap. How long a result stays up and what dismisses it are app concerns end to end — the SDK has no concept of a screen and supplies no duration, and dismissing a screen never stops its app-scoped credit polling.
 
@@ -1199,9 +1199,18 @@ Four things worth knowing before you rely on it:
 - **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
   read `getLastTransactions()` at start-up. The observer is a convenience over the store, not a delivery
   guarantee, so keep the read path.
+- **Registration is single-listener: last registration wins.** Calling it again *replaces* the previous
+  observer rather than adding a second one, and `TransactionResolvedObserver.clear()` stops it. There is
+  no subscription token and no listener list — if two parts of your app want the answer, fan it out
+  yourself from one registration.
 - **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
   this separate channel; the two are not alternatives.
 - It is delivered on the main thread, like the payment callback.
+
+The same channel exists on the other platforms, with the same semantics: iOS calls
+`VeyraSoftPOS.shared.transactions.onTransactionResolved { … }` (with
+`stopObservingTransactionResolved()`), and React Native subscribes with
+`merchant.onTransactionResolved(listener)` on both of its platforms.
 
 #### When the SDK could not start a payment at all
 
@@ -1254,6 +1263,8 @@ Both carry `amountMinorUnits` (name the amount that failed) and `rail` (`"TAP"`,
 **These describe the payment, not the card.** `Token.requiresOnline` answers a different question — "can this card pay *anything* offline?" — and stays `false` for a card that can still make smaller payments. Show a message about the payment that just failed; don't grey the card out on the strength of one refused amount.
 
 On iOS the same two signals are delivered by `observePaymentRefusals`; both fire from the QR rails only, since iOS has no tap-to-pay. On React Native they arrive as `requireOnline` / `amountExceedCardLimit` phases of the `walletTap` event.
+
+**One difference worth knowing before you port an Android integration to iOS.** On Android these two refusals are **per token**: you pass them to the card you are arming, so different cards can carry different handlers at the same time. On iOS and React Native they are a **single SDK-wide registration** — `observePaymentRefusals` replaces whatever was registered before, and the refusal's `tokenUniqueReference` tells you which card it was about. Nothing is lost (the payload identifies the card either way), but code that relies on "this handler only ever hears about *this* card" has to start filtering on `tokenUniqueReference` when it moves to iOS. It is the same single-listener rule the deferred-answer observers follow.
 
 ### QR context lifecycle — `contextStatus().state`
 
@@ -1521,6 +1532,13 @@ data class TransactionInfo(                 // history row
     val creditTransactionId: String?,       // merchant-bank credit id; null unless approved + supported
     val isCreditConfirmationSupported: Boolean?, // true ⇒ SDK is polling; show "confirming credit…" until resolved
     val creditConfirmationStatus: String?   // "RECEIVED" / final "UNABLE_TO_CONFIRM"; null while unconfirmed
+)
+
+data class TransactionResolution(           // onTransactionResolved payload (a pending sale settled)
+    val reference: String,                  // the sale's merchantTransactionReference — match on this
+    val responseCode: String?,              // the wire literal, for receipts and support
+    val status: String,                     // "APPROVED" / "DECLINED" / "FAILED" — never "PENDING"
+    val reason: String?                     // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse
 )
 
 data class CreditConfirmation(              // onCreditConfirmation payload (settlement news, not an outcome)
