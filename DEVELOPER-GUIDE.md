@@ -246,7 +246,6 @@ val softposConfig = VeyraSoftPosSdkConfig.builder(
 | `clientId` | **Mandatory** | OAuth client ID issued by Veyra. |
 | `clientSecret` | **Mandatory** | OAuth client secret. |
 | `enableNfc(Boolean)` | Optional | Arm the NFC reader capability at init. Default `true`. |
-| `terminalId(String)` | Optional | Terminal ID override. Normally comes from the stored merchant after registration — set only if your app pre-configures terminals. |
 | `merchantId(String)` | Optional | Merchant ID override (same note). |
 | `merchantNameAndLocation(String)` | Optional | Merchant name/location override for receipts and EMV data (same note). |
 | `acquirerId(String)` | Optional | Acquirer ID override (same note). |
@@ -444,10 +443,13 @@ Arm the reader for one sale and wait for the customer's tap. **Non-terminal even
 ```kotlin
 val request = TransactionRequest.Builder(
     amount = 32500L,                                   // MINOR units: ₦325.00
-    merchantTransactionReference = uniqueReference,    // your unique reference, echoed back
     currency = "0566",                                 // ISO 4217 numeric, 4 digits
     txType = TransactionRequest.TxType.PURCHASE
-).build()
+).merchantOrderId("ORDER-42")                          // optional: YOUR order id, not a key
+ .build()
+
+// The transaction reference is minted by the SDK — read it back off the response
+// (`response.merchantTransactionReference`) and key your receipts and lookups off that.
 
 try {
     sdk.cardPaymentService.makeCardPayment(
@@ -481,10 +483,18 @@ try {
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `amount` | **Mandatory** | **Minor units** (`Long`), e.g. ₦325.00 → `32500L`. Must be > 0. |
-| `merchantTransactionReference` | **Mandatory** | Your unique reference for this sale — echoed on the response and used to fetch the receipt afterwards. |
 | `currency` | **Mandatory** | ISO 4217 numeric, 3–4 digits (padded to 4, e.g. `"0566"`). |
 | `txType` | **Mandatory** | `TxType.PURCHASE`, `REFUND`, `CASH_ADVANCE`, `RECURRING_PURCHASE`, `PRE_AUTH_COMPLETION`, `OTHER`. |
+| `.merchantOrderId(String?)` | Optional | **Your** order / basket / invoice id. Stored and echoed by the gateway and shown on the transaction detail and receipt. Never validated for uniqueness and never used as a lookup key, so the same value may appear on two payments — which is exactly what links the attempts of a retried sale. |
 | `.performed3ds(Boolean)` | Optional | Whether your app performed 3-D Secure. Default `false`. |
+
+> **The transaction reference is no longer yours to supply.** `Builder` used to take a mandatory
+> `merchantTransactionReference`; the SDK now mints it (`{terminalId}-YYYYMMDDHHmmssSSS`) so the
+> gateway can guarantee it is unique per merchant. Read it off `response.merchantTransactionReference`
+> and key receipts, status lookups and credit confirmation off **that**. An app that keeps generating
+> its own is keying those lookups on a value no gateway has ever seen. Use `merchantOrderId` for your
+> own identifier instead — and note the two differ in kind: the reference identifies *an attempt*, the
+> order id identifies *your sale*, which is why a retry gets a new reference but keeps the order id.
 
 **Also on `cardPaymentService`:** `cancelPendingPayment()` (cancels an armed, untapped payment — the callback receives code `"06"` with message `"Payment cancelled"`; no-op when nothing is pending), `isTransactionInProgress`, `isAwaitingCardTap`.
 
@@ -558,15 +568,17 @@ val scanned = try {
 }
 confirmScreen(scanned.amountMinorUnits, scanned.currencyNumeric4, "Card •••• ${scanned.dpan.takeLast(4)}")
 // on merchant confirm:
-val reference = uniqueReference()                        // supply your own reference so the
-lifecycleScope.launch {                                  // receipt can be fetched afterwards
-    val response = sdk.cpmCustomerQrService.charge(scanned, reference)
+lifecycleScope.launch {
+    val response = sdk.cpmCustomerQrService.charge(scanned, merchantOrderId = "ORDER-42")
     val approved = response.responseCode == "00"
-    showResult(approved, reference)
+    // The SDK minted the reference; take it from the response for the receipt lookup.
+    showResult(approved, response.merchantTransactionReference)
 }
 ```
 
-`charge(scanned, merchantTransactionReference?)` returns `PaymentResponse`: `responseCode` (`"00"` approved), `transactionId`, `merchantStatus`. Pass your own `merchantTransactionReference` — with it you can fetch the receipt via `generateTransactionReceipt(reference)`; if you omit it the SDK generates one internally that your app cannot observe. A transport failure throws and records nothing.
+`charge(scanned, merchantOrderId = …)` returns `PaymentResponse`: `responseCode` (`"00"` approved), `transactionId`, `merchantStatus`, `merchantTransactionReference` (**the SDK-minted reference — fetch the receipt with `generateTransactionReceipt(it)`**) and `merchantOrderId` echoed back. A transport failure throws and records nothing.
+
+> The signature still accepts a positional `merchantTransactionReference` for source compatibility, but **the value is ignored** — the SDK mints the reference. Pass `merchantOrderId` by name, as above.
 
 ---
 
@@ -602,9 +614,73 @@ label.
 
 **How the SDK waits for a `PENDING` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own, with **exponential backoff**: the first re-checks come within seconds (most payments settle at once) and the interval doubles to a steady state of roughly **once an hour**. It keeps that up for **30 days** from the transaction date, and then stops asking.
 
-**Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is. ``reconcilePendingTransactions()`` still works past the window if you need one more check.
+**Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is.
+
+**Let the merchant ask on demand — `refreshTransactionStatus`.** The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never invents an outcome — a row that ages out simply stops being asked about and stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the merchant can ask on demand, which is the route for anything still pending after the window closes.
 
 A failed poll — device offline, gateway unreachable, an unreadable answer — changes nothing at all: the SDK backs off and asks again, and the row is left exactly as it was. "We could not reach the server" is never recorded as "the payment failed".
+
+#### `refreshTransactionStatus`
+
+```kotlin
+// suspend — call from a coroutine. Returns the updated stored row, or null if unknown here.
+val updated = sdk.transactionService.refreshTransactionStatus(reference)
+```
+
+The on-demand counterpart to `getTransaction`, which only reads what the device already knows. It
+asks the gateway about that one transaction now and writes the answer into the same local store the
+background sweep writes, so an on-demand check and a background check can never disagree.
+
+- **Show it only while the row is `PENDING`.** A settled row has nothing to ask, and offering the
+  action implies the outcome might still change. Hide it the moment the row is terminal.
+- **It works past the 30-day window**, and on a row the sweep never had on its list — that is what it
+  is for.
+- **It is not a way to force an outcome.** A payment that is still unsettled answers `PENDING` again.
+  Show a brief "still processing" note; do not retry in a loop.
+- **A failed call throws and changes nothing** — `NO_NETWORK_CONNECTION` when the device is offline.
+  Show the error and leave the row pending; that is the correct handling, not an error state on the
+  transaction.
+- **No SDK-side throttle.** Disable your button while a call is in flight, as the sample does.
+
+#### `refreshCreditConfirmation`
+
+The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
+days**, finalising the row as `UNABLE_TO_CONFIRM` — which means "we stopped asking", never "the funds
+were not received". Expose **`refreshCreditConfirmation`** in your UI so the merchant can ask on
+demand; it works after the window closes, and a later `RECEIVED` replaces the give-up state.
+
+**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
+this rail. `true` means the SDK is polling and you may offer the manual check; `false`/`null` means
+there is nothing to ask — do not call it, and show no credit UI for that transaction. Offer the
+action only while
+
+```kotlin
+tx.transactionStatus == TransactionStatus.APPROVED &&
+    tx.isCreditConfirmationSupported == true &&
+    tx.creditConfirmationStatus != "RECEIVED"
+```
+
+```kotlin
+// suspend — call from a coroutine. Returns the updated stored row, or null if unknown here.
+val updated = sdk.transactionService.refreshCreditConfirmation(reference)
+```
+
+- **A row outside that predicate is a no-op**, not an error: no request is made and the unchanged row
+  comes back. The gateway refuses the same cases, so the SDK does not spend a round trip being told.
+- **It works past the 30-day window**, including on a row already stamped `UNABLE_TO_CONFIRM` — that
+  is the case it exists for. A later `RECEIVED` replaces the give-up; nothing ever replaces
+  `RECEIVED`.
+- **Only a confirmation is written.** An answer of `UNABLE_TO_CONFIRM`, or one this SDK version does
+  not recognise, leaves the row exactly as it was — "not confirmed **yet**", never "not received".
+- **Settlement only.** Nothing on this path can change `transactionStatus`, `responseCode` or
+  `responseStatusReason`. A credit answer says whether the money reached your bank, not what the
+  payment did.
+- **It writes the store and fires `onCreditConfirmation`**, exactly as the background sweep does —
+  both go through the same write — so a manual check and a swept one are indistinguishable once
+  stored, and your existing observer needs no change.
+- **A failed call throws and changes nothing** — `SdkErrorCode.NO_NETWORK_CONNECTION` when the device
+  is offline. Show the error and leave the credit line reading "not confirmed yet".
+- **No SDK-side throttle.** Disable your button while a call is in flight, as the sample does.
 
 #### `generateTransactionReceipt`
 
@@ -1095,9 +1171,13 @@ Did the money actually reach the merchant's bank? The wallet asks the same quest
 
 **The SDK does the polling; your app renders the stored row.** After a payment is approved, the SDK asks the gateway on an exponential backoff for up to **30 days**, app-scoped: it keeps going across every screen, and no screen starts or stops it. There is deliberately **no wallet callback** for this — the stored row is the whole surface. Read it when a transaction detail view appears, and re-read while it is up if you want the line to flip live.
 
+These three fields are the **eligibility contract**: they are how you decide whether to render a
+credit line at all, and whether you may call `refreshCreditConfirmation` (below). They are not merely
+a cue to wait.
+
 | Field | What it means for you |
 |---|---|
-| `isCreditConfirmationSupported: Boolean?` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line. `false`/`null` ⇒ there is nothing to ask — render **no** credit UI for that transaction. |
+| `isCreditConfirmationSupported: Boolean?` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line **and may offer the manual check**. `false`/`null` ⇒ there is nothing to ask — render **no** credit UI for that transaction, and **do not call `refreshCreditConfirmation`**. |
 | `creditConfirmationStatus: String?` | `null` = no answer yet (with the gate `true`, that is the "confirming…" state) · `"RECEIVED"` = terminal, the funds are confirmed in the merchant's account · `"UNABLE_TO_CONFIRM"` = the 30-day sweep stopped asking. |
 | `creditTransactionId: String?` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — display/support only; never pass it back to the SDK. |
 | `creditedAt: String?` | When the beneficiary bank posted the credit. `"RECEIVED"` only. |
@@ -1112,6 +1192,41 @@ The same three core fields, with the same meanings, exist on the SoftPOS side of
 
 **Cadence, stated plainly:** the wallet's periodic sweep rides WorkManager, whose floor is **15 minutes**, so the backoff ladder is measured in sweep cycles and the practical resolution is coarser than the merchant SDK's ten-second loop. A one-shot chain runs immediately after a payment resolves, so a credit that lands promptly is usually picked up within seconds; after that, expect minutes, not seconds.
 
+##### `refreshCreditConfirmation` — let the customer ask on demand
+
+The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
+days**, finalising the row as `UNABLE_TO_CONFIRM` — which means "we stopped asking", never "the funds
+were not received". Expose **`refreshCreditConfirmation`** in your UI so the user can ask on demand;
+it works after the window closes, and a later `RECEIVED` replaces the give-up state.
+
+**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
+this rail. `true` means the SDK is polling and you may offer the manual check; `false`/`null` means
+there is nothing to ask — do not call it, and show no credit UI for that transaction. Offer the
+action only while
+
+```kotlin
+tx.authorizationStatus == "APPROVED" &&
+    tx.isCreditConfirmationSupported == true &&
+    tx.creditConfirmationStatus != "RECEIVED"
+```
+
+```kotlin
+// suspend — call from a coroutine. Keyed by the row's transaction hash, never by a credit id.
+val updated = sdk.tokenisationService.refreshCreditConfirmation(transactionHash)
+```
+
+- **A row outside that predicate is a no-op**, not an error: no request is made and the unchanged row
+  comes back.
+- **It works past the 30-day window**, including on a row already stamped `UNABLE_TO_CONFIRM` — that
+  is the case it exists for. Nothing ever replaces `RECEIVED`.
+- **Only a confirmation is written.** Anything else leaves the row exactly as it was.
+- **Settlement only.** Nothing on this path can change `authorizationStatus`, `responseCode` or
+  `responseStatusReason`.
+- **Still no callback** — the returned row and the stored history are the wallet's whole credit
+  surface, by design.
+- **A failed call throws and changes nothing** — the message carries `NO_NETWORK_CONNECTION` when the
+  device is offline. Show the error and leave the credit line reading "not confirmed yet".
+
 #### `reconcilePendingTransactions`
 
 Reconcile still-`PENDING` rows against the backend. Call it opportunistically: on returning to the foreground, on pull-to-refresh, and on a short loop while a shown QR is on screen (that rail is offline — reconciliation is how its outcome arrives).
@@ -1119,6 +1234,27 @@ Reconcile still-`PENDING` rows against the backend. Call it opportunistically: o
 ```kotlin
 sdk.tokenisationService.reconcilePendingTransactions { /* refresh the list */ }
 ```
+
+#### `refreshTransactionStatus`
+
+```kotlin
+// suspend — call from a coroutine. Returns the updated row, or null if no row carries that hash.
+val updated = sdk.tokenisationService.refreshTransactionStatus(summary.transactionHash)
+```
+
+The **per-transaction** counterpart to `reconcilePendingTransactions`, which asks about every open
+row and returns nothing — this one answers about the row the customer is actually looking at, keyed
+by its `transactionHash`.
+
+The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30
+days**. Polling never invents an outcome — a row that ages out simply stops being asked about and
+stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the customer can ask on demand,
+which is the route for anything still pending after the window closes.
+
+The same five rules as the merchant method above apply: show it only while the row is `PENDING`; it
+works past the window and off the sweep's list; it never forces an outcome; a failed call throws
+(`NO_NETWORK_CONNECTION` when offline) and leaves the row untouched; and there is no SDK-side
+throttle, so disable the button while a call is in flight.
 
 #### `processReceipt` / `getLastReceipts` / `getReceiptForTransaction`
 
@@ -1190,7 +1326,7 @@ Terminal outcomes only — unsupported cards and lost contact **never** produce 
 
 | Code | Meaning | Terminal? | What to do |
 |---|---|---|---|
-| `"00"` | Approved | Yes | Success screen + receipt (look it up by your echoed `merchantTransactionReference`). |
+| `"00"` | Approved | Yes | Success screen + receipt (look it up by the SDK-minted `merchantTransactionReference` on the response). |
 | `"05"` | Declined by the issuer/server | Yes | Show decline; try another card. A stale customer QR also surfaces as `"05"` on the CPM rail — if the customer's code sat on screen a while, ask them to regenerate and rescan. |
 | `"06"` | Failed before reaching the issuer — validation, cancellation, merchant not active, wrong mode, read failure after the online boundary | Yes (no money moved) | Fix the input/config and re-initiate; `message` says which check failed. Cancellation returns `"06"` with message `"Payment cancelled"`. |
 | `"68"` (was `"99"`) | Pending — sent, no reply received (timeout/network) | Callback fires, outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
@@ -1484,7 +1620,7 @@ data class TokenStatusUpdateResponse(val tokenUniqueReference: String?, val stat
 
 data class TransactionSummary(
     val merchantName: String,
-    val amountInMinorUnit: Int,             // 150000 = ₦1,500.00
+    val amountInMinorUnit: Long,            // 150000 = ₦1,500.00 (Long since 1.0.15; was Int)
     val transactionCurrencyCode: String?,   // ISO 4217 numeric 4-digit, e.g. "0566"
     val authorizationStatus: String?,       // PENDING / APPROVED / DECLINED / FAILED; null = legacy
     val entryMethod: String?,               // "TAP" / "QR_GENERATED" / "QR_SCANNED"; null = legacy
@@ -1554,7 +1690,7 @@ data class CpmPaymentQr(
 )
 ```
 
-`CurrencyUtils` (wallet): `getSymbol(code)`, `formatAmount(minorUnits, code)` — display helpers for ISO 4217 numeric codes.
+`CurrencyUtils` (wallet): `getSymbol(code)`, `formatAmount(minorUnits, code)`, `formatAmountWithCode(minorUnits, code)` — display helpers for ISO 4217 numeric codes. **`minorUnits` is a `Long` from 1.0.15** (it was `Int`), matching `TransactionSummary.amountInMinorUnit`: a 32-bit amount could not carry a payment above ₦21,474,836.47. If you parse an amount out of a `TransactionReceipt.totalAmount` string, use `toLongOrNull()`.
 
 ### SoftPOS
 
@@ -1579,7 +1715,8 @@ data class TransactionResponse(             // tap terminal outcome (makeCardPay
     val amount: String?,                    // minor units as string
     val cardScheme: String?,                // "VISA", "MASTERCARD", …
     val cardExpiry: String?,                // YYMM
-    val merchantTransactionReference: String?,  // your echoed reference — receipt lookup key
+    val merchantTransactionReference: String?,  // SDK-MINTED reference — receipt/status lookup key
+    val merchantOrderId: String?,               // your order id, echoed back (never a lookup key)
     val transactionType: String?, val maskedTokenLast4: String?,
     val merchantStatus: String?, val transactionId: String?, val aid: String?,
     val creditTransactionId: String?,           // merchant-bank credit id (approved + supported only)

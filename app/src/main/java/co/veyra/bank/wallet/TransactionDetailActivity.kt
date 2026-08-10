@@ -159,7 +159,70 @@ class TransactionDetailActivity : AppCompatActivity() {
             binding.rowResponseCode.visibility = View.VISIBLE
             binding.txDetailResponseCode.text = it
         }
+        bindStatusCheckButton(tx)
         bindCreditConfirmation(tx)
+    }
+
+    /**
+     * "Check status" — the customer's manual ask beside the SDK's own background poll.
+     *
+     * Visible **only while the row is still open** (`PENDING`, or a status this build does not
+     * recognise — unknown values are carried raw and are equally unresolved). A settled row has
+     * nothing left to ask, and offering the action would imply its outcome might still change.
+     *
+     * This is why an unresolved row is shown in wallet history at all: the SDK stops polling after
+     * 30 days, and this button is the only route to an answer thereafter.
+     */
+    private fun bindStatusCheckButton(tx: TransactionSummary) {
+        val hash = tx.transactionHash
+        val open = tx.authorizationStatus?.trim()?.uppercase() !in setOf("APPROVED", "DECLINED", "FAILED")
+        if (!open || hash.isNullOrBlank()) {
+            binding.btnCheckStatus.visibility = View.GONE
+            return
+        }
+        binding.btnCheckStatus.visibility = View.VISIBLE
+        binding.btnCheckStatus.isEnabled = true
+        binding.btnCheckStatus.setOnClickListener { checkStatus(hash) }
+    }
+
+    private fun checkStatus(transactionHash: String) {
+        val sdk = VeyraWalletSdk.getInstance() ?: return
+        // The SDK deliberately has no throttle — the screen disables its own button while in flight.
+        binding.btnCheckStatus.isEnabled = false
+        binding.txDetailStatusCheckNote.text = getString(R.string.status_check_in_flight)
+        binding.txDetailStatusCheckNote.visibility = View.VISIBLE
+
+        lifecycleScope.launch {
+            runCatching {
+                sdk.tokenisationService.refreshTransactionStatus(transactionHash)
+            }.onSuccess { fresh ->
+                if (fresh != null) {
+                    summary = fresh
+                    bindSummary(fresh)
+                }
+                val resolved = fresh?.authorizationStatus?.trim()?.uppercase() in
+                    setOf("APPROVED", "DECLINED", "FAILED")
+                if (resolved) {
+                    // bindSummary has already re-rendered the status line and hidden this button.
+                    binding.txDetailStatusCheckNote.visibility = View.GONE
+                } else {
+                    // Still unsettled — the honest answer, never a failure.
+                    binding.txDetailStatusCheckNote.text =
+                        getString(R.string.status_check_still_pending)
+                    binding.btnCheckStatus.isEnabled = true
+                }
+            }.onFailure { e ->
+                // An offline device gets the one piece of advice that helps. The row is untouched
+                // either way — a failed check is never an outcome.
+                val offline = e.message?.contains("NO_NETWORK_CONNECTION") == true
+                binding.txDetailStatusCheckNote.text = if (offline) {
+                    getString(R.string.status_check_offline)
+                } else {
+                    getString(R.string.status_check_failed, e.message ?: "unknown error")
+                }
+                binding.btnCheckStatus.isEnabled = true
+            }
+        }
     }
 
     /**
@@ -198,6 +261,73 @@ class TransactionDetailActivity : AppCompatActivity() {
         ).joinToString(" · ")
         binding.txDetailCreditDetail.text = detail
         binding.txDetailCreditDetail.visibility = if (detail.isEmpty()) View.GONE else View.VISIBLE
+
+        bindCreditCheckButton(tx)
+    }
+
+    /**
+     * "Check merchant credit" — the customer's manual ask beside the SDK's own background credit
+     * sweep.
+     *
+     * Visible on exactly the predicate the SDK enforces internally: the payment is **approved**, the
+     * merchant's bank is on the confirmation rail, and the credit is not already `RECEIVED`. That
+     * deliberately **includes** a row the 30-day sweep gave up on and marked `UNABLE_TO_CONFIRM` —
+     * the give-up means "we stopped asking", not "the merchant was not paid", so that is the row
+     * this button matters most for. A later `RECEIVED` replaces it.
+     *
+     * A convenience, never the mechanism: the SDK keeps asking whether or not this screen exists.
+     */
+    private fun bindCreditCheckButton(tx: TransactionSummary) {
+        val hash = tx.transactionHash
+        val eligible = tx.authorizationStatus == "APPROVED" &&
+            tx.isCreditConfirmationSupported == true &&
+            tx.creditConfirmationStatus != "RECEIVED" &&
+            !hash.isNullOrBlank()
+        if (!eligible) {
+            binding.btnCheckMerchantCredit.visibility = View.GONE
+            return
+        }
+        binding.btnCheckMerchantCredit.visibility = View.VISIBLE
+        binding.btnCheckMerchantCredit.isEnabled = true
+        binding.btnCheckMerchantCredit.setOnClickListener { checkMerchantCredit(hash!!) }
+    }
+
+    private fun checkMerchantCredit(transactionHash: String) {
+        val sdk = VeyraWalletSdk.getInstance() ?: return
+        // The SDK deliberately has no throttle — the screen disables its own button.
+        binding.btnCheckMerchantCredit.isEnabled = false
+        binding.txDetailCreditCheckNote.text = getString(R.string.credit_check_in_flight)
+        binding.txDetailCreditCheckNote.visibility = View.VISIBLE
+
+        lifecycleScope.launch {
+            runCatching {
+                sdk.tokenisationService.refreshCreditConfirmation(transactionHash)
+            }.onSuccess { fresh ->
+                if (fresh != null) {
+                    summary = fresh
+                    bindSummary(fresh)
+                }
+                if (fresh?.creditConfirmationStatus == "RECEIVED") {
+                    // bindSummary has already re-rendered the credit line and hidden the button.
+                    binding.txDetailCreditCheckNote.visibility = View.GONE
+                } else {
+                    // Not confirmed **yet** — the honest answer, never "not received".
+                    binding.txDetailCreditCheckNote.text =
+                        getString(R.string.credit_check_still_unconfirmed)
+                    binding.btnCheckMerchantCredit.isEnabled = true
+                }
+            }.onFailure { e ->
+                // An offline device gets the one piece of advice that helps. The row is untouched
+                // either way — a failed check is never a settlement answer.
+                binding.txDetailCreditCheckNote.text =
+                    if (e.message?.contains("NO_NETWORK_CONNECTION") == true) {
+                        getString(R.string.credit_check_offline)
+                    } else {
+                        getString(R.string.credit_check_failed, e.message ?: "unknown error")
+                    }
+                binding.btnCheckMerchantCredit.isEnabled = true
+            }
+        }
     }
 
     private fun entryMethodLabel(entryMethod: String?): String? = when (entryMethod) {

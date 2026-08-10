@@ -298,6 +298,33 @@
                             android:textColor="@android:color/white" />
                     </LinearLayout>
 
+                    <!--
+                      "Check status" — the manual ask beside the SDK's own 30-day background poll.
+                      Shown ONLY while the row is still open (PENDING, or a status this build does
+                      not recognise); it disappears the moment the payment resolves. It is the only
+                      route to an answer once the SDK's 30-day poll gives up.
+                    -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnCheckStatus"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/status_check_now"
+                        android:textAllCaps="false"
+                        android:textSize="13sp"
+                        android:visibility="gone" />
+
+                    <!-- Transient outcome of the manual check (still pending, or failed). -->
+                    <TextView
+                        android:id="@+id/txDetailStatusCheckNote"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingTop="4dp"
+                        android:textSize="12sp"
+                        android:textColor="#777777"
+                        android:visibility="gone" />
+
                     <!-- Beneficiary credit confirmation: shown ONLY when the gateway said the
                          merchant's bank is on the rail. A row that isn't (or a payment that
                          wasn't approved) shows nothing at all — absence means "we cannot ask",
@@ -314,6 +341,33 @@
                     <!-- Credited time / bank reference — present on RECEIVED only. -->
                     <TextView
                         android:id="@+id/txDetailCreditDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingTop="4dp"
+                        android:textSize="12sp"
+                        android:textColor="#777777"
+                        android:visibility="gone" />
+
+                    <!--
+                      "Check merchant credit" — the manual ask beside the SDK's own 30-day credit
+                      sweep. Shown only while the payment is approved, the merchant's bank is on
+                      the confirmation rail, and the credit is not already RECEIVED; the SDK
+                      enforces the same predicate, so a press outside it would do nothing.
+                    -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnCheckMerchantCredit"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/credit_check_now"
+                        android:textAllCaps="false"
+                        android:textSize="13sp"
+                        android:visibility="gone" />
+
+                    <!-- Transient outcome of the manual credit check (unconfirmed, or failed). -->
+                    <TextView
+                        android:id="@+id/txDetailCreditCheckNote"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:paddingTop="4dp"

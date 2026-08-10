@@ -179,6 +179,59 @@
                 android:textColor="@android:color/white"
                 android:layout_marginBottom="16dp" />
 
+            <!--
+              "Check status" — the manual ask beside the SDK's own 30-day background poll. Shown
+              ONLY while the row is PENDING; it disappears the moment the payment resolves, because
+              a settled row has nothing left to ask.
+            -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/checkStatusButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/status_check_now"
+                android:textAllCaps="false"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <!-- Transient outcome of the manual check (still pending, or failed). -->
+            <TextView
+                android:id="@+id/detailStatusCheckNote"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:textSize="12sp"
+                android:textColor="#AAAAAA"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone" />
+
+            <!--
+              "Check merchant credit" — the manual ask beside the SDK's own 30-day credit sweep.
+              Shown only while the sale is approved, the merchant's bank is on the confirmation
+              rail, and the credit is not already RECEIVED. On an approved row this is the button
+              that applies; on a pending one, "Check status" above is.
+            -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/checkMerchantCreditButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/credit_check_now"
+                android:textAllCaps="false"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <!-- Transient outcome of the manual credit check (still unconfirmed, or failed). -->
+            <TextView
+                android:id="@+id/detailCreditCheckNote"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:textSize="12sp"
+                android:textColor="#AAAAAA"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/detailTime"
                 android:layout_width="match_parent"

@@ -171,8 +171,21 @@ class GetPaidActivity : AppCompatActivity() {
     /** Authorised amount in minor units (matches [TransactionRequest.amount] / EMV 9F02). */
     private var currentAmountMinorUnits: Long = 0
     private var currentPaymentCurrencyCode: String = "0566"
+    /**
+     * The reference of the last sale — **as minted by the SDK and returned on the response**.
+     * The app does not invent one: since the SDK became the minter, an app-generated value is a
+     * key the gateway has never seen, and every receipt or status lookup built on it would miss.
+     */
     private var lastOriginalTransactionReference: String = ""
     private var lastSuccessfulResponse: TransactionResponse? = null
+
+    /**
+     * A stand-in for the till's own order/basket/invoice id, which a real integration would take
+     * from its POS rather than generate. It is optional, is never used as a lookup key, and may
+     * repeat across attempts of the same sale — which is exactly what ties a retry back to the
+     * original order, now that every attempt mints its own transaction reference.
+     */
+    private fun nextSampleOrderId(): String = "ORDER-${System.currentTimeMillis()}"
 
     // The sale the result page is waiting on beneficiary credit confirmation for.
     // Set when an APPROVED response says the merchant's bank supports confirmation; cleared when
@@ -218,16 +231,18 @@ class GetPaidActivity : AppCompatActivity() {
     private fun chargeCpm(scanned: co.veyra.softpos.payment.sdk.cpm.ScannedCpmQr) {
         currentAmountMinorUnits = scanned.amountMinorUnits
         currentPaymentCurrencyCode = scanned.currencyNumeric4
-        // App-supplied reference (tap idiom) so the CPM result can offer the
-        // receipt — the recorded transaction is keyed under it.
-        val reference = "${System.currentTimeMillis()}_${(1000..9999).random()}"
+        // Your own order id — optional, never a key, and safe to reuse across attempts of the
+        // same sale. The transaction *reference* is minted by the SDK and comes back on the
+        // response; the app no longer invents one.
+        val orderId = nextSampleOrderId()
         // The whole round trip happens behind this page: swap the buttons for a visible
         // processing state so the merchant sees the charge is in flight (iOS parity).
         setCpmConfirmCharging(true)
         lifecycleScope.launch {
             try {
-                val response = sdk.cpmCustomerQrService.charge(scanned, reference)
-                lastOriginalTransactionReference = reference
+                val response = sdk.cpmCustomerQrService.charge(scanned, merchantOrderId = orderId)
+                // Key the receipt and the credit watch off the reference the SDK returns.
+                lastOriginalTransactionReference = response.merchantTransactionReference.orEmpty()
                 showPage(PAGE_PAYMENT_RESULT)
                 // A delivered outcome (approved or declined) is recorded — receipt available.
                 viewReceiptButton.visibility = View.VISIBLE
@@ -622,8 +637,127 @@ class GetPaidActivity : AppCompatActivity() {
         // Only show View Receipt for final statuses (approved, declined, failed) - not for pending
         pageTransactionDetail.findViewById<MaterialButton>(R.id.viewReceiptButtonDetail)?.visibility =
             if (tx.transactionStatus == TransactionStatus.PENDING) View.GONE else View.VISIBLE
+        bindStatusCheckButton(tx)
+        bindCreditCheckButton(tx)
     }
-    
+
+    /**
+     * "Check status" on the transaction detail — the manual ask beside the SDK's own background
+     * poll.
+     *
+     * Visible **only while the row is `PENDING`**: a settled row has nothing left to ask, and
+     * offering the action would imply its outcome might still change. It disappears the moment the
+     * row resolves.
+     *
+     * This is the documented route to an answer after the SDK's 30-day give-up, which is why it is
+     * offered on however old a pending row. A convenience the rest of the time, never the
+     * mechanism: the SDK keeps asking whether or not this page is up.
+     */
+    private fun bindStatusCheckButton(tx: TransactionInfo) {
+        val button = pageTransactionDetail.findViewById<MaterialButton>(R.id.checkStatusButton)
+        val note = pageTransactionDetail.findViewById<TextView>(R.id.detailStatusCheckNote)
+        note.visibility = View.GONE
+
+        if (tx.transactionStatus != TransactionStatus.PENDING) {
+            button.visibility = View.GONE
+            return
+        }
+        button.visibility = View.VISIBLE
+        button.isEnabled = true
+        button.setOnClickListener {
+            // The SDK deliberately has no throttle — the screen disables its own button.
+            button.isEnabled = false
+            note.text = getString(R.string.status_check_in_flight)
+            note.visibility = View.VISIBLE
+            lifecycleScope.launch {
+                runCatching {
+                    sdk.transactionService.refreshTransactionStatus(tx.merchantTransactionReference)
+                }.onSuccess { fresh ->
+                    if (fresh != null && fresh.transactionStatus != TransactionStatus.PENDING) {
+                        // Re-render the detail and the list so the status, this button and the
+                        // receipt affordance all agree.
+                        loadTransactionDetail(tx.merchantTransactionReference)
+                        loadTransactionsList()
+                    } else {
+                        // Still unsettled — the honest answer, not a failure.
+                        note.text = getString(R.string.status_check_still_pending)
+                        button.isEnabled = true
+                    }
+                }.onFailure { e ->
+                    // An offline device gets the one piece of advice that helps. The row is
+                    // untouched either way — a failed check is never an outcome.
+                    note.text = if (e.message?.contains("NO_NETWORK_CONNECTION") == true) {
+                        getString(R.string.status_check_offline)
+                    } else {
+                        getString(R.string.status_check_failed, e.message ?: "unknown error")
+                    }
+                    button.isEnabled = true
+                }
+            }
+        }
+    }
+
+    /**
+     * "Check merchant credit" on the transaction detail — the manual ask beside the SDK's own
+     * background credit sweep.
+     *
+     * Visible on exactly the predicate the SDK enforces internally: the sale is **approved**, the
+     * merchant's bank is on the confirmation rail (`isCreditConfirmationSupported == true`), and the
+     * credit is not already `RECEIVED`. Calling it outside that is a no-op rather than an error, but
+     * offering a control that does nothing is its own defect — so the button is gated on the same
+     * line the SDK checks.
+     *
+     * It deliberately stays offered on a row the 30-day sweep gave up on and stamped
+     * `UNABLE_TO_CONFIRM`: that means "we stopped asking", never "the funds were not received", and
+     * asking again after it is exactly what this button is for. A later `RECEIVED` replaces it.
+     *
+     * On an approved row this is the button that applies; on a pending one, "Check status" is.
+     */
+    private fun bindCreditCheckButton(tx: TransactionInfo) {
+        val button = pageTransactionDetail.findViewById<MaterialButton>(R.id.checkMerchantCreditButton)
+        val note = pageTransactionDetail.findViewById<TextView>(R.id.detailCreditCheckNote)
+        note.visibility = View.GONE
+
+        val eligible = tx.transactionStatus == TransactionStatus.APPROVED &&
+            tx.isCreditConfirmationSupported == true &&
+            tx.creditConfirmationStatus != "RECEIVED"
+        if (!eligible) {
+            button.visibility = View.GONE
+            return
+        }
+        button.visibility = View.VISIBLE
+        button.isEnabled = true
+        button.setOnClickListener {
+            // The SDK deliberately has no throttle — the screen disables its own button.
+            button.isEnabled = false
+            note.text = getString(R.string.credit_check_in_flight)
+            note.visibility = View.VISIBLE
+            lifecycleScope.launch {
+                runCatching {
+                    sdk.transactionService.refreshCreditConfirmation(tx.merchantTransactionReference)
+                }.onSuccess { fresh ->
+                    if (fresh?.creditConfirmationStatus == "RECEIVED") {
+                        // Re-render the detail so the credit line and this button agree.
+                        loadTransactionDetail(tx.merchantTransactionReference)
+                    } else {
+                        // Not confirmed **yet** — the honest answer, never "not received".
+                        note.text = getString(R.string.credit_check_still_unconfirmed)
+                        button.isEnabled = true
+                    }
+                }.onFailure { e ->
+                    // An offline device gets the one piece of advice that helps. The row is
+                    // untouched either way — a failed check is never a settlement answer.
+                    note.text = if (e.message?.contains("NO_NETWORK_CONNECTION") == true) {
+                        getString(R.string.credit_check_offline)
+                    } else {
+                        getString(R.string.credit_check_failed, e.message ?: "unknown error")
+                    }
+                    button.isEnabled = true
+                }
+            }
+        }
+    }
+
     private fun populateRegistrationForm() {
         // All demo defaults come from res/values/sample_data.xml via SampleData — one shared
         // identity (the same account the Wallet tokenises). Personal and Business differ only by
@@ -1015,14 +1149,16 @@ class GetPaidActivity : AppCompatActivity() {
         // Show cancel button when waiting for card
         cancelButton.visibility = View.VISIBLE
         
-        // Build payment request (app provides amount, merchant_transaction_reference, currency, tx_type)
-        lastOriginalTransactionReference = "${System.currentTimeMillis()}_${(1000..9999).random()}"
+        // Build the payment request: you supply amount, currency, tx type and — optionally —
+        // your own order id. The **transaction reference is minted by the SDK** and arrives on
+        // the response; an app that invents one is keying its receipts off a value the gateway
+        // has never seen.
+        lastOriginalTransactionReference = ""
         val request = TransactionRequest.Builder(
             amount = currentAmountMinorUnits,
-            merchantTransactionReference = lastOriginalTransactionReference,
             currency = currentPaymentCurrencyCode,
             txType = TransactionRequest.TxType.PURCHASE
-        ).build()
+        ).merchantOrderId(nextSampleOrderId()).build()
         
         // Initiate payment using SDK. makeCardPayment claims SOFTPOS at the point of use;
         // in this combined app the claim is refused only while a wallet payment is
@@ -1160,8 +1296,12 @@ class GetPaidActivity : AppCompatActivity() {
                         response.cardScheme?.let { append("Card Scheme: $it\n") }
                         response.cardExpiry?.let { append("Card Expiry: $it\n") }
                         response.merchantTransactionReference?.let { append("Reference: $it\n") }
+                        response.merchantOrderId?.let { append("Order: $it\n") }
                     }
                 )
+                // The SDK minted the reference — adopt it, since the receipt, the status poll and
+                // the credit watch all key off the value the gateway actually recorded.
+                response.merchantTransactionReference?.let { lastOriginalTransactionReference = it }
                 // The approval said the merchant's bank supports credit confirmation —
                 // the SDK is now polling in the background, so the result page waits: show the
                 // confirming line and let onCreditConfirmation flip it when the answer arrives.

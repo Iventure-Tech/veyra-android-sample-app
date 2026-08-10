@@ -194,6 +194,27 @@
     <string name="wallet_credit_received">Merchant\'s bank has received the funds</string>
     <string name="wallet_credit_unconfirmed">Could not confirm the merchant\'s bank received the funds</string>
     <string name="wallet_credit_bank_reference">Bank reference: %1$s</string>
+    <!--
+      The manual "check status now" beside the SDK's own backoff poll. Shown only on an unresolved
+      row, and the documented route to an answer after the SDK's 30-day give-up.
+      "Still processing" is an answer, not a failure — word it so, and never as "failed".
+    -->
+    <string name="status_check_now">Check status</string>
+    <string name="status_check_in_flight">Checking the payment status…</string>
+    <string name="status_check_still_pending">Still processing — the app will keep checking.</string>
+    <string name="status_check_failed">Could not check right now: %1$s</string>
+    <string name="status_check_offline">No internet connection — connect and try again.</string>
+    <!--
+      The manual "check merchant credit now" beside the SDK's own backoff sweep. Shown only on an
+      approved row whose bank is on the confirmation rail and whose credit is not yet RECEIVED —
+      which includes a row the 30-day sweep gave up on, since the give-up means "we stopped
+      asking", never "the funds were not received". Word it that way and never more strongly.
+    -->
+    <string name="credit_check_now">Check merchant credit</string>
+    <string name="credit_check_in_flight">Checking whether the merchant\'s bank received the funds…</string>
+    <string name="credit_check_still_unconfirmed">Still not confirmed — the app will keep checking.</string>
+    <string name="credit_check_failed">Could not check right now: %1$s</string>
+    <string name="credit_check_offline">No internet connection — connect and try again.</string>
     <string name="entry_method_tap">Tapped</string>
     <string name="entry_method_qr_generated">Generated QR</string>
     <string name="entry_method_qr_scanned">Scanned QR</string>
