@@ -74,7 +74,7 @@ android {
 dependencies {
     // Single entry point: pulls softpos-sdk, wallet-sdk and the shared core artifacts
     // transitively from the Veyra Maven repository (declared in settings.gradle).
-    implementation 'co.veyra:veyra-sdk:1.0.12-SNAPSHOT'
+    implementation 'co.veyra:veyra-sdk:1.0.14'
 
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
