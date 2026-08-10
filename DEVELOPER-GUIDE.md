@@ -1286,15 +1286,16 @@ On iOS the same two signals are delivered by `observePaymentRefusals`; both fire
 
 ### Digitisation & eligibility — `responseCode`
 
-Exactly three values on both eligibility and digitise responses:
+Three values, and a rule for everything else, on both eligibility and digitise responses:
 
 | Code | Meaning | What to do |
 |---|---|---|
 | `"APPROVED"` | Eligible / provisioned and active | Card is ready — show it in the wallet. |
 | `"APPROVE_REQUIRE_AUTH"` | Provisioned, needs activation | Run the activation flow with the returned `activationMethods`. |
 | `"DECLINED"` | Refused | Show `message` (it carries the reason — e.g. the account falls outside your configured provision-context allow-lists). Flow ends. |
+| Any other code (or none) | Not recognised by this SDK version | The token is **discarded** — nothing provisioned, no card added, even if the response carried full token data. Show the error and offer a retry; update the SDK if it persists. |
 
-Digitise failures additionally carry `error.code`: `CONFIG_ERROR` (fix your configuration), `TOKENIZATION_ERROR` (server refused — show message), `UNEXPECTED_ERROR` (retry later).
+Digitise failures additionally carry `error.code`: `CONFIG_ERROR` (fix your configuration), `TOKENIZATION_ERROR` (server refused — show message), `UNEXPECTED_ERROR` (retry later). A discarded token is a `TOKENIZATION_ERROR` whose `message` starts with `UNRECOGNISED_RESPONSE_CODE:` and quotes the raw code — match that prefix if you want to word it differently from a decline. A token whose terms the SDK cannot interpret is never installed on a guess, so the wallet is left exactly as it was and the SDK asks the backend to release the token it minted.
 
 ### Activation — `status` + `failureCode`
 
