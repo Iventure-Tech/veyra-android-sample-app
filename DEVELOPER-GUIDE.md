@@ -998,13 +998,23 @@ sdk.tokenisationService.authenticateForScannedPayment(
 
 #### `payScannedContext`
 
-Pay the verified context with the wallet's **active card**. Requires the fresh authentication above (the SDK enforces one per payment). The delivered outcome — approved or declined — also lands in the card's history.
+Pay the verified context with the wallet's **active card**. Requires the fresh authentication above (the SDK enforces one per payment). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
+
+**Branch on `responseStatus`, not on `approved` or the response code.** The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one.
 
 ```kotlin
 sdk.tokenisationService.payScannedContext(ctx) { result ->
     result.fold(
-        onSuccess = { outcome -> showResult(outcome.approved, outcome.message) },  // approved ⇔ rail code "00"
-        onFailure = { e -> showResult(false, e.message) }   // see Response codes for the refusal strings
+        onSuccess = { outcome ->
+            when (outcome.responseStatus?.uppercase()) {
+                "APPROVED" -> showApproved(outcome.message)
+                "DECLINED", "FAILED" -> showDeclined(outcome.message, outcome.responseStatusReason)
+                // Absent or anything else: not yet known. Say so, and point at history —
+                // never show a refusal for a payment that may still settle.
+                else -> showPending(outcome.responseCode)
+            }
+        },
+        onFailure = { e -> showDeclined(e.message, null) }  // see Response codes for the refusal strings
     )
 }
 ```
@@ -1475,7 +1485,14 @@ data class VerifiedPaymentContext(
     val amountMinorUnits: Long, val currencyNumeric: String,
     val expiryEpochSeconds: Long, /* … */
 )
-data class MpmPushOutcome(val approved: Boolean, val responseCode: String?, val message: String?)
+data class MpmPushOutcome(
+    val responseCode: String?,              // "00", "51", "68"… — always populated, quote it verbatim
+    val responseStatus: String?,            // APPROVED · DECLINED · FAILED · PENDING — what the payment IS
+    val message: String?,
+    val merchantName: String?,              // registered name from the gateway (beats the QR copy)
+    val merchantLocation: String?,          // "city, state" from the gateway; null if not supplied
+    val responseStatusReason: String?,      // stated cause: INSUFFICIENT_FUNDS, NO_RESPONSE_RECEIVED…
+) { val approved: Boolean }                 // derived: responseStatus == "APPROVED"; false for PENDING too
 
 // Show-QR-to-pay:
 data class CpmPaymentQr(

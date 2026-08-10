@@ -63,7 +63,8 @@ class ScanToPayActivity : AppCompatActivity() {
         when (val scan = sdk.tokenisationService.inspectScannedQr(payload)) {
             is MpmScanResult.Verified -> showConfirm(scan.context)
             is MpmScanResult.Rejected -> showResult(
-                success = false,
+                // Refused on-device before anything was sent — no payment exists to be pending.
+                state = ResultState.REFUSED,
                 title = getString(R.string.declined),
                 message = when (scan.reason) {
                     MpmScanResult.Reason.EXPIRED -> getString(R.string.scan_expired)
@@ -109,20 +110,31 @@ class ScanToPayActivity : AppCompatActivity() {
         sdk.tokenisationService.payScannedContext(context) { result ->
             result.fold(
                 onSuccess = { outcome ->
+                    // The push answers with a status, not just a code, and PENDING is a real
+                    // answer — the payer must not be told they were refused when the SDK has
+                    // stored the payment as unresolved and is still polling for it.
+                    val state = paymentState(outcome.responseStatus)
                     showResult(
-                        success = outcome.approved,
+                        state = state,
                         title = getString(
-                            if (outcome.approved) R.string.payment_successful else R.string.declined,
+                            when (state) {
+                                ResultState.APPROVED -> R.string.payment_successful
+                                ResultState.PENDING -> R.string.payment_pending
+                                ResultState.REFUSED -> R.string.declined
+                            },
                         ),
                         message = "Ref: ${context.txRef}\nResponse: ${outcome.responseCode ?: "-"}" +
-                            (outcome.message?.let { "\n$it" } ?: ""),
+                            (outcome.message?.let { "\n$it" } ?: "") +
+                            (if (state == ResultState.PENDING) "\n${getString(R.string.payment_pending_message)}" else ""),
                     )
                 },
                 onFailure = { error ->
                     payButton.isEnabled = true
                     payButton.text = getString(R.string.scan_pay_confirm)
                     showResult(
-                        success = false,
+                        // A pre-dispatch refusal or a transport failure: the SDK recorded nothing,
+                        // so there is no unresolved payment to report as pending.
+                        state = ResultState.REFUSED,
                         title = getString(R.string.declined),
                         message = error.message ?: "Payment failed",
                     )
@@ -131,16 +143,41 @@ class ScanToPayActivity : AppCompatActivity() {
         }
     }
 
-    private fun showResult(success: Boolean, title: String, message: String) {
+    /**
+     * How the result page reads an outcome. Three states, because the gateway states three kinds
+     * of thing: it approved, it refused (declined/failed), or it does not know yet — and the third
+     * is neither of the first two. Anything not stated final is PENDING, which is also exactly what
+     * the SDK stored and keeps polling.
+     */
+    private enum class ResultState { APPROVED, PENDING, REFUSED }
+
+    private fun paymentState(responseStatus: String?): ResultState =
+        when (responseStatus?.trim()?.uppercase()) {
+            "APPROVED" -> ResultState.APPROVED
+            "DECLINED", "FAILED" -> ResultState.REFUSED
+            else -> ResultState.PENDING
+        }
+
+    private fun showResult(state: ResultState, title: String, message: String) {
         findViewById<TextView>(R.id.scanStatusText).visibility = View.GONE
         findViewById<View>(R.id.confirmGroup).visibility = View.GONE
         findViewById<View>(R.id.resultGroup).visibility = View.VISIBLE
         findViewById<ImageView>(R.id.resultIcon).setImageResource(
-            if (success) R.drawable.success_tick_only else R.drawable.error_x_only,
+            when (state) {
+                ResultState.APPROVED -> R.drawable.success_tick_only
+                ResultState.PENDING -> R.drawable.pending_clock_only
+                ResultState.REFUSED -> R.drawable.error_x_only
+            },
         )
         findViewById<TextView>(R.id.resultTitle).apply {
             text = title
-            setTextColor(getColor(if (success) R.color.success_green else R.color.error_red))
+            setTextColor(getColor(
+                when (state) {
+                    ResultState.APPROVED -> R.color.success_green
+                    ResultState.PENDING -> R.color.warning_orange
+                    ResultState.REFUSED -> R.color.error_red
+                },
+            ))
         }
         findViewById<TextView>(R.id.resultMessage).text = message
         // Any terminal outcome holds here, then returns to the main menu, mirroring the SoftPOS
