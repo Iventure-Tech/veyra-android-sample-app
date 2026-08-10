@@ -153,8 +153,15 @@ class TokenizationRequestActivity : AppCompatActivity() {
                             }
                         }
                     },
-                    onFailure = {
-                        binding.bankAutoComplete.setText(getString(R.string.no_banks_found), false)
+                    onFailure = { error ->
+                        // An offline device says so, instead of claiming the account has no banks.
+                        // The wallet SDK's failure idiom is a stable code prefix on the message
+                        // (the same shape as ONLINE_REQUIRED:) — see the developer guide.
+                        val offline = error.message?.contains("NO_NETWORK_CONNECTION") == true
+                        binding.bankAutoComplete.setText(
+                            getString(if (offline) R.string.no_network_connection else R.string.no_banks_found),
+                            false,
+                        )
                         banks = emptyList()
                     }
                 )

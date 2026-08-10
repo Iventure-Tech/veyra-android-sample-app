@@ -13,12 +13,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import co.veyra.bank.R
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import co.veyra.bank.databinding.ActivityTransactionDetailBinding
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.TransactionSummary
 import co.veyra.wallet.sdk.util.CurrencyUtils
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,6 +32,10 @@ class TransactionDetailActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityTransactionDetailBinding
     private var summary: TransactionSummary? = null
+
+    // Refreshes the merchant-credited line while this screen is visible. A UI refresh only — the
+    // SDK's own credit poll is app-scoped and unaffected by this screen's lifetime.
+    private var creditWatchJob: Job? = null
 
     private val requestCameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -65,6 +74,34 @@ class TransactionDetailActivity : AppCompatActivity() {
         super.onResume()
         refreshSummaryFromStorage()
         summary?.let { bindReceiptButtons(it) }
+        startCreditWatch()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        creditWatchJob?.cancel()
+        creditWatchJob = null
+    }
+
+    /**
+     * Re-read the stored row while this screen is up, so a credit confirmation that lands during
+     * the visit appears without navigating away and back.
+     *
+     * This is a **store read**, not a poll: the SDK owns the asking (app-scoped, for up to 30 days)
+     * and keeps going whether or not this screen exists. Which is why cancelling in [onPause] is
+     * safe — it ends a UI refresh, never a wait. Stops itself once the answer is terminal.
+     */
+    private fun startCreditWatch() {
+        creditWatchJob?.cancel()
+        val tx = summary ?: return
+        if (tx.isCreditConfirmationSupported != true || tx.creditConfirmationStatus != null) return
+        creditWatchJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(CREDIT_WATCH_INTERVAL_MS)
+                refreshSummaryFromStorage()
+                if (summary?.creditConfirmationStatus != null) return@launch
+            }
+        }
     }
 
     private fun refreshSummaryFromStorage() {
@@ -122,6 +159,45 @@ class TransactionDetailActivity : AppCompatActivity() {
             binding.rowResponseCode.visibility = View.VISIBLE
             binding.txDetailResponseCode.text = it
         }
+        bindCreditConfirmation(tx)
+    }
+
+    /**
+     * The merchant-credited indicator — did the money actually reach the merchant's bank?
+     *
+     * `isCreditConfirmationSupported` is the whole gate: false or null means the rail does not
+     * exist for this transaction, so we render **nothing at all**. Absence of the line means "we
+     * cannot ask", and must never be shown as "the merchant was not paid" — which is also why the
+     * 30-day give-up reads "could not confirm" rather than anything stronger.
+     *
+     * The SDK owns the polling (app-scoped, exponential backoff, up to 30 days) and there is no
+     * callback: this screen is a renderer over the stored row, re-read in [onResume]. Leaving the
+     * screen changes nothing about the wait.
+     */
+    private fun bindCreditConfirmation(tx: TransactionSummary) {
+        if (tx.isCreditConfirmationSupported != true) {
+            binding.txDetailCreditConfirmation.visibility = View.GONE
+            binding.txDetailCreditDetail.visibility = View.GONE
+            return
+        }
+        val (text, color) = when (tx.creditConfirmationStatus) {
+            "RECEIVED" -> getString(R.string.wallet_credit_received) to Color.parseColor("#4CAF50")
+            "UNABLE_TO_CONFIRM" -> getString(R.string.wallet_credit_unconfirmed) to Color.parseColor("#AAAAAA")
+            // Null = no answer yet, which with the flag true is the in-flight state.
+            else -> getString(R.string.wallet_credit_confirming) to Color.parseColor("#FFA726")
+        }
+        binding.txDetailCreditConfirmation.text = text
+        binding.txDetailCreditConfirmation.setTextColor(color)
+        binding.txDetailCreditConfirmation.visibility = View.VISIBLE
+
+        // The bank's own description of the credit — present on RECEIVED only.
+        val detail = listOfNotNull(
+            tx.creditedAt?.takeIf { it.isNotBlank() },
+            tx.bankReference?.takeIf { it.isNotBlank() }
+                ?.let { getString(R.string.wallet_credit_bank_reference, it) },
+        ).joinToString(" · ")
+        binding.txDetailCreditDetail.text = detail
+        binding.txDetailCreditDetail.visibility = if (detail.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun entryMethodLabel(entryMethod: String?): String? = when (entryMethod) {
@@ -214,6 +290,9 @@ class TransactionDetailActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_SUMMARY = "extra_summary"
+
+        /** How often the visible detail screen re-reads the stored row for a credit answer. */
+        private const val CREDIT_WATCH_INTERVAL_MS = 3000L
 
         fun intent(context: Context, summary: TransactionSummary): Intent =
             Intent(context, TransactionDetailActivity::class.java).putExtra(EXTRA_SUMMARY, summary.toJson())

@@ -298,6 +298,29 @@
                             android:textColor="@android:color/white" />
                     </LinearLayout>
 
+                    <!-- Beneficiary credit confirmation: shown ONLY when the gateway said the
+                         merchant's bank is on the rail. A row that isn't (or a payment that
+                         wasn't approved) shows nothing at all — absence means "we cannot ask",
+                         never "the merchant was not paid". The SDK polls in the background; this
+                         screen only renders the stored row. -->
+                    <TextView
+                        android:id="@+id/txDetailCreditConfirmation"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingTop="14dp"
+                        android:textSize="14sp"
+                        android:visibility="gone" />
+
+                    <!-- Credited time / bank reference — present on RECEIVED only. -->
+                    <TextView
+                        android:id="@+id/txDetailCreditDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingTop="4dp"
+                        android:textSize="12sp"
+                        android:textColor="#777777"
+                        android:visibility="gone" />
+
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

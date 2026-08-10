@@ -10,6 +10,10 @@
     <string name="bank_hint">Select Bank</string>
     <string name="loading_banks">Loading banks…</string>
     <string name="no_banks_found">No banks found for this account</string>
+    <!-- The device has no working connection: distinct from "no banks found", which is an
+         answer from the server. Telling the user to check their connection is the only advice
+         that fixes this one. -->
+    <string name="no_network_connection">No internet connection — reconnect and try again</string>
     <string name="select_bank_first">Please select a bank</string>
     <string name="cant_find_my_bank">Can\'t find my bank</string>
     <string name="user_id_hint">User ID</string>
@@ -184,6 +188,12 @@
     <string name="credit_could_not_be_confirmed">Bank credit could not be confirmed</string>
     <string name="confirming_credit_with_merchant_bank">Confirming credit with merchant bank…</string>
     <string name="tx_detail_response_code">Response code</string>
+    <!-- Wallet beneficiary credit confirmation. The wording says exactly what the rail proves —
+         a credit posted at the merchant's bank — and never phrases the give-up as "not received". -->
+    <string name="wallet_credit_confirming">Confirming the merchant\'s bank has received the funds…</string>
+    <string name="wallet_credit_received">Merchant\'s bank has received the funds</string>
+    <string name="wallet_credit_unconfirmed">Could not confirm the merchant\'s bank received the funds</string>
+    <string name="wallet_credit_bank_reference">Bank reference: %1$s</string>
     <string name="entry_method_tap">Tapped</string>
     <string name="entry_method_qr_generated">Generated QR</string>
     <string name="entry_method_qr_scanned">Scanned QR</string>
