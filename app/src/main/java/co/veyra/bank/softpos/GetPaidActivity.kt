@@ -639,8 +639,10 @@ class GetPaidActivity : AppCompatActivity() {
         pageTransactionDetail.findViewById<TextView>(R.id.detailCreditValue).text = tx.creditConfirmationStatus ?: "—"
         pageTransactionDetail.findViewById<TextView>(R.id.detailTime).text = getString(R.string.time)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTimeValue).text = tx.transactionTime ?: "—"
-        // EMV tag 5F20 as the card presented it (a Veyra token shows e.g. "AFRIGO ****1234").
-        // Null on QR-MPM, where the merchant never reads the card, and on pre-5F20 rows.
+        // The card's display name (a Veyra token shows e.g. "AFRIGO ****1234") — read off EMV tag
+        // 5F20 on a tap, off the scanned QR on CPM, and carried by the gateway on QR-MPM, where
+        // the merchant never touches the card (STORY-93). Null only on pre-5F20 rows and on MPM
+        // sales paid by a wallet older than that release.
         pageTransactionDetail.findViewById<TextView>(R.id.detailCardholder).text = getString(R.string.cardholder)
         pageTransactionDetail.findViewById<TextView>(R.id.detailCardholderValue).text = tx.cardholderName ?: "—"
         // Only show View Receipt for final statuses (approved, declined, failed) - not for pending
@@ -1738,8 +1740,9 @@ class GetPaidActivity : AppCompatActivity() {
                 receiptPageQrImage.setImageBitmap(bitmap)
                 receiptPageQrImage.visibility = View.VISIBLE
                 pageReceipt.findViewById<TextView>(R.id.receiptHint).visibility = View.VISIBLE
-                // The paying card as it presented itself (EMV 5F20) — shown on the merchant's
-                // copy only; absent on QR-MPM, where the merchant never reads the card.
+                // The paying card's display name — shown on the merchant's copy only. Read off
+                // EMV 5F20 on a tap, off the scanned QR on CPM, and carried by the gateway on
+                // QR-MPM (STORY-93), so every rail can name the card that paid.
                 pageReceipt.findViewById<TextView>(R.id.receiptCardholder).apply {
                     text = result.cardholderName
                     visibility = if (result.cardholderName.isNullOrBlank()) View.GONE else View.VISIBLE
