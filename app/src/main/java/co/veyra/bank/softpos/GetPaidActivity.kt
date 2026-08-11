@@ -641,8 +641,8 @@ class GetPaidActivity : AppCompatActivity() {
         pageTransactionDetail.findViewById<TextView>(R.id.detailTimeValue).text = tx.transactionTime ?: "—"
         // The card's display name (a Veyra token shows e.g. "AFRIGO ****1234") — read off EMV tag
         // 5F20 on a tap, off the scanned QR on CPM, and carried by the gateway on QR-MPM, where
-        // the merchant never touches the card (STORY-93). Null only on pre-5F20 rows and on MPM
-        // sales paid by a wallet older than that release.
+        // the merchant never touches the card. Null only on pre-5F20 rows and on MPM sales paid
+        // by a wallet older than the release that added it.
         pageTransactionDetail.findViewById<TextView>(R.id.detailCardholder).text = getString(R.string.cardholder)
         pageTransactionDetail.findViewById<TextView>(R.id.detailCardholderValue).text = tx.cardholderName ?: "—"
         // Only show View Receipt for final statuses (approved, declined, failed) - not for pending
@@ -1286,12 +1286,12 @@ class GetPaidActivity : AppCompatActivity() {
         // Hide View Receipt when showing new result
         viewReceiptButton.visibility = View.GONE
         
-        // STORY-89: branch on the outcome the SDK was TOLD, not on a code we recognise. The old
+        // Branch on the outcome the SDK was TOLD, not on a code we recognise. The old
         // `when (response.transactionCode)` had to know "99" meant pending — a code the SDK invented
         // because it had nowhere to put a status — and read anything unfamiliar as a failure, so a
         // still-settling `09`/`68`/`96` looked like a refusal to the cashier.
         val outcome = response.responseStatus?.name ?: when (response.transactionCode) {
-            // Rows/responses from a build older than STORY-89 keep working.
+            // Rows/responses from an older SDK build, which carried no status, keep working.
             "00" -> "APPROVED"
             "06", "09", "68", "96", "99" -> "PENDING"
             "91", "25" -> "FAILED"
@@ -1742,7 +1742,7 @@ class GetPaidActivity : AppCompatActivity() {
                 pageReceipt.findViewById<TextView>(R.id.receiptHint).visibility = View.VISIBLE
                 // The paying card's display name — shown on the merchant's copy only. Read off
                 // EMV 5F20 on a tap, off the scanned QR on CPM, and carried by the gateway on
-                // QR-MPM (STORY-93), so every rail can name the card that paid.
+                // QR-MPM, so every rail can name the card that paid.
                 pageReceipt.findViewById<TextView>(R.id.receiptCardholder).apply {
                     text = result.cardholderName
                     visibility = if (result.cardholderName.isNullOrBlank()) View.GONE else View.VISIBLE
