@@ -65,6 +65,27 @@
                 android:layout_marginBottom="16dp"
                 android:fontFamily="monospace" />
 
+            <!-- The merchant's own order id. Hidden entirely when the sale carried none,
+                 rather than drawn as an empty row. -->
+            <TextView
+                android:id="@+id/detailOrderId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#AAAAAA"
+                android:visibility="gone"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/detailOrderIdValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textColor="@android:color/white"
+                android:visibility="gone"
+                android:layout_marginBottom="16dp"
+                android:fontFamily="monospace" />
+
             <TextView
                 android:id="@+id/detailTransactionId"
                 android:layout_width="match_parent"

@@ -150,6 +150,7 @@
     <string name="transaction_detail">Transaction Detail</string>
     <string name="no_transactions">No transactions yet</string>
     <string name="reference">Reference</string>
+    <string name="order_id">Your order ID</string>
     <string name="transaction_id">Transaction ID</string>
     <string name="cardholder">Cardholder</string>
     <string name="paid_via">Paid Via</string>

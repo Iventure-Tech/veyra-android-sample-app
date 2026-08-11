@@ -607,6 +607,15 @@ class GetPaidActivity : AppCompatActivity() {
         val tx = sdk.transactionService.getTransaction(ref) ?: return
         pageTransactionDetail.findViewById<TextView>(R.id.detailReference).text = getString(R.string.reference)
         pageTransactionDetail.findViewById<TextView>(R.id.detailReferenceValue).text = tx.merchantTransactionReference
+        // Your own order id, from the stored row. Shown only when the sale carried one — a blank
+        // "Your order ID" row on every legacy sale would read as data loss rather than absence.
+        val orderIdLabel = pageTransactionDetail.findViewById<TextView>(R.id.detailOrderId)
+        val orderIdValue = pageTransactionDetail.findViewById<TextView>(R.id.detailOrderIdValue)
+        val orderId = tx.merchantOrderId?.takeIf { it.isNotBlank() }
+        orderIdLabel.text = getString(R.string.order_id)
+        orderIdValue.text = orderId
+        orderIdLabel.visibility = if (orderId == null) View.GONE else View.VISIBLE
+        orderIdValue.visibility = if (orderId == null) View.GONE else View.VISIBLE
         pageTransactionDetail.findViewById<TextView>(R.id.detailTransactionId).text = getString(R.string.transaction_id)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTransactionIdValue).text = tx.transactionId ?: "—"
         // Which rail took the payment (Tap / QR / Scan) — every rail records its own, so a QR
@@ -967,6 +976,9 @@ class GetPaidActivity : AppCompatActivity() {
             // EXPIRED state up to one poll interval later.
             val created = client.createContextPayment(
                 merchantId, currentAmountMinorUnits, currentPaymentCurrencyCode,
+                // The merchant-presented rail carries your order id too, so all three rails
+                // (tap, CPM charge, MPM) tie a sale back to the same POS order.
+                merchantOrderId = nextSampleOrderId(),
                 onExpired = {
                     qrImage.visibility = View.GONE
                     placeholder.visibility = View.VISIBLE

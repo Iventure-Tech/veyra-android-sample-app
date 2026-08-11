@@ -523,6 +523,7 @@ Poll `contextStatus(txRef)` on a short interval (the sample uses 2.5 s). States:
 val client = ContextPaymentClient(context, Environment.TEST, clientId, clientSecret)
 val created = client.createContextPayment(
     merchantId, amountMinorUnits, "566",
+    merchantOrderId = "ORDER-42",            // optional: YOUR order id (1.0.15+), never a lookup key
     onExpired = { blankQr(); showHint("This payment code has expired — start a new payment") },
 ) ?: run { showError("Could not create payment QR"); return }
 
@@ -578,7 +579,7 @@ lifecycleScope.launch {
 
 `charge(scanned, merchantOrderId = …)` returns `PaymentResponse`: `responseCode` (`"00"` approved), `transactionId`, `merchantStatus`, `merchantTransactionReference` (**the SDK-minted reference — fetch the receipt with `generateTransactionReceipt(it)`**) and `merchantOrderId` echoed back. A transport failure throws and records nothing.
 
-> The signature still accepts a positional `merchantTransactionReference` for source compatibility, but **the value is ignored** — the SDK mints the reference. Pass `merchantOrderId` by name, as above.
+> **1.0.15+:** the old `charge(scanned, merchantTransactionReference, …)` shape no longer compiles — it is retained only as an `ERROR`-level deprecation that tells you what to do. That is deliberate: had the inert parameter simply been deleted, `charge(scanned, myReference)` would have kept compiling and bound your reference to `merchantOrderId` (both are `String?`), turning a value the SDK ignored into a stored, echoed, portal-visible order id. Drop the argument and pass `merchantOrderId` by name, as above.
 
 ---
 
