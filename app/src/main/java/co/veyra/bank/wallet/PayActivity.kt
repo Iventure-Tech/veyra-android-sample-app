@@ -64,6 +64,40 @@ class PayActivity : AppCompatActivity() {
         setupSettingsButton()
         setupFab()
         loadCards()
+        observeCardState()
+    }
+
+    /**
+     * The SDK tells us when a card's stored truth changes, instead of us finding out on the next
+     * read.
+     *
+     * Registered here, once, rather than per card page: the issuer can suspend a card while this
+     * screen is *already up*, which is the case the observers exist for — without them the card
+     * stays drawn as usable until something makes the list reload, and the customer taps a dead
+     * card.
+     *
+     * `loadCards()` in [onResume] deliberately stays: these are notifications, not the source of
+     * truth, and they do not replay — an app that was backgrounded when the status changed learns
+     * it from the store on the way back in.
+     */
+    private fun observeCardState() {
+        co.veyra.wallet.sdk.api.TokenLifecycleObserver.onTokenStatusChanged { change ->
+            // Already on the main thread (the SDK hops for us), so touching views is safe here.
+            Log.d(TAG, "card ${change.tokenUniqueReference} -> ${change.rawStatus} (canPay=${change.canPay})")
+            loadCards()
+            if (!change.canPay) {
+                Toast.makeText(
+                    this,
+                    "A card was ${change.rawStatus.lowercase()} by your bank",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+        // The keys ran out (or came back) — redraw so the card's requires-online state is current.
+        co.veyra.wallet.sdk.api.WalletKeyStateObserver.onKeyStateChanged { state ->
+            Log.d(TAG, "card ${state.tokenUniqueReference} requiresOnline=${state.requiresOnline}")
+            loadCards()
+        }
     }
 
     // ── ViewPager ──────────────────────────────────────────────────────────────
@@ -163,7 +197,8 @@ class PayActivity : AppCompatActivity() {
             startActivity(android.content.Intent(this, ScanToPayActivity::class.java))
         }
         // Show-QR-to-pay (CPM rail): the merchant scans the customer's QR. Amount
-        // first (dynamic CPM — it is bound inside the QR's cryptogram), then CDCVM, then render.
+        // first (dynamic CPM — it is bound inside the QR's cryptogram); the SDK asks for the
+        // CDCVM itself as part of rendering.
         binding.showQrFab.setOnClickListener { promptAmountForPaymentQr() }
     }
 
@@ -183,34 +218,24 @@ class PayActivity : AppCompatActivity() {
                 if (naira == null || naira <= 0.0) {
                     Toast.makeText(this, "Enter a valid amount", Toast.LENGTH_SHORT).show()
                 } else {
-                    authenticateThenShowQr((naira * 100).toLong())
+                    showPaymentQr((naira * 100).toLong())
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun authenticateThenShowQr(amountMinorUnits: Long) {
+    private fun showPaymentQr(amountMinorUnits: Long) {
         val amountText = "₦%,.2f".format(amountMinorUnits / 100.0)
-        // Each render consumes one authentication (SDK-enforced) — regenerate re-authenticates.
-        sdk.tokenisationService.authenticateForScannedPayment(
-            activity = this,
-            title = "Show QR to pay",
-            subtitle = "Pay $amountText by QR",
-        ) { auth ->
-            auth.fold(
-                onSuccess = {
-                    // The SDK owns the expiry timer; it fires onExpired when the QR lapses.
-                    sdk.tokenisationService.showQrToPay(
-                        amountMinorUnits,
-                        onExpired = { onQrExpired?.invoke() },
-                    ) { result ->
-                        result.fold(
-                            onSuccess = { qr -> showPaymentQrDialog(qr, amountText) },
-                            onFailure = { e -> Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() },
-                        )
-                    }
-                },
+        // No authentication call — showQrToPay raises the OS sheet itself, once per render (a
+        // regenerate after expiry asks again). The SDK owns the expiry timer and fires onExpired
+        // when the QR lapses.
+        sdk.tokenisationService.showQrToPay(
+            amountMinorUnits,
+            onExpired = { onQrExpired?.invoke() },
+        ) { result ->
+            result.fold(
+                onSuccess = { qr -> showPaymentQrDialog(qr, amountText) },
                 onFailure = { e -> Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() },
             )
         }
@@ -248,7 +273,7 @@ class PayActivity : AppCompatActivity() {
             .setTitle("Show to merchant — $amountText")
             .setView(container)
             .setNegativeButton("Done", null)
-            .setNeutralButton("New QR") { _, _ -> authenticateThenShowQr(qr.amountMinorUnits) }
+            .setNeutralButton("New QR") { _, _ -> showPaymentQr(qr.amountMinorUnits) }
             .create()
         dialog.show()
         // The SDK owns the expiry timer (showQrToPay(onExpired=…)); it fires the blank
@@ -596,6 +621,11 @@ class PayActivity : AppCompatActivity() {
         super.onDestroy()
         pendingObserverRefs.forEach { sdk.tokenisationService.stopActivationObserver(it) }
         pendingObserverRefs.clear()
+        // These hold a reference to this Activity, so clear them with it. Registration is
+        // single-listener ("last registration wins"), so a recreated Activity replaces rather than
+        // stacks — but a destroyed one must not be called back into.
+        co.veyra.wallet.sdk.api.TokenLifecycleObserver.clear()
+        co.veyra.wallet.sdk.api.WalletKeyStateObserver.clear()
     }
 
     private fun navigateToTokenizationRequest() {

@@ -87,20 +87,10 @@ class ScanToPayActivity : AppCompatActivity() {
 
     private fun pay() {
         val context = verified ?: return
-        // CDCVM: the OS biometric sheet is the authorization gesture — bound to the
-        // merchant + amount in the subtitle. Cancel/failure stays on this confirm screen.
-        sdk.tokenisationService.authenticateForScannedPayment(
-            activity = this,
-            title = getString(R.string.scan_pay_auth_title),
-            subtitle = getString(
-                R.string.scan_pay_auth_subtitle,
-                CurrencyUtils.formatAmount(context.amountMinorUnits, context.currencyNumeric),
-                context.merchantName,
-            ),
-        ) { auth ->
-            if (auth.isSuccess) pushPayment(context)
-            // else: stay on the confirm screen; the system sheet already told the user.
-        }
+        // No authentication call here. payScannedContext raises the OS biometric sheet itself —
+        // bound to the merchant and amount — and a cancelled or failed gesture comes back as an
+        // AUTH_* failure on the same callback, leaving the customer on this confirm screen.
+        pushPayment(context)
     }
 
     private fun pushPayment(context: VerifiedPaymentContext) {

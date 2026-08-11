@@ -1067,21 +1067,47 @@ when (val scan = sdk.tokenisationService.inspectScannedQr(payload)) {
 
 The verified context carries `merchantName`, `merchantCity`, `amount` (display string), `amountMinorUnits`, `currencyNumeric`, `txRef`, `expiryEpochSeconds` — render these on the confirm screen; the customer never keys an amount.
 
-#### `authenticateForScannedPayment`
+#### Device authentication (CDCVM) — the SDK asks, you don't
 
-Biometric confirmation (system prompt; passcode/credential fallback allowed by default). On success the SDK records a **fresh, single-use** authentication — exactly one payment (or one QR render) consumes it. Put the merchant and amount in the prompt so the gesture is visibly bound to what it authorises.
+**There is no authentication method to call.** `payScannedContext` and `showQrToPay` raise the
+system `BiometricPrompt` sheet themselves — fingerprint or face, falling back to the device's own
+PIN/pattern/password in the same sheet — before they build the payment. You cannot build a QR
+payment flow that skips it, and you cannot forget to sequence it.
+
+The SDK composes the prompt copy from the payment it is about to make, so the gesture is visibly
+bound to what it authorises: *"Confirm payment / Pay ₦5,000.00 to Ada's Store"*. It asks **once per
+payment attempt** — a retry, or regenerating an expired QR, asks again.
+
+Three failures can come back on the same callback, and they need different UI:
+
+| Code in the message | What happened | What to do |
+|---|---|---|
+| `AUTH_CANCELLED` | The customer dismissed the sheet | Stay put and let them try again — nothing was sent |
+| `AUTH_FAILED` | They tried and the device rejected it | Offer a retry |
+| `AUTH_UNAVAILABLE` | This device has **no** enrolled biometric *and* **no** screen lock | Send them to system settings; a retry can never succeed |
+
+The sheet appears only **after** the card checks pass, so a card that is out of keys, over its limit
+or not active is refused without spending the customer's gesture.
+
+**Changing the wording or the language.** Set these once on `VeyraWalletSdkConfig` — `{amount}` and
+`{merchant}` are substituted:
 
 ```kotlin
-sdk.tokenisationService.authenticateForScannedPayment(
-    activity = this,
-    title = "Confirm payment",
-    subtitle = "Pay ${CurrencyUtils.formatAmount(ctx.amountMinorUnits, ctx.currencyNumeric)} to ${ctx.merchantName}",
-) { auth -> if (auth.isSuccess) pushPayment(ctx) /* else stay on the confirm screen */ }
+VeyraWalletSdkConfig.builder(/* … */)
+    .cdcvmPayPrompt(title = "Authorise payment", subtitle = "Send {amount} to {merchant}")
+    .cdcvmShowQrPrompt(title = "Show payment code", subtitle = "Code for {amount}")
+    .cdcvmAllowDeviceCredential(true)   // false = biometric only, no PIN fallback
+    .build()
 ```
+
+> **Tap-to-pay is different.** A contactless tap derives CDCVM from the device already being
+> unlocked with a secure lock screen — there is no moment to show a sheet while the phone is held
+> against the reader. This section is about the two QR rails only.
 
 #### `payScannedContext`
 
-Pay the verified context with the wallet's **active card**. Requires the fresh authentication above (the SDK enforces one per payment). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
+Pay the verified context with the wallet's **active card**. The SDK raises the authentication sheet
+itself first (above). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
 
 **Branch on `responseStatus`, not on `approved` or the response code.** The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one.
 
@@ -1115,21 +1141,13 @@ The customer keys nothing at the till: your app asks the amount first (the merch
 | `amountMinorUnits` | **Mandatory** | The merchant-stated amount — bound into the QR's cryptogram; the merchant's scan charges exactly this or fails. |
 | `onExpired` | Optional | Fired **once, on the main thread**, when the QR lapses — blank or replace the code (a dimmed QR is still scannable). A new render supersedes the watch; `cancelQrExpiry()` stops it (call on screen teardown). |
 
-Requires a fresh `authenticateForScannedPayment` first — **one authentication per QR**; regenerating after expiry needs a new one.
+The SDK raises the authentication sheet itself — **one gesture per QR**; regenerating after expiry is a fresh payment attempt and asks again.
 
 ```kotlin
-sdk.tokenisationService.authenticateForScannedPayment(activity = this, title = "Show QR to pay",
-    subtitle = "Pay $amountText by QR") { auth ->
-    auth.fold(
-        onSuccess = {
-            sdk.tokenisationService.showQrToPay(amountMinorUnits, onExpired = { blankQr() }) { result ->
-                result.fold(
-                    onSuccess = { qr -> renderQr(qr.payload); pollForSettlement(qr) },
-                    onFailure = { e -> showError(e.message) }
-                )
-            }
-        },
-        onFailure = { e -> showError(e.message) }
+sdk.tokenisationService.showQrToPay(amountMinorUnits, onExpired = { blankQr() }) { result ->
+    result.fold(
+        onSuccess = { qr -> renderQr(qr.payload); pollForSettlement(qr) },
+        onFailure = { e -> showError(e.message) }   // includes AUTH_CANCELLED / AUTH_FAILED / AUTH_UNAVAILABLE
     )
 }
 // dialog/screen teardown:
@@ -1165,6 +1183,33 @@ val transactions = sdk.tokenisationService.getTransactions(tokenUniqueReference,
 ```
 
 `TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`, plus the five beneficiary-credit fields below.
+
+##### `onTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
+
+A wallet payment that gets no immediate answer is stored and polled by the SDK until the backend
+settles it — seconds, or days. Unresolved rows are visible in history, so the customer can be
+looking at the row at the moment it settles. This is how your app hears it without polling:
+
+```kotlin
+WalletTransactionResolvedObserver.onTransactionResolved { resolution ->
+    // resolution.transactionHash        — which payment (match your row on this)
+    // resolution.tokenUniqueReference   — the card that paid
+    // resolution.status                 — APPROVED / DECLINED / FAILED (never PENDING)
+    // resolution.responseCode           — the wire literal, for receipts and support
+    // resolution.reason                 — e.g. INSUFFICIENT_FUNDS — display, never parse
+    // resolution.amountInMinorUnit, resolution.merchantName
+}
+```
+
+**This is not the same channel as the merchant SDK's `TransactionResolvedObserver`**, and the two
+are not interchangeable: that one is the *merchant's* side of a payment and identifies a sale by the
+reference the merchant's own app supplied — a value a wallet never sees. The wallet keys on
+`transactionHash`.
+
+Fires only on a genuine `PENDING` → final transition: a poll that leaves the row pending, and a
+later write that backfills merchant details onto an already-final row, both wake nothing. Register
+once at start-up, no replay (read `getTransactions` on appear), last registration wins, delivered
+on the main thread.
 
 ##### Merchant credit confirmation (wallet side)
 
@@ -1306,7 +1351,9 @@ Two kinds of surface, marked throughout:
 | `ONLINE_REQUIRED:` | `error.message?.contains("ONLINE_REQUIRED") == true` |
 | `AMOUNT_EXCEEDS_CARD_LIMIT:` | `error.message?.contains("AMOUNT_EXCEEDS_CARD_LIMIT") == true` |
 | `TOKEN_NOT_ACTIVE:` | `error.message?.contains("TOKEN_NOT_ACTIVE") == true` |
-| `CDCVM required:` | You skipped `authenticateForScannedPayment` (one authentication per payment / per QR render). Authenticate, then retry. |
+| `AUTH_CANCELLED:` | The customer dismissed the authentication sheet the SDK raised. Nothing was sent — let them start the payment again. |
+| `AUTH_FAILED:` | Authentication was attempted and did not succeed. Offer a retry. |
+| `AUTH_UNAVAILABLE:` | The device has no enrolled biometric and no screen lock, so no authentication is possible. Send the user to system settings; retrying cannot help. |
 | `Authentication cancelled:` / `Authentication failed:` | Stay on the confirm screen; let the user retry. |
 | `No active card to pay with (or card unsupported on the QR rail)` | The wallet is empty, or no card is selected — send the user to add/select a card. A card added before QR payments were provisioned must be removed and re-added. |
 | `This card can't show a payment QR — no active card, or it was added before QR payments (re-add it)` | Same treatment, from `showQrToPay`. |
@@ -1315,7 +1362,7 @@ Two kinds of surface, marked throughout:
 
 Terminal outcomes only — unsupported cards and lost contact **never** produce one of these; they fire the re-tap hints and the reader stays armed.
 
-> **Read `response_status`, not the code (STORY-98 / ISSUE-140).** Every payment outcome now carries a
+> **Read `response_status`, not the code.** Every payment outcome now carries a
 > triple: `response_code` (what the wire said), `response_status` (**what to do**) and
 > `response_status_reason` (why). Branch on `response_status` only — `APPROVED`, `DECLINED`, `FAILED`
 > or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
@@ -1383,7 +1430,11 @@ Four things worth knowing before you rely on it:
   yourself from one registration.
 - **The payment callback still fires exactly once**, possibly with `PENDING`. The resolution arrives on
   this separate channel; the two are not alternatives.
-- It is delivered on the main thread, like the payment callback.
+- It is delivered on the main thread, like the payment callback — you can update UI directly from
+  it. (Before 1.0.18 this held only under React Native: the native Android path did not hop, so a
+  host that updated views straight from the callback could fail intermittently. From 1.0.18 it
+  hops for every host, and the same guarantee covers `onCreditConfirmation` and the state
+  observers documented below.)
 
 The same channel exists on the other platforms, with the same semantics: iOS calls
 `VeyraSoftPOS.shared.transactions.onTransactionResolved { … }` (with
@@ -1501,9 +1552,91 @@ The wallet syncs each card's server status automatically (foreground sweeps and 
 | `SUSPENDED` / `EXPIRED` / `PENDING_ACTIVATION` | Card refuses to pay (`TOKEN_NOT_ACTIVE:`); `Token.isActive` flips false | Render the card as unavailable. **Not sticky** — a later sync unfreezes it automatically. |
 | `DEACTIVATED` | The card and all its on-device material are wiped when your app calls `deactivateToken`, and it disappears from `getTokens()` | Refresh your card list; the user re-adds the card if needed. |
 
+#### `onTokenStatusChanged` — the SDK tells you when a card's status changes
+
+Reading the table above on your next render is not always soon enough. The sweep can apply
+`SUSPENDED` while the customer is *looking at* a card screen — so the card stays drawn as usable,
+they tap, and it fails at the terminal. Subscribe and you are told the moment it is applied:
+
+```kotlin
+TokenLifecycleObserver.onTokenStatusChanged { change ->
+    // change.tokenUniqueReference — which card (it fires for any stored card)
+    // change.status               — ACTIVE / SUSPENDED / EXPIRED / DEACTIVATED /
+    //                               PENDING_ACTIVATION / UNKNOWN
+    // change.rawStatus            — the literal as stored; log this one
+    // change.canPay               — whether the card can pay right now
+    // change.previousRawStatus    — what it held before, or null if this is its first status
+}
+```
+
+- **Branch on `canPay`, not on `status`.** It is the same predicate the SDK's own payment gates
+  use, so a status added to the backend after your build shipped is correctly reported as *not*
+  payable instead of falling through a `when` that has never heard of it.
+- **Register once, at start-up** — not per card screen. The card that matters is the one no screen
+  is showing.
+- **It does not replay.** If your app was not running when the issuer suspended the card, nothing
+  is queued — read `getTokens()` at start-up. The observer is a convenience over the store, not a
+  delivery guarantee, so keep the read path.
+- **Only genuine changes fire.** A sweep that re-applies the status a card already had wakes
+  nothing, and `ACTIVE` → `active` is not a change.
+- **Last registration wins.** Calling it again *replaces* the previous observer;
+  `TokenLifecycleObserver.clear()` stops it. No subscription token, no listener list.
+- Delivered on the main thread.
+
+The same channel exists on the other platforms: iOS
+`VeyraWallet.shared.tokenisation.observeTokenLifecycle { … }`, React Native
+`wallet.onTokenStatusChanged(listener)`.
+
+#### `onKeyStateChanged` — a card ran out of payment keys, or got them back
+
+`Token.requiresOnline` (below) tells you a card cannot pay offline until the SDK refreshes its
+keys. This is the push version of that same value:
+
+```kotlin
+WalletKeyStateObserver.onKeyStateChanged { state ->
+    // state.tokenUniqueReference, state.requiresOnline
+}
+```
+
+`requiresOnline` here is **the same value `getTokens()` reports** — the SDK reads one function for
+both, so a callback can never contradict the list you are about to draw.
+
+**Read this limit before you word your UI.** It fires from the two moments the SDK is actually
+executing: a payment consuming a key, and a refresh delivering new ones. Payment keys *also* expire
+by clock, which happens with no SDK code running at all — **nothing fires for that**, and such a
+card simply reads as `requiresOnline` on your next `getTokens()`. So keep reading the card list
+when a screen appears; do not present this as live coverage of every case. The first evaluation of
+a card after launch is a silent baseline, for the same reason (at launch you are reading the list
+anyway).
+
+Observation only: there is deliberately no API to trigger a key refresh — the SDK owns when keys
+are replenished.
+
 ### Merchant statuses
 
 `ACTIVE` / `INACTIVE` / `SUSPENDED` / `DEACTIVATED` (on registration results, status responses and every payment response's `merchantStatus`). Payments are refused client-side unless the merchant is `ACTIVE` — gate your get-paid entry on `isRegistered` + `isMerchantActive()` and call `refreshStatus()` while awaiting activation.
+
+#### `onMerchantStatusChanged` — the SDK tells you when it changes
+
+```kotlin
+MerchantStatusObserver.onMerchantStatusChanged { change ->
+    // change.merchantId, change.status, change.previousStatus
+    if (!change.canAcceptPayments) disableGetPaid()
+}
+```
+
+Two uses: stop offering to take payments the moment a merchant is deactivated mid-session, rather
+than at the next screen load; and catch the **activation** moment after registration without
+polling for it yourself.
+
+**Branch on `canAcceptPayments`, not on `status`** — it is the same reading the client-side payment
+gate uses, so you cannot end up more permissive than the gate that will refuse the sale. Anything
+that is not `ACTIVE`, including a status newer than your build, is `false`.
+
+Only genuine changes fire (a poll re-applying the same status wakes nothing), registration is
+single-listener with last-registration-wins, there is no replay, and delivery is on the main
+thread. Same channel on iOS (`VeyraSoftPOS.shared.merchant.onMerchantStatusChanged { … }`) and
+React Native (`merchant.onMerchantStatusChanged(listener)`).
 
 ### History status vocabularies
 
@@ -1557,7 +1690,9 @@ onFailure = { e ->
     }
 }
 ```
-| `CDCVM required:` | Wallet QR payments | Yes | Call `authenticateForScannedPayment` first — one authentication per payment / per QR render. |
+| `AUTH_CANCELLED:` | Wallet QR payments | Yes | The customer dismissed the sheet the SDK raised. Nothing was sent; offer the payment again. |
+| `AUTH_FAILED:` | Wallet QR payments | Yes | Authentication did not succeed. Offer a retry. |
+| `AUTH_UNAVAILABLE:` | Wallet QR payments | No | No biometric and no screen lock on this device — send the user to system settings. |
 | Digitise `"DECLINED"` | Add card | Per `message` | Show the server's message; the flow ends. Common cause: the account falls outside your provision-context allow-lists. |
 | Activation `"FAILURE"` | Activation | Per `failureCode` | Branch on the typed [`failureCode`](#activation--status--failurecode): resend on `CODE_EXPIRED`, cool-down on `CODE_REQUEST_RATE_LIMITED`, stop entirely on `ACTIVATION_LOCKED` ("contact your issuer"). |
 | `SdkModeException` | Combined apps | Yes (after mode settles) | The other mode's payment is mid-flight — prompt to finish/cancel it. |
@@ -1869,7 +2004,7 @@ Camera scan ──► inspectScannedQr
                     └─ verified ──► confirm screen (merchant + the QR's amount)
                                         │ user confirms
                                         ▼
-                          authenticateForScannedPayment (biometric)
+                          SDK raises the biometric sheet itself
                                         ├─ failed/cancelled ──► stay on confirm screen
                                         ▼ success (single-use)
                               payScannedContext
