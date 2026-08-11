@@ -595,7 +595,10 @@ val tx = sdk.transactionService.getTransaction(reference)           // or null
 // TransactionInfo: merchantTransactionReference, amount (minor units), transactionStatus
 // (APPROVED / DECLINED / PENDING / FAILED), responseCode, responseStatusReason (the stated
 // cause, e.g. "INSUFFICIENT_FUNDS" — display, never parse), transactionTime, currencyCode,
-// transactionId, cardholderName (EMV 5F20 as the card presented it — null on QR-MPM),
+// transactionId, merchantOrderId (your own order/basket id as supplied on the charge — your
+// reconciliation key back to your POS/till, null on sales that carried none; display only,
+// never a lookup key: receipts and status refreshes key off merchantTransactionReference),
+// cardholderName (EMV 5F20 as the card presented it — null on QR-MPM),
 // rail ("TAP" / "QR_MPM" / "QR_CPM"), railLabel ("Tap" / "QR" / "Scan"),
 // creditTransactionId (the merchant-bank credit's identifier — null unless approved and
 // supported), isCreditConfirmationSupported (true ⇒ the SDK is polling the confirmation rail
@@ -1030,6 +1033,20 @@ sdk.tokenisationService.setActiveToken(
 
 Tap callbacks arrive on an SDK thread — wrap UI updates in `runOnUiThread`. Guard with `hasProvisioningData(tokenId)` if you keep display records for cards whose material may be gone.
 
+#### `getActiveToken`
+
+Read the currently selected card, or `null` when none is selected — the counterpart to
+`setActiveToken`, and the way a screen answers "which card would pay right now?" without inferring
+it from a list.
+
+```kotlin
+val active: Token? = sdk.tokenisationService.getActiveToken()
+```
+
+Synchronous, and a read of stored state rather than a network call. It returns `null` both when no
+card has ever been selected and when the selected card has since been removed, so treat `null` as
+"prompt the customer to choose" rather than as an error.
+
 #### `deactivateToken`
 
 `deactivateToken(ref) { Result<TokenStatusUpdateResponse> }` deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active.
@@ -1182,7 +1199,7 @@ The card's full local history across every rail (tap, scanned QR, shown QR), mos
 val transactions = sdk.tokenisationService.getTransactions(tokenUniqueReference, 50)
 ```
 
-`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`, plus the five beneficiary-credit fields below.
+`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderId` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, tap and generated-QR rows learn it from the status poll, so `null` on a still-open row means "not learned yet", not "no order id"; **display only, never a lookup key** — receipts and status refreshes still key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
 ##### `onTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
 
@@ -1225,7 +1242,7 @@ a cue to wait.
 |---|---|
 | `isCreditConfirmationSupported: Boolean?` | **The gate.** `true` ⇒ the merchant's bank is on the confirmation rail, the SDK is polling, and you should render the credit line **and may offer the manual check**. `false`/`null` ⇒ there is nothing to ask — render **no** credit UI for that transaction, and **do not call `refreshCreditConfirmation`**. |
 | `creditConfirmationStatus: String?` | `null` = no answer yet (with the gate `true`, that is the "confirming…" state) · `"RECEIVED"` = terminal, the funds are confirmed in the merchant's account · `"UNABLE_TO_CONFIRM"` = the 30-day sweep stopped asking. |
-| `creditTransactionId: String?` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — display/support only; never pass it back to the SDK. |
+| `creditTransactionId: String?` | The credit leg's id (NIP session id inter-bank, batch reference intra-bank) — **what you quote to a bank** when the merchant says the money never arrived. Display/support only; never pass it back to the SDK, and render it only where the gate above is `true` — a bare id with no confirmation line reads as a promise. |
 | `creditedAt: String?` | When the beneficiary bank posted the credit. `"RECEIVED"` only. |
 | `bankReference: String?` | The beneficiary bank's own reference for the credit. `"RECEIVED"` only. |
 
@@ -1766,6 +1783,7 @@ data class TransactionSummary(
     val atEpochMillis: Long?,               // (QR rows)
     val merchantTransactionReference: String?,
     val merchantId: String?,
+    val merchantOrderId: String?,           // the merchant's own order id; display only, never a key
     // Beneficiary credit confirmation — settlement only, never the payment outcome.
     val creditTransactionId: String?,            // credit-leg id; display/support only
     val isCreditConfirmationSupported: Boolean?, // THE GATE: true ⇒ SDK is polling, render the line
@@ -1867,6 +1885,7 @@ data class TransactionInfo(                 // history row
     val responseStatusReason: String?,      // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse
     val transactionTime: String?,           // "yyyy-MM-dd HH:mm:ss"
     val currencyCode: String?, val transactionId: String?,
+    val merchantOrderId: String?,           // your own order id as supplied on the charge; display only
     val cardholderName: String?,            // EMV 5F20, e.g. "AFRIGO ****1234"; null on QR-MPM
     val rail: String,                       // "TAP" / "QR_MPM" / "QR_CPM" — use for logic
     val railLabel: String,                  // "Tap" / "QR" / "Scan" — use for display

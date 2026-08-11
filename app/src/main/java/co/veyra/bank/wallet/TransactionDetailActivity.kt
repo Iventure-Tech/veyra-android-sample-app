@@ -139,6 +139,10 @@ class TransactionDetailActivity : AppCompatActivity() {
             binding.txDetailCurrency.text = it
         }
 
+        // The merchant's own order id — always a row, em-dash when absent: a tap/CPM row learns
+        // the value from the status poll, so absence often just means "not learned yet".
+        binding.txDetailOrderId.text = tx.merchantOrderId?.takeIf { it.isNotBlank() } ?: "—"
+
         // How this wallet paid — legacy rows (null) show nothing rather than a guess.
         entryMethodLabel(tx.entryMethod)?.let {
             binding.rowEntryMethod.visibility = View.VISIBLE
@@ -241,6 +245,7 @@ class TransactionDetailActivity : AppCompatActivity() {
         if (tx.isCreditConfirmationSupported != true) {
             binding.txDetailCreditConfirmation.visibility = View.GONE
             binding.txDetailCreditDetail.visibility = View.GONE
+            binding.txDetailCreditTransactionId.visibility = View.GONE
             return
         }
         val (text, color) = when (tx.creditConfirmationStatus) {
@@ -261,6 +266,14 @@ class TransactionDetailActivity : AppCompatActivity() {
         ).joinToString(" · ")
         binding.txDetailCreditDetail.text = detail
         binding.txDetailCreditDetail.visibility = if (detail.isEmpty()) View.GONE else View.VISIBLE
+
+        // The credit leg's own id — what a bank is quoted when a merchant says the money never
+        // arrived. Same gate as the status line above; em-dash rather than a blank.
+        binding.txDetailCreditTransactionId.text = getString(
+            R.string.wallet_credit_transaction_id,
+            tx.creditTransactionId?.takeIf { it.isNotBlank() } ?: "—",
+        )
+        binding.txDetailCreditTransactionId.visibility = View.VISIBLE
 
         bindCreditCheckButton(tx)
     }

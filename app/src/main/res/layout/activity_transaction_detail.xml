@@ -250,6 +250,31 @@
                             android:textColor="@android:color/white" />
                     </LinearLayout>
 
+                    <!-- The merchant's own order id. Always a row — an em-dash, never a blank or a
+                         missing line: a tap/CPM row learns the value from the status poll, so
+                         absence often just means "not learned yet". -->
+                    <LinearLayout
+                        android:id="@+id/rowOrderId"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingTop="14dp"
+                        android:paddingBottom="14dp">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/tx_detail_order_id"
+                            android:textSize="14sp"
+                            android:textColor="#777777" />
+                        <TextView
+                            android:id="@+id/txDetailOrderId"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="@android:color/white" />
+                    </LinearLayout>
+
                     <!-- Outcome cause + response code, verbatim from the resolving rail;
                          absent fields (legacy/unresolved rows) show nothing rather than a guess. -->
                     <LinearLayout
@@ -341,6 +366,18 @@
                     <!-- Credited time / bank reference — present on RECEIVED only. -->
                     <TextView
                         android:id="@+id/txDetailCreditDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingTop="4dp"
+                        android:textSize="12sp"
+                        android:textColor="#777777"
+                        android:visibility="gone" />
+
+                    <!-- The credit leg's own id — what a bank is quoted when a merchant says the
+                         money never arrived. Rendered only under the same gate as the credit
+                         status above: where there is no rail there is nothing to show. -->
+                    <TextView
+                        android:id="@+id/txDetailCreditTransactionId"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:paddingTop="4dp"

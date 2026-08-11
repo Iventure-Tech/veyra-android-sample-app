@@ -200,6 +200,27 @@
                 android:textColor="@android:color/white"
                 android:layout_marginBottom="16dp" />
 
+            <!-- The credit leg's own id — what you quote to a bank when chasing the settlement.
+                 Shown only where the confirmation rail applies (same gate as "Merchant credit"). -->
+            <TextView
+                android:id="@+id/detailCreditTransactionId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="#AAAAAA"
+                android:visibility="gone"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/detailCreditTransactionIdValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textColor="@android:color/white"
+                android:fontFamily="monospace"
+                android:visibility="gone"
+                android:layout_marginBottom="16dp" />
+
             <!--
               "Check status" — the manual ask beside the SDK's own 30-day background poll. Shown
               ONLY while the row is PENDING; it disappears the moment the payment resolves, because

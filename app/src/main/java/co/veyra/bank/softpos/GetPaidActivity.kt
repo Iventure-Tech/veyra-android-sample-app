@@ -607,15 +607,15 @@ class GetPaidActivity : AppCompatActivity() {
         val tx = sdk.transactionService.getTransaction(ref) ?: return
         pageTransactionDetail.findViewById<TextView>(R.id.detailReference).text = getString(R.string.reference)
         pageTransactionDetail.findViewById<TextView>(R.id.detailReferenceValue).text = tx.merchantTransactionReference
-        // Your own order id, from the stored row. Shown only when the sale carried one — a blank
-        // "Your order ID" row on every legacy sale would read as data loss rather than absence.
+        // Your own order id, from the stored row. Always a row, em-dash when the sale carried
+        // none — the same null rendering the wallet's detail uses. (This used to hide the row on
+        // legacy sales; superseded so the two sides of a payment show the same shape of detail.)
         val orderIdLabel = pageTransactionDetail.findViewById<TextView>(R.id.detailOrderId)
         val orderIdValue = pageTransactionDetail.findViewById<TextView>(R.id.detailOrderIdValue)
-        val orderId = tx.merchantOrderId?.takeIf { it.isNotBlank() }
         orderIdLabel.text = getString(R.string.order_id)
-        orderIdValue.text = orderId
-        orderIdLabel.visibility = if (orderId == null) View.GONE else View.VISIBLE
-        orderIdValue.visibility = if (orderId == null) View.GONE else View.VISIBLE
+        orderIdValue.text = tx.merchantOrderId?.takeIf { it.isNotBlank() } ?: "—"
+        orderIdLabel.visibility = View.VISIBLE
+        orderIdValue.visibility = View.VISIBLE
         pageTransactionDetail.findViewById<TextView>(R.id.detailTransactionId).text = getString(R.string.transaction_id)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTransactionIdValue).text = tx.transactionId ?: "—"
         // Which rail took the payment (Tap / QR / Scan) — every rail records its own, so a QR
@@ -637,6 +637,16 @@ class GetPaidActivity : AppCompatActivity() {
         // alarming "not received"; RECEIVED/UNABLE_TO_CONFIRM are the only stored values.
         pageTransactionDetail.findViewById<TextView>(R.id.detailCredit).text = getString(R.string.tx_detail_merchant_credit)
         pageTransactionDetail.findViewById<TextView>(R.id.detailCreditValue).text = tx.creditConfirmationStatus ?: "—"
+        // The credit leg's own id — what you quote to a bank when chasing the settlement. Shown
+        // only where the confirmation rail applies at all: with no rail there is nothing to
+        // quote, and a bare id under no "Merchant credit" line would read as a promise.
+        val creditIdLabel = pageTransactionDetail.findViewById<TextView>(R.id.detailCreditTransactionId)
+        val creditIdValue = pageTransactionDetail.findViewById<TextView>(R.id.detailCreditTransactionIdValue)
+        val onCreditRail = tx.isCreditConfirmationSupported == true
+        creditIdLabel.text = getString(R.string.tx_detail_credit_transaction_id)
+        creditIdValue.text = tx.creditTransactionId?.takeIf { it.isNotBlank() } ?: "—"
+        creditIdLabel.visibility = if (onCreditRail) View.VISIBLE else View.GONE
+        creditIdValue.visibility = if (onCreditRail) View.VISIBLE else View.GONE
         pageTransactionDetail.findViewById<TextView>(R.id.detailTime).text = getString(R.string.time)
         pageTransactionDetail.findViewById<TextView>(R.id.detailTimeValue).text = tx.transactionTime ?: "—"
         // The card's display name (a Veyra token shows e.g. "AFRIGO ****1234") — read off EMV tag

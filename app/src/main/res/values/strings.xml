@@ -183,8 +183,12 @@
     <!-- Wallet transaction detail -->
     <string name="tx_detail_paid_by">Paid by</string>
     <string name="tx_detail_location">Location</string>
+    <string name="tx_detail_order_id">Merchant order ID</string>
     <string name="tx_detail_reason">Reason</string>
     <string name="tx_detail_merchant_credit">Merchant credit</string>
+    <!-- The credit leg's own id — one label on both the wallet and merchant details. -->
+    <string name="tx_detail_credit_transaction_id">Credit transaction ID</string>
+    <string name="wallet_credit_transaction_id">Credit transaction ID: %1$s</string>
     <string name="funds_received_by_merchant_bank">Funds received by merchant bank</string>
     <string name="credit_could_not_be_confirmed">Bank credit could not be confirmed</string>
     <string name="confirming_credit_with_merchant_bank">Confirming credit with merchant bank…</string>
