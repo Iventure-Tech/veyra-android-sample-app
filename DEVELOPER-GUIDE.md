@@ -228,9 +228,16 @@ val sdk = VeyraWalletSdk.initialize(context, walletConfig, activity = this)
 
 ### `VeyraSoftPosSdkConfig` (SoftPOS)
 
+> **Breaking change:** `builder(...)` now requires a `paymentAppProviderId` — the globally
+> unique identifier issued to your organisation at onboarding, the same value your wallet
+> configuration carries. The gateway links every merchant you register to it and resolves the
+> acquirer id and MCC from it, so `acquirerId` no longer exists anywhere on the SoftPOS
+> surface: not on this builder, and not on the registration form data.
+
 ```kotlin
 val softposConfig = VeyraSoftPosSdkConfig.builder(
     Environment.TEST,
+    paymentAppProviderId = "your-payment-app-provider-id",
     clientId = "your-client-id",
     clientSecret = "your-client-secret"
 )
@@ -243,16 +250,16 @@ val softposConfig = VeyraSoftPosSdkConfig.builder(
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `Environment.TEST` or `Environment.LIVE`. Determines the server host; set once, applies to all SDK calls. |
+| `paymentAppProviderId` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet config's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. Must not be blank. |
 | `clientId` | **Mandatory** | OAuth client ID issued by Veyra. |
 | `clientSecret` | **Mandatory** | OAuth client secret. |
 | `enableNfc(Boolean)` | Optional | Arm the NFC reader capability at init. Default `true`. |
 | `merchantId(String)` | Optional | Merchant ID override (same note). |
 | `merchantNameAndLocation(String)` | Optional | Merchant name/location override for receipts and EMV data (same note). |
-| `acquirerId(String)` | Optional | Acquirer ID override (same note). |
 | `merchantCategoryCode(String)` | Optional | 4-digit MCC override (same note). |
 | `countryCode(String)` | Optional | ISO 3166-1 numeric, 4-digit zero-padded (e.g. `"0566"` for Nigeria) override (same note). |
 
-After merchant registration the terminal/merchant values come from the stored merchant profile — a typical app sets none of the optional overrides.
+After merchant registration the terminal/merchant values come from the stored merchant profile — a typical app sets none of the optional overrides. The acquirer id is learned from the gateway's registration/update/status responses (resolved from your payment app provider) and stored with the merchant; it is never app-supplied.
 
 ### `VeyraWalletSdkConfig` (Wallet)
 
@@ -337,7 +344,7 @@ A device must have a **registered, active merchant** before it can accept paymen
 
 #### `registerPersonalMerchant` / `registerBusinessMerchant`
 
-Register the merchant on this device. Personal merchants require a BVN; business merchants require a CAC number. All other fields are mandatory for both.
+Register the merchant on this device. Personal merchants require a BVN; business merchants require a CAC number — and may supply a BVN too (the account holder behind a business has one). All other fields are mandatory for both, except `walletAccountId`.
 
 ```kotlin
 val data = MerchantRegistrationData(
@@ -349,9 +356,9 @@ val data = MerchantRegistrationData(
     countryCode = "0566",                  // ISO 3166-1 numeric, 4 digits
     accountNumber = "1234567890",          // settlement NUBAN account
     institutionCode = "000000",            // from getBanks
-    acquirerId = "ACQ001",
-    bvn = "12345678901",                   // personal merchants only
-    cacNumber = null                       // business merchants only
+    bvn = "12345678901",                   // required for personal; optional for business
+    cacNumber = null,                      // business merchants only
+    walletAccountId = null                 // optional
 )
 sdk.merchantService.registerPersonalMerchant(data) { response ->
     if (response.success) {
@@ -375,11 +382,11 @@ sdk.merchantService.registerPersonalMerchant(data) { response ->
 | `countryCode` | **Mandatory** | ISO 3166-1 numeric, 4-digit zero-padded (`"0566"`). |
 | `accountNumber` | **Mandatory** | Settlement NUBAN account number. |
 | `institutionCode` | **Mandatory** | Settlement bank's institution code (from `getBanks`). |
-| `acquirerId` | **Mandatory** | Acquirer ID from your scheme onboarding. |
-| `bvn` | Personal only | 11-digit BVN. |
+| `bvn` | Personal: mandatory; Business: optional | 11-digit BVN. A business's account holder has one too — send it when you have it. |
 | `cacNumber` | Business only | CAC registration number. |
+| `walletAccountId` | Optional | The merchant's wallet account id; stored verbatim by the gateway and echoed on responses. |
 
-**`MerchantRegistrationResponse` fields:** `success: Boolean`, `merchantId`, `terminalId`, `merchantCategoryCode`, `countryCode`, `acquirerId`, `merchantStatus`, `message`. Validation problems come back as `success = false` with a message — nothing throws.
+**`MerchantRegistrationResponse` fields:** `success: Boolean`, `merchantId`, `terminalId`, `merchantCategoryCode`, `countryCode`, `acquirerId` (resolved by the gateway from your payment app provider — the SDK stores it and uses it on payments), `paymentAppProviderId`, `walletAccountId`, `merchantStatus`, `message`. Validation problems come back as `success = false` with a message — nothing throws.
 
 ---
 
@@ -418,14 +425,16 @@ sdk.merchantService.getBanks { banks ->
 
 #### `updateMerchant`
 
-Update the merchant profile (terminal ID and MCC are preserved). All parameters are required except `addressLine2`.
+Update the merchant profile (terminal ID, MCC and the gateway-resolved acquirer id are preserved; the response re-states them and the SDK refreshes its stored copy). All parameters are required except `addressLine2`, `walletAccountId` and `bvn`.
 
 ```kotlin
 sdk.merchantService.updateMerchant(
     merchantName = "Ada's Store", emailAddress = "ada@example.com",
     phoneNumber = "+2348012345678", addressLine1 = "12 Marina Road",
     city = "Lagos", state = "Lagos", countryCode = "0566",
-    accountNumber = "1234567890", institutionCode = "000000"
+    accountNumber = "1234567890", institutionCode = "000000",
+    walletAccountId = null,   // optional: stored verbatim by the gateway when supplied
+    bvn = null                // optional: how an already-registered business supplies its BVN
 ) { response ->
     if (response == null) showError("Update failed")
     // else response.merchantStatus
@@ -443,10 +452,9 @@ Arm the reader for one sale and wait for the customer's tap. **Non-terminal even
 ```kotlin
 val request = TransactionRequest.Builder(
     amount = 32500L,                                   // MINOR units: ₦325.00
-    currency = "0566",                                 // ISO 4217 numeric, 4 digits
-    txType = TransactionRequest.TxType.PURCHASE
+    currency = "0566"                                  // ISO 4217 numeric, 4 digits
 ).merchantOrderId("ORDER-42")                          // optional: YOUR order id, not a key
- .build()
+ .build()                                              // txType defaults to PURCHASE
 
 // The transaction reference is minted by the SDK — read it back off the response
 // (`response.merchantTransactionReference`) and key your receipts and lookups off that.
@@ -484,7 +492,7 @@ try {
 |-----------|----------|-------------|
 | `amount` | **Mandatory** | **Minor units** (`Long`), e.g. ₦325.00 → `32500L`. Must be > 0. |
 | `currency` | **Mandatory** | ISO 4217 numeric, 3–4 digits (padded to 4, e.g. `"0566"`). |
-| `txType` | **Mandatory** | `TxType.PURCHASE`, `REFUND`, `CASH_ADVANCE`, `RECURRING_PURCHASE`, `PRE_AUTH_COMPLETION`, `OTHER`. |
+| `txType` | Optional | `TxType.PURCHASE`, `REFUND`, `CASH_ADVANCE`, `RECURRING_PURCHASE`, `PRE_AUTH_COMPLETION`, `OTHER`. **Defaults to `PURCHASE`** when omitted — pass a value only for a non-purchase transaction. |
 | `.merchantOrderId(String?)` | Optional | **Your** order / basket / invoice id. Stored and echoed by the gateway and shown on the transaction detail and receipt. Never validated for uniqueness and never used as a lookup key, so the same value may appear on two payments — which is exactly what links the attempts of a retried sale. |
 | `.performed3ds(Boolean)` | Optional | Whether your app performed 3-D Secure. Default `false`. |
 
@@ -1856,11 +1864,13 @@ data class StoredMerchantData(
     val merchantName: String, val emailAddress: String, val phoneNumber: String,
     val addressLine1: String, val addressLine2: String, val city: String, val state: String,
     val countryCode: String, val bvn: String?, val cacNumber: String?,
-    val accountNumber: String, val institutionCode: String, val acquirerId: String,
+    val accountNumber: String, val institutionCode: String,
+    val acquirerId: String,                 // backend-assigned (resolved from your payment app provider)
     val merchantCategoryCode: String,       // backend-assigned
     val terminalId: String,                 // backend-assigned
     val merchantStatus: String?,            // last known ("ACTIVE", …)
-    val currencyCode: String?
+    val currencyCode: String?,
+    val walletAccountId: String?            // as stored by the gateway, if supplied
 )
 
 data class TransactionResponse(             // tap terminal outcome (makeCardPayment callback)

@@ -133,7 +133,7 @@ class GetPaidActivity : AppCompatActivity() {
     private lateinit var accountNumberEditText: TextInputEditText
     private lateinit var bankDropdown: AutoCompleteTextView
     private lateinit var bankLoadingProgress: ProgressBar
-    private lateinit var acquirerIdEditText: TextInputEditText
+    private lateinit var walletAccountIdEditText: TextInputEditText
     private lateinit var bvnEditText: TextInputEditText
     private lateinit var cacNumberEditText: TextInputEditText
     private lateinit var bvnLayout: com.google.android.material.textfield.TextInputLayout
@@ -409,7 +409,7 @@ class GetPaidActivity : AppCompatActivity() {
         accountNumberEditText = pageMerchantRegistration.findViewById(R.id.accountNumberEditText)
         bankDropdown = pageMerchantRegistration.findViewById(R.id.bankDropdown)
         bankLoadingProgress = pageMerchantRegistration.findViewById(R.id.bankLoadingProgress)
-        acquirerIdEditText = pageMerchantRegistration.findViewById(R.id.acquirerIdEditText)
+        walletAccountIdEditText = pageMerchantRegistration.findViewById(R.id.walletAccountIdEditText)
         registerButton = pageMerchantRegistration.findViewById(R.id.registerButton)
         registerProgressBar = pageMerchantRegistration.findViewById(R.id.registerProgressBar)
         
@@ -796,7 +796,7 @@ class GetPaidActivity : AppCompatActivity() {
         stateEditText.setText(d.state)
         countryCodeEditText.setText(d.countryCode)
         accountNumberEditText.setText(d.accountNumber)
-        acquirerIdEditText.setText(d.acquirerId)
+        walletAccountIdEditText.setText(d.walletAccountId)
         bvnEditText.setText(d.bvn)
         cacNumberEditText.setText(d.cacNumber) // null for a personal merchant → clears the field
 
@@ -1180,8 +1180,7 @@ class GetPaidActivity : AppCompatActivity() {
         lastOriginalTransactionReference = ""
         val request = TransactionRequest.Builder(
             amount = currentAmountMinorUnits,
-            currency = currentPaymentCurrencyCode,
-            txType = TransactionRequest.TxType.PURCHASE
+            currency = currentPaymentCurrencyCode
         ).merchantOrderId(nextSampleOrderId()).build()
         
         // Initiate payment using SDK. makeCardPayment claims SOFTPOS at the point of use;
@@ -1502,13 +1501,13 @@ class GetPaidActivity : AppCompatActivity() {
         val countryCode = countryCodeEditText.text.toString().trim()
         val accountNumber = accountNumberEditText.text.toString().trim()
         val institutionCode = selectedRegistrationBankCode
-        val acquirerId = acquirerIdEditText.text.toString().trim()
+        val walletAccountId = walletAccountIdEditText.text.toString().trim()
         val bvn = bvnEditText.text.toString().trim()
         val cacNumber = cacNumberEditText.text.toString().trim()
 
         val countryCodePadded = validateMerchantForm(
             institutionCode = institutionCode,
-            requiredFields = listOf(merchantName, email, phone, addressLine1, city, state, countryCode, accountNumber, acquirerId),
+            requiredFields = listOf(merchantName, email, phone, addressLine1, city, state, countryCode, accountNumber),
             countryCode = countryCode,
         ) ?: return
 
@@ -1533,9 +1532,11 @@ class GetPaidActivity : AppCompatActivity() {
             countryCode = countryCodePadded,
             accountNumber = accountNumber,
             institutionCode = institutionCode,
-            acquirerId = acquirerId,
-            bvn = if (merchantTypeIsPersonal) bvn else null,
-            cacNumber = if (!merchantTypeIsPersonal) cacNumber else null
+            // The BVN is submitted for BOTH merchant types — a business's account holder has
+            // one too (optional for business, required for personal; validated above).
+            bvn = bvn.takeIf { it.isNotBlank() },
+            cacNumber = if (!merchantTypeIsPersonal) cacNumber else null,
+            walletAccountId = walletAccountId.takeIf { it.isNotBlank() }
         )
 
         // Personal vs business differ only in which SDK call is made — the result handling is shared.

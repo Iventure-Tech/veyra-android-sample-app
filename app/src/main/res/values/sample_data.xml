@@ -24,8 +24,6 @@
     <string name="sample_email">ada.demo@example.com</string>
     <string name="sample_wallet_account_id">ada.demo@example.com</string>
     <string name="sample_mobile_number">2348000000000</string>
-
-    <string name="sample_acquirer_id">ACQ001</string>
     <string name="sample_address_line1">20 Campbell Street</string>
     <string name="sample_address_line2">Lagos Island</string>
     <string name="sample_city">Lagos</string>

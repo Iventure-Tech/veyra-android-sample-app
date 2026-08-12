@@ -27,6 +27,11 @@ object VeyraBank {
     fun softposConfig(context: Context): VeyraSoftPosSdkConfig =
         VeyraSoftPosSdkConfig.builder(
             co.veyra.common.Environment.TEST,
+            // The provider credential the gateway resolves the acquirer id and MCC from —
+            // the same identifier the wallet config carries.
+            paymentAppProviderId = requireNotNull(context.getString(R.string.payment_app_provider_id).takeIf { it.isNotBlank() }) {
+                "veyra.paymentAppProviderId must be set in veyra.properties (copy veyra.properties.example)"
+            },
             clientId = context.getString(R.string.client_id),
             clientSecret = context.getString(R.string.client_secret)
         )

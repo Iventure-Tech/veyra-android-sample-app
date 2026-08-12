@@ -32,7 +32,6 @@ sealed class Merchant {
     abstract val emailAddress: String
     abstract val walletAccountId: String
     abstract val mobileNumber: String
-    abstract val acquirerId: String
     abstract val addressLine1: String
     abstract val addressLine2: String
     abstract val city: String
@@ -59,7 +58,6 @@ data class PersonalMerchant(
     override val emailAddress: String,
     override val walletAccountId: String,
     override val mobileNumber: String,
-    override val acquirerId: String,
     override val addressLine1: String,
     override val addressLine2: String,
     override val city: String,
@@ -76,7 +74,6 @@ data class BusinessMerchant(
     override val emailAddress: String,
     override val walletAccountId: String,
     override val mobileNumber: String,
-    override val acquirerId: String,
     override val addressLine1: String,
     override val addressLine2: String,
     override val city: String,
@@ -104,7 +101,6 @@ object SampleData {
             emailAddress = getString(R.string.sample_email),
             walletAccountId = getString(R.string.sample_wallet_account_id),
             mobileNumber = getString(R.string.sample_mobile_number),
-            acquirerId = getString(R.string.sample_acquirer_id),
             addressLine1 = getString(R.string.sample_address_line1),
             addressLine2 = getString(R.string.sample_address_line2),
             city = getString(R.string.sample_city),
@@ -123,7 +119,6 @@ object SampleData {
             emailAddress = emailAddress,
             walletAccountId = walletAccountId,
             mobileNumber = mobileNumber,
-            acquirerId = acquirerId,
             addressLine1 = addressLine1,
             addressLine2 = addressLine2,
             city = city,
