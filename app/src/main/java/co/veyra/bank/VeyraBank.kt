@@ -50,7 +50,6 @@ object VeyraBank {
             co.veyra.common.Environment.TEST,
             paymentAppProviderId,
             tokenRequestorId,
-            allowedCountryCodes = resources.getStringArray(R.array.allowed_country_codes).filter { it.isNotBlank() },
             clientId = context.getString(R.string.client_id).takeIf { it.isNotBlank() },
             clientSecret = context.getString(R.string.client_secret).takeIf { it.isNotBlank() }
         )
@@ -60,7 +59,6 @@ object VeyraBank {
             )
             .allowedAcquirerIds(resources.getStringArray(R.array.allowed_acquirer_ids).filter { it.isNotBlank() })
             .allowedMerchantIds(resources.getStringArray(R.array.allowed_merchant_ids).filter { it.isNotBlank() })
-            .allowedMccs(resources.getStringArray(R.array.allowed_mccs).filter { it.isNotBlank() })
             .enableNfc(true)
             .build()
     }

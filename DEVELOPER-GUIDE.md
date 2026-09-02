@@ -268,7 +268,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
     Environment.TEST,
     paymentAppProviderId = "your-provider-id",
     tokenRequestorId = "50100000001",
-    allowedCountryCodes = listOf("0566"),      // ISO 3166-1 numeric, 4 digits
     clientId = "your-client-id",
     clientSecret = "your-client-secret"
 )
@@ -276,7 +275,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
     .walletProviderTokenizationRecommendationStandardVersion("1.0")
     .allowedAcquirerIds(listOf("ACQ001"))
     .allowedMerchantIds(listOf("MERCHANT01"))
-    .allowedMccs(listOf("5411"))
     .enableNfc(true)
     .build()
 ```
@@ -288,14 +286,14 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `environment` | **Mandatory** | `Environment.TEST` or `LIVE`. |
 | `paymentAppProviderId` | **Mandatory** | Your payment-app provider identifier, assigned by Veyra. Sent in every tokenisation and eligibility request. |
 | `tokenRequestorId` | **Mandatory** | Token requestor ID assigned by the scheme. |
-| `allowedCountryCodes` | **Mandatory** (may be empty) | Provision context: ISO 3166-1 **numeric, 4-digit** codes (`"0566"` Nigeria, `"0826"` UK) — never alpha codes. |
 | `clientId` / `clientSecret` | **Mandatory** for TEST/LIVE | OAuth client credentials — `initialize` throws if missing. |
 | `enableNfc(Boolean)` | Optional | Enable NFC/HCE at init. Default `true`. |
 | `appVersion(String)` | Optional | App version sent in digitise requests (falls back to your package version). |
 | `walletProviderTokenizationRecommendationStandardVersion(String)` | **Required before digitising** | Standard version for the tokenisation recommendation (e.g. `"1.0"`). Digitise throws if unset. |
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
-| `allowedMccs(List<String>)` | Optional | Provision context: merchant category codes to restrict to. |
+
+> **Breaking change:** `allowedCountryCodes` (a mandatory builder argument) and `allowedMccs` have been **removed**. The SDK now declares the provisioning domain itself — country, currency and merchant category code are fixed platform values, identical on Android, iOS and React Native, and can no longer be supplied or overridden. Delete the argument and the `.allowedMccs(...)` call; `allowedAcquirerIds` and `allowedMerchantIds` are unchanged.
 
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 

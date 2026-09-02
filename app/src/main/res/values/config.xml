@@ -15,12 +15,6 @@
     <string-array name="allowed_merchant_ids">
         <item>MERCHANT01</item>
     </string-array>
-    <string-array name="allowed_country_codes">
-        <item>0566</item>
-    </string-array>
-    <string-array name="allowed_mccs">
-        <item>5411</item>
-    </string-array>
 
     <!-- supports_3ds for provision_channel_context -->
     <bool name="supports_3ds">false</bool>
