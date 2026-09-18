@@ -1588,6 +1588,7 @@ call can hand you.
 | `refreshTransactionStatus(...)` / `reconcilePendingTransactions()` (wallet) | the updated history row | As above | Poll answers `09`, `09` + escalated, `25`, or the settled outcome — same rules as the merchant poll |
 | `digitizeAccount(...)` / `checkAccountEligibility(...)` | `responseCode`, `responseStatus`, `responseStatusReason`, `status`, `error.code` | `status`: `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** `"APPROVED"`, `"APPROVE_REQUIRE_AUTH"`, `"DECLINED"` — and anything else means the token is **discarded**. `error.code` is `CONFIG_ERROR` / `TOKENIZATION_ERROR` / `UNEXPECTED_ERROR`. The issuer's cause arrives in `message` — see [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) |
 | `requestActivationCode(...)` / `activate(...)` | `status`, `failureCode`, `attemptsRemaining` | `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** the typed `failureCode` (`CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `CODE_REQUEST_RATE_LIMITED`, `NO_PENDING_ACTIVATION`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, `UNKNOWN`) |
+| `observePaymentRefusals(tur, ...)` / the same handlers via `setActiveToken` | `RequireOnlineEvent` / `AmountExceedCardLimitEvent` | — | — Refused **before anything was sent**, so there is no response code by design. Fires on all three rails (`TAP`, `CPM_QR`, `QR_MPM`). Per card: a handler hears only its own token |
 | `getTokens()` / `getToken(...)` / `onTokenStatusChanged` | `Token.status`, `.isActive`, `.requiresOnline`; the observer's `canPay` | `ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `EXPIRED` / `DEACTIVATED` / `UNKNOWN` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
 | `inspectScannedQr(payload)` | `MpmScanResult` | `Verified` / `Rejected` | **A different vocabulary:** `MALFORMED`, `MISSING_SIGNATURE`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `EXPIRED`. Every rejection ends the flow — no payment was attempted |
 
@@ -1713,7 +1714,7 @@ When the customer's phone is tapped on a terminal, the wallet's `onTransactionCo
 
 The SDK also vibrates the phone itself — once on success, twice on decline/error — so your UI feedback is supplementary.
 
-### Refused payments — `onRequireOnline` and `onAmountExceedCardLimit` (1.0.12+)
+### Refused payments — `onRequireOnline` and `onAmountExceedCardLimit`
 
 A payment can be refused **before anything is sent**, when the card's payment keys cannot carry the amount. This is not a terminal decline and has no response code: on the tap rail it ends the tap at the protocol level, so `onTransactionCompleted` fires with `"DECLINED"` and these callbacks tell you *why*.
 
@@ -1730,9 +1731,25 @@ Both carry `amountMinorUnits` (name the amount that failed) and `rail` (`"TAP"`,
 
 **These describe the payment, not the card.** `Token.requiresOnline` answers a different question — "can this card pay *anything* offline?" — and stays `false` for a card that can still make smaller payments. Show a message about the payment that just failed; don't grey the card out on the strength of one refused amount.
 
-On iOS the same two signals are delivered by `observePaymentRefusals`; both fire from the QR rails only, since iOS has no tap-to-pay. On React Native they arrive as `requireOnline` / `amountExceedCardLimit` phases of the `walletTap` event.
+**Refusals are per card on every platform.** A handler registered for one card never hears about another's. iOS registers with `observePaymentRefusals(forTokenUniqueReference:…)` and React Native with `wallet.onPaymentRefusal(tokenUniqueReference, listener)`; the ownership model is the same on all three, so an integration reads the same wherever it is ported. The rails differ, not the API: iOS fires from the QR rails only, having no tap-to-pay.
 
-**One difference worth knowing before you port an Android integration to iOS.** On Android these two refusals are **per token**: you pass them to the card you are arming, so different cards can carry different handlers at the same time. On iOS and React Native they are a **single SDK-wide registration** — `observePaymentRefusals` replaces whatever was registered before, and the refusal's `tokenUniqueReference` tells you which card it was about. Nothing is lost (the payload identifies the card either way), but code that relies on "this handler only ever hears about *this* card" has to start filtering on `tokenUniqueReference` when it moves to iOS. It is the same single-listener rule the deferred-answer observers follow.
+**A refusal the SDK could not attribute to a card** — `tokenUniqueReference` is null — reaches **every** registered handler rather than none. The payer was refused either way, and telling nobody because the card could not be named is the one outcome worth avoiding.
+
+#### Registering refusals without arming a card — `observePaymentRefusals`
+
+`setActiveToken` takes these handlers for the card it arms, which is the common case. When you want them for a card you are **not** arming — a wallet list that reflects refusals across several cards, say — register them on their own:
+
+```kotlin
+sdk.tokenisationService.observePaymentRefusals(
+    tokenUniqueReference = card.tokenUniqueReference!!,
+    onRequireOnline = { event -> promptToConnect(event.amountMinorUnits) },
+    onAmountExceedCardLimit = { event -> offerSmallerAmount(event.cardLimitMinorUnits) },
+)
+// when the screen goes:
+sdk.tokenisationService.stopObservingPaymentRefusals(card.tokenUniqueReference!!)
+```
+
+Registering the same card again replaces its handlers; other cards are unaffected. This is the same registration `setActiveToken` performs internally, so the two cannot disagree.
 
 ### QR context lifecycle — `contextStatus().state`
 
