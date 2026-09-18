@@ -81,7 +81,7 @@ private class ReceiptsAdapter(
         val receipt = receipts[position]
         holder.itemView.setOnClickListener { onItemClick(receipt) }
         holder.merchant.text = receipt.merchantName
-        val amountCents = receipt.totalAmount.toIntOrNull() ?: 0
+        val amountCents = receipt.totalAmount.toLongOrNull() ?: 0L
         val currencyCode = receipt.currency?.filter { it.isDigit() }?.take(4)?.takeIf { it.length in 3..4 }
         holder.amount.text = if (amountCents > 0) {
             CurrencyUtils.formatAmountWithCode(amountCents, currencyCode)

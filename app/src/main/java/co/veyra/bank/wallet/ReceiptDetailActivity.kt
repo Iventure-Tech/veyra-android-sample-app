@@ -56,7 +56,7 @@ class ReceiptDetailActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.receiptType).text = r.transactionType
 
         // Amount
-        val amountCents = r.totalAmount.toIntOrNull() ?: 0
+        val amountCents = r.totalAmount.toLongOrNull() ?: 0L
         val currencyCode = r.currency?.filter { it.isDigit() }?.take(4)?.takeIf { it.length in 3..4 }
         findViewById<TextView>(R.id.receiptAmount).text = if (amountCents > 0) {
             CurrencyUtils.formatAmountWithCode(amountCents, currencyCode)
