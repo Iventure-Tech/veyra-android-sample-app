@@ -133,7 +133,6 @@ class GetPaidActivity : AppCompatActivity() {
     private lateinit var accountNumberEditText: TextInputEditText
     private lateinit var bankDropdown: AutoCompleteTextView
     private lateinit var bankLoadingProgress: ProgressBar
-    private lateinit var walletAccountIdEditText: TextInputEditText
     private lateinit var bvnEditText: TextInputEditText
     private lateinit var cacNumberEditText: TextInputEditText
     private lateinit var bvnLayout: com.google.android.material.textfield.TextInputLayout
@@ -409,7 +408,6 @@ class GetPaidActivity : AppCompatActivity() {
         accountNumberEditText = pageMerchantRegistration.findViewById(R.id.accountNumberEditText)
         bankDropdown = pageMerchantRegistration.findViewById(R.id.bankDropdown)
         bankLoadingProgress = pageMerchantRegistration.findViewById(R.id.bankLoadingProgress)
-        walletAccountIdEditText = pageMerchantRegistration.findViewById(R.id.walletAccountIdEditText)
         registerButton = pageMerchantRegistration.findViewById(R.id.registerButton)
         registerProgressBar = pageMerchantRegistration.findViewById(R.id.registerProgressBar)
         
@@ -796,7 +794,6 @@ class GetPaidActivity : AppCompatActivity() {
         stateEditText.setText(d.state)
         countryCodeEditText.setText(d.countryCode)
         accountNumberEditText.setText(d.accountNumber)
-        walletAccountIdEditText.setText(d.walletAccountId)
         bvnEditText.setText(d.bvn)
         cacNumberEditText.setText(d.cacNumber) // null for a personal merchant → clears the field
 
@@ -1501,7 +1498,6 @@ class GetPaidActivity : AppCompatActivity() {
         val countryCode = countryCodeEditText.text.toString().trim()
         val accountNumber = accountNumberEditText.text.toString().trim()
         val institutionCode = selectedRegistrationBankCode
-        val walletAccountId = walletAccountIdEditText.text.toString().trim()
         val bvn = bvnEditText.text.toString().trim()
         val cacNumber = cacNumberEditText.text.toString().trim()
 
@@ -1536,7 +1532,8 @@ class GetPaidActivity : AppCompatActivity() {
             // one too (optional for business, required for personal; validated above).
             bvn = bvn.takeIf { it.isNotBlank() },
             cacNumber = if (!merchantTypeIsPersonal) cacNumber else null,
-            walletAccountId = walletAccountId.takeIf { it.isNotBlank() }
+            // The wallet account id is the email entered above.
+            walletAccountId = email.takeIf { it.isNotBlank() }
         )
 
         // Personal vs business differ only in which SDK call is made — the result handling is shared.

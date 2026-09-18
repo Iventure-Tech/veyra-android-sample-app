@@ -119,7 +119,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
             bvn = sample.bvn,
             accountHolderAddress = sample.fullAddress,
             mobileNumber = sample.mobileNumber,
-            walletAccountId = sample.walletAccountId,
+            walletAccountId = sample.emailAddress,
             emailAddress = sample.emailAddress,
         )
             .clientRequestId(UUID.randomUUID().toString())
