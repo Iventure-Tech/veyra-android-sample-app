@@ -531,12 +531,45 @@ class PayActivity : AppCompatActivity() {
                         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                         loadCards()
                     }
+                },
+                // A tap the card could not carry. Without these the terminal shows a decline and
+                // the wallet says nothing, so the payer has no idea whether waiting, retrying or
+                // using another card would help.
+                onRequireOnline = { event ->
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Connect to the internet to pay ${formatMinor(event.amountMinorUnits)}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                onAmountExceedCardLimit = { event ->
+                    runOnUiThread {
+                        // Deliberately NOT "go online": a refreshed key carries the same cap, so
+                        // that advice would send the payer round a loop that cannot succeed.
+                        val limit = event.cardLimitMinorUnits
+                        Toast.makeText(
+                            this,
+                            if (limit != null) {
+                                "${formatMinor(event.amountMinorUnits)} is over this card's " +
+                                    "${formatMinor(limit)} payment limit — try a smaller amount or another card"
+                            } else {
+                                "This amount is too large for this card — try a smaller amount or another card"
+                            },
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 }
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error activating NFC for card", e)
         }
     }
+
+    /** Minor units → display amount, for the refusal messages above. */
+    private fun formatMinor(amountMinorUnits: Long): String =
+        co.veyra.wallet.sdk.util.CurrencyUtils.formatAmount(amountMinorUnits)
 
     // ── Transaction response ──────────────────────────────────────────────────
 

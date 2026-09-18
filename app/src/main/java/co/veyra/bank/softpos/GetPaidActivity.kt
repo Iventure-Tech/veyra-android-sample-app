@@ -256,7 +256,9 @@ class GetPaidActivity : AppCompatActivity() {
                 // An approved CPM sale can wait on beneficiary credit confirmation just like tap
                 // and MPM — the same stored-row watch, which cancels the hold above if the
                 // merchant's bank turns out to support it.
-                if (response.responseCode == "00") watchCreditConfirmationForQr(reference)
+                if (response.responseCode == "00") {
+                    watchCreditConfirmationForQr(lastOriginalTransactionReference)
+                }
             } catch (e: Exception) {
                 showPage(PAGE_PAYMENT_RESULT)
                 // Transport failure — nothing recorded, so no receipt.
@@ -1316,7 +1318,6 @@ class GetPaidActivity : AppCompatActivity() {
                         response.cardScheme?.let { append("Card Scheme: $it\n") }
                         response.cardExpiry?.let { append("Card Expiry: $it\n") }
                         response.merchantTransactionReference?.let { append("Reference: $it\n") }
-                        response.merchantOrderId?.let { append("Order: $it\n") }
                     }
                 )
                 // The SDK minted the reference — adopt it, since the receipt, the status poll and
