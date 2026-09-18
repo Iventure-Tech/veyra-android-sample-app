@@ -29,8 +29,8 @@ sealed class Merchant {
     /** Account holder name — the merchant name for both types. */
     abstract val accountName: String
     abstract val bvn: String
+    /** Also the wallet account id — the SDK hashes it for the issuer's identity match. */
     abstract val emailAddress: String
-    abstract val walletAccountId: String
     abstract val mobileNumber: String
     abstract val addressLine1: String
     abstract val addressLine2: String
@@ -56,7 +56,6 @@ data class PersonalMerchant(
     override val accountName: String,
     override val bvn: String,
     override val emailAddress: String,
-    override val walletAccountId: String,
     override val mobileNumber: String,
     override val addressLine1: String,
     override val addressLine2: String,
@@ -72,7 +71,6 @@ data class BusinessMerchant(
     override val accountName: String,
     override val bvn: String,
     override val emailAddress: String,
-    override val walletAccountId: String,
     override val mobileNumber: String,
     override val addressLine1: String,
     override val addressLine2: String,
@@ -99,7 +97,6 @@ object SampleData {
             accountName = getString(R.string.sample_account_name),
             bvn = getString(R.string.sample_bvn),
             emailAddress = getString(R.string.sample_email),
-            walletAccountId = getString(R.string.sample_wallet_account_id),
             mobileNumber = getString(R.string.sample_mobile_number),
             addressLine1 = getString(R.string.sample_address_line1),
             addressLine2 = getString(R.string.sample_address_line2),
@@ -117,7 +114,6 @@ object SampleData {
             accountName = accountName,
             bvn = bvn,
             emailAddress = emailAddress,
-            walletAccountId = walletAccountId,
             mobileNumber = mobileNumber,
             addressLine1 = addressLine1,
             addressLine2 = addressLine2,
