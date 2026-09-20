@@ -293,8 +293,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
 
-> **Breaking change:** `allowedCountryCodes` (a mandatory builder argument) and `allowedMccs` have been **removed**. The SDK now declares the provisioning domain itself — country, currency and merchant category code are fixed platform values, identical on Android, iOS and React Native, and can no longer be supplied or overridden. Delete the argument and the `.allowedMccs(...)` call; `allowedAcquirerIds` and `allowedMerchantIds` are unchanged.
-
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
 ### `Environment`
