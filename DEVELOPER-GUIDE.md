@@ -293,8 +293,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
 
-> **Breaking change:** `allowedCountryCodes` (a mandatory builder argument) and `allowedMccs` have been **removed**. The SDK now declares the provisioning domain itself — country, currency and merchant category code are fixed platform values, identical on Android, iOS and React Native, and can no longer be supplied or overridden. Delete the argument and the `.allowedMccs(...)` call; `allowedAcquirerIds` and `allowedMerchantIds` are unchanged.
-
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
 ### `Environment`
@@ -577,13 +575,18 @@ confirmScreen(scanned.amountMinorUnits, scanned.currencyNumeric4, "Card ••�
 // on merchant confirm:
 lifecycleScope.launch {
     val response = sdk.cpmCustomerQrService.charge(scanned, merchantOrderId = "ORDER-42")
-    val approved = response.responseCode == "00"
-    // The SDK minted the reference; take it from the response for the receipt lookup.
-    showResult(approved, response.merchantTransactionReference)
+    // Branch on the status, never on responseCode. The SDK minted the reference; take it from
+    // the response for the receipt lookup.
+    when (response.responseStatus) {
+        ResponseStatus.APPROVED -> showApproved(response.merchantTransactionReference)
+        ResponseStatus.DECLINED, ResponseStatus.FAILED ->
+            showDeclined(response.message, response.responseStatusReason)
+        else -> showProcessing(response.merchantTransactionReference)  // PENDING — never re-charge
+    }
 }
 ```
 
-`charge(scanned, merchantOrderId = …)` returns `PaymentResponse`: `responseCode` (`"00"` approved), `transactionId`, `merchantStatus`, `merchantTransactionReference` (**the SDK-minted reference — fetch the receipt with `generateTransactionReceipt(it)`**) and `merchantOrderId` echoed back. A transport failure throws and records nothing.
+`charge(scanned, merchantOrderId = …)` returns `PaymentResponse`: the response triple — `responseCode` (the wire literal: display it, never branch on it), `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING` — **branch on this**; `PENDING` means the outcome is unknown, so never re-charge) and `responseStatusReason` — plus `message`, `transactionId`, `merchantStatus`, `merchantTransactionReference` (**the SDK-minted reference — fetch the receipt with `generateTransactionReceipt(it)`**) and `merchantOrderId` echoed back. A transport failure throws and records nothing.
 
 > **1.0.15+:** the old `charge(scanned, merchantTransactionReference, …)` shape no longer compiles — it is retained only as an `ERROR`-level deprecation that tells you what to do. That is deliberate: had the inert parameter simply been deleted, `charge(scanned, myReference)` would have kept compiling and bound your reference to `merchantOrderId` (both are `String?`), turning a value the SDK ignored into a stored, echoed, portal-visible order id. Drop the argument and pass `merchantOrderId` by name, as above.
 
@@ -753,7 +756,7 @@ Check whether an account can be tokenised before digitising. Eligible when `resp
 |-----------|----------|-------------|
 | `accountNumber` | **Mandatory** | The customer's bank account number (10-digit NUBAN). |
 | `institutionCode` | **Mandatory** | From `Bank.institutionCode`. |
-| `walletAccountId` | **Mandatory** | The customer's identifier with **your** wallet service — email, phone or GUID. The SDK derives a hash from it; it is not sent raw. Must match the value registered with your wallet provider. |
+| `walletAccountId` | **Mandatory** | The customer's registered email address or phone number — a value the issuer already holds for this account, not an internal id of your own. The SDK derives a hash from it; it is not sent raw. The issuer checks the hash against its own records, so an identifier it has never seen (a GUID, a placeholder) fails eligibility. |
 | `.accountHolderName(String)` | Optional | Full name of the account holder. |
 | `.accountNumberSource(AccountNumberSource)` | Optional | How the number was captured: `MANUAL`, `SCAN`, `CARD_ON_FILE`, `RECENT`, `APPLICATION`, `EXISTING_TOKEN`, `OTHER`. Default `MANUAL`. |
 | `.numberOfActiveTokens(Int)` | Optional | Tokens already active on this device. Default `0`. |
@@ -905,7 +908,7 @@ sdk.tokenisationService.activate(tokenUniqueReference = ref, activationCode = co
 }
 ```
 
-`ActivateResponse` failure fields (all null on success): `failureCode` — typed `ActivationFailureCode`, one of `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `NO_PENDING_ACTIVATION`, `CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, or `UNKNOWN` for a code newer than this SDK (raw value in `failureCodeRaw`); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `RecommendDelete.MUST` / `MAY` after an exhausted cycle (delete the dead token rather than leaving it in the card list), null otherwise (raw in `recommendDeleteRaw`).
+`ActivateResponse` failure fields (all null on success): `failureCode` — typed `ActivationFailureCode`, one of `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `NO_PENDING_ACTIVATION`, `CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `CODE_REQUEST_RATE_LIMITED`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, or `UNKNOWN` for a code newer than this SDK (raw value in `failureCodeRaw`); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `RecommendDelete.MUST` / `MAY` after an exhausted cycle (delete the dead token rather than leaving it in the card list), null otherwise (raw in `recommendDeleteRaw`).
 
 #### `observeActivation` (+ pause / resume / stop)
 
@@ -1380,9 +1383,8 @@ catalogued in [SDK error codes](#sdk-error-codes--the-complete-sdkerrorcode-cata
 | `AUTH_CANCELLED:` | The customer dismissed the authentication sheet the SDK raised. Nothing was sent — let them start the payment again. |
 | `AUTH_FAILED:` | Authentication was attempted and did not succeed. Offer a retry. |
 | `AUTH_UNAVAILABLE:` | The device has no enrolled biometric and no screen lock, so no authentication is possible. Send the user to system settings; retrying cannot help. |
-| `Authentication cancelled:` / `Authentication failed:` | Stay on the confirm screen; let the user retry. |
-| `No active card to pay with (or card unsupported on the QR rail)` | The wallet is empty, or no card is selected — send the user to add/select a card. A card added before QR payments were provisioned must be removed and re-added. |
-| `This card can't show a payment QR — no active card, or it was added before QR payments (re-add it)` | Same treatment, from `showQrToPay`. |
+
+A QR payment the active card cannot make is refused with a **human-readable message naming the cause** — no card in the wallet, no card selected, missing or incomplete payment material, a card added before QR payments, a card that cannot pay by QR. These carry no machine prefix: show `message` as-is. Where it tells the user to remove and re-add the card, that is the fix.
 
 ### SDK error codes — the complete `SdkErrorCode` catalogue
 
@@ -1482,6 +1484,7 @@ but it never reports *itself* as a payment outcome, and it never mints `96`.
 | `TRANSACTION_DATA_NOT_SET` | A payment was progressed with no transaction data prepared. |
 | `COMPLETION_FAILED` | The kernel's completion step failed after the cryptogram. |
 | `STATE_MACHINE_MAX_ITERATIONS_EXCEEDED`, `STATE_MACHINE_CYCLE_DETECTED`, `STATE_MACHINE_SELF_LOOP_DETECTED`, `STATE_MACHINE_UNEXPECTED_END`, `NO_HANDLER_FOUND`, `STATE_HANDLER_EXCEPTION`, `STATE_HANDLER_FAILED` | The EMV kernel's state machine could not complete. Report the code; these are SDK defects, not merchant mistakes. |
+| `DATA_AUTHENTICATION_FAILED`, `TRANSACTION_DECLINED` | Declared in the enum but not raised by this SDK version — a decline always arrives as the response triple, never as an SDK error. Cover them with your default branch. |
 
 **Handling depends on one question: had the request gone out?** If the SDK failed *before* dispatch,
 nothing was sent — fix and retry. If it failed *after*, the payment may well have completed, so the
@@ -1588,7 +1591,7 @@ call can hand you.
 | `refreshTransactionStatus(...)` / `reconcilePendingTransactions()` (wallet) | the updated history row | As above | Poll answers `09`, `09` + escalated, `25`, or the settled outcome — same rules as the merchant poll |
 | `digitizeAccount(...)` / `checkAccountEligibility(...)` | `responseCode`, `responseStatus`, `responseStatusReason`, `status`, `error.code` | `status`: `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** `"APPROVED"`, `"APPROVE_REQUIRE_AUTH"`, `"DECLINED"` — and anything else means the token is **discarded**. `error.code` is `CONFIG_ERROR` / `TOKENIZATION_ERROR` / `UNEXPECTED_ERROR`. The issuer's cause arrives in `message` — see [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) |
 | `requestActivationCode(...)` / `activate(...)` | `status`, `failureCode`, `attemptsRemaining` | `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** the typed `failureCode` (`CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `CODE_REQUEST_RATE_LIMITED`, `NO_PENDING_ACTIVATION`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, `UNKNOWN`) |
-| `observePaymentRefusals(tur, ...)` / the same handlers via `setActiveToken` | `RequireOnlineEvent` / `AmountExceedCardLimitEvent` | — | — Refused **before anything was sent**, so there is no response code by design. Fires on all three rails (`TAP`, `CPM_QR`, `QR_MPM`). Per card: a handler hears only its own token |
+| `observePaymentRefusals(tur, ...)` / the same handlers via `setActiveToken` | `RequireOnlineEvent` / `AmountExceedCardLimitEvent` | — | — Refused **before anything was sent**, so there is no response code by design. Fires on all three rails (`rail`: `TAP`, `CPM_QR`, `MPM_QR`). Per card: a handler hears only its own token |
 | `getTokens()` / `getToken(...)` / `onTokenStatusChanged` | `Token.status`, `.isActive`, `.requiresOnline`; the observer's `canPay` | `ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `EXPIRED` / `DEACTIVATED` / `UNKNOWN` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
 | `inspectScannedQr(payload)` | `MpmScanResult` | `Verified` / `Rejected` | **A different vocabulary:** `MALFORMED`, `MISSING_SIGNATURE`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `EXPIRED`. Every rejection ends the flow — no payment was attempted |
 
@@ -1608,7 +1611,7 @@ Terminal outcomes only — unsupported cards and lost contact **never** produce 
 > or `PENDING`. Only the first three are final; `PENDING` always means "ask again". The SDK no longer
 > derives a status from the code, and neither should your app: a code you do not recognise is not a
 > decline. `"99"` is retired — an unheard outcome is now `68` (no reply), `06` (the hop we called
-> failed) or `96` (the SDK/service itself threw), all `PENDING`, while `91` (never connected) and
+> failed) or `96` (a service behind the SDK threw — the SDK never mints it), all `PENDING`, while `91` (never connected) and
 > `25` (no such transaction) are `FAILED`, meaning nothing happened and a retry is safe.
 
 
@@ -1616,11 +1619,12 @@ Terminal outcomes only — unsupported cards and lost contact **never** produce 
 |---|---|---|---|
 | `"00"` | Approved | Yes | Success screen + receipt (look it up by the SDK-minted `merchantTransactionReference` on the response). |
 | `"05"` | Declined by the issuer/server | Yes | Show decline; try another card. A stale customer QR also surfaces as `"05"` on the CPM rail — if the customer's code sat on screen a while, ask them to regenerate and rescan. |
-| `"06"` | Failed before reaching the issuer — validation, cancellation, merchant not active, wrong mode, read failure after the online boundary | Yes (no money moved) | Fix the input/config and re-initiate; `message` says which check failed. Cancellation returns `"06"` with message `"Payment cancelled"`. |
+| `"06"` with status `PENDING` | Upstream error — the request was sent and the hop we called failed or answered unintelligibly | No — `PENDING` | **Do not charge again.** Same as `68`: the outcome is unknown, the SDK polls it, and the history row resolves. |
+| `"06"` with **no** status and `sdkErrorCode` set | Legacy shape of a payment that was **never attempted** — validation, cancellation, merchant not active, wrong mode | Yes (nothing was sent) | Not a payment outcome: handle it by `sdkErrorCode`, fix the input/config and re-initiate. Cancellation returns it with message `"Payment cancelled"`. Opt in to `typedPreDispatchErrors` (below) and it arrives with an empty code instead. |
 | `"68"` (was `"99"`) | Pending — sent, no reply received (timeout/network) | Callback fires, outcome unresolved | **Do not charge again.** The SDK stores the transaction as `PENDING` and keeps polling; show "processing" and let the history row resolve. |
-| `"91"` | Never connected — the request provably never left | **`FAILED`** — nothing happened, retry is safe | Same — poll, don't retry-charge. |
+| `"91"` | Never connected — the request provably never left | **`FAILED`** — nothing happened | Safe to retry: nothing reached the gateway. The merchant's own connection is not the problem. |
 | `"51"` / `"54"` / `"14"` / `"58"` / `"61"` / `"63"` / `"65"` | Insufficient funds / expired card or token / invalid token / domain restriction / limit exceeded / suspected fraud / velocity limit | Yes | Hard declines — show the named reason (`responseStatusReason`) and act on it; see [the full vocabulary](#payment-response-codes--the-full-vocabulary). |
-| `"96"` | System malfunction — **ambiguous**: the payment may have failed *or* succeeded with the response lost | No — `PENDING` | Don't assume failure: the SDK polls it, and it may still settle. Never show it as a decline. |
+| `"96"` | System malfunction reported by a service behind the SDK — **ambiguous**: the payment may have failed *or* succeeded with the response lost | No — `PENDING` | Don't assume failure: the SDK polls it, and it may still settle. Never show it as a decline. |
 
 ### Holding a `PENDING` payment, and being told when it settles
 
@@ -2043,14 +2047,14 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | You receive | Where | Safe to retry? | Do this |
 |---|---|---|---|
 | Tap code `"05"` / status `DECLINED` | Merchant tap / rails | Yes (new attempt) | Show decline; try another card or rail. |
-| Tap code `"06"` / status `FAILED` | Merchant tap | Yes | Nothing reached the issuer — fix what `message` names (input, config, merchant inactive, wrong mode) and re-initiate. |
+| `sdkErrorCode` set (legacy tap code `"06"` with **no** status) | Merchant tap | Yes | The payment was never attempted — fix what `sdkErrorCode` / `message` name (input, config, merchant inactive, wrong mode) and re-initiate. |
+| Tap code `"91"` / status `FAILED` | Merchant tap | Yes | The connection was refused — nothing was sent. Retry; the merchant's connection is not the problem. |
 | Status `PENDING` (codes `68`/`06`/`96`/`09`) | Merchant tap | **No — never re-charge** | Outcome unknown at the issuer. Show "processing"; the SDK polls and resolves the history row. Re-charging risks a double charge. |
 | Code `"96"` | Any rail | **No — not yet** | Ambiguous: may have succeeded with the response lost. Poll briefly (context status / transaction status / reconcile) before reporting failure. |
 | `EXPIRED` context / `onExpired` fired | Get-paid QR | Yes | The QR died unpaid (never recorded). Blank it, offer a fresh one. |
 | `inspect` throws (customer QR) | Merchant CPM scan | Yes | Not a payment QR — transient hint, stay armed for another scan. |
 | `"05"` on a customer-QR charge | Merchant CPM | Yes (fresh QR) | Could be a stale/hoarded QR: ask the customer to regenerate and rescan before treating it as a funds decline. |
 | Scan rejected (`EXPIRED` / `BAD_SIGNATURE` / …) | Wallet MPM scan | Yes (fresh scan) | End the flow; ask the merchant for a fresh code. Never show a rejected payment on a confirm screen. |
-| `Authentication cancelled:` / `Authentication failed:` | Wallet payments | Yes | Nothing was sent. Stay on the confirm screen; let the user retry the biometric. |
 | `WalletRefusalException.OnlineRequired` (message prefix `ONLINE_REQUIRED:`) | Wallet payments | After going online | Prompt to connect; the SDK refreshes the card itself. Pre-empt with `requiresOnline` (grey the card out). |
 | `WalletRefusalException.AmountExceedsCardLimit` (message prefix `AMOUNT_EXCEEDS_CARD_LIMIT:`) | Wallet payments | **Not by retrying** | The amount is larger than this card can carry in one payment. Going online does **not** help — offer a smaller amount or another card. |
 | `WalletRefusalException.TokenNotActive` (message prefix `TOKEN_NOT_ACTIVE:`) | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
@@ -2109,7 +2113,10 @@ data class Token(
     val isActive: Boolean,                  // the card payments use (at most one)
     val activationMethods: List<ActivationMethod>?,  // non-null while activation is pending
     val transactions: List<TransactionSummary>,      // last 3
-    val requiresOnline: Boolean             // true: card can't pay until the wallet has been online — grey it out
+    val requiresOnline: Boolean,            // true: card can't pay until the wallet has been online — grey it out
+    val status: TokenStatus?,               // ACTIVE / PENDING_ACTIVATION / SUSPENDED / DEACTIVATED / EXPIRED / UNKNOWN;
+                                            // null = never status-synced. A value this build doesn't know reads as UNKNOWN
+    val statusRaw: String?                  // the stored wire value behind status — logs / forward compatibility
 ) {
     fun getMaskedPAN(): String              // "**** **** **** 1234"
     fun getLastFourDigits(): String
@@ -2122,8 +2129,12 @@ data class ActivationMethod(val medium: String, val contact: String)
 
 data class Bank(val slug: String, val name: String, val institutionCode: String)
 
-data class VerifyAccountResponse(val responseCode: String?, val message: String?)
-// responseCode "APPROVED" = eligible
+data class VerifyAccountResponse(
+    val responseCode: String?,              // "APPROVED" = eligible
+    val message: String?,
+    val responseStatus: String?,            // APPROVED / DECLINED / FAILED / PENDING — what the call did (1.2.4+)
+    val responseStatusReason: String?       // the symbolic cause — branch on this; null = none stated (1.2.4+)
+)
 
 data class TokenisationResponse(
     val responseCode: String?,              // APPROVED / APPROVE_REQUIRE_AUTH / DECLINED
@@ -2132,6 +2143,8 @@ data class TokenisationResponse(
     val isSuccess: Boolean,
     val status: String?,                    // SUCCESS / PENDING / FAILED
     val message: String?,
+    val responseStatus: String?,            // APPROVED / DECLINED / FAILED / PENDING — what the call did (1.2.4+)
+    val responseStatusReason: String?,      // the symbolic cause — branch on this; null = none stated (1.2.4+)
     val error: TokenisationError?           // code: CONFIG_ERROR / TOKENIZATION_ERROR / UNEXPECTED_ERROR
 )
 
@@ -2139,10 +2152,21 @@ data class ActivationCodeResponse(
     val tokenUniqueReference: String?,
     val expirationDateTime: String?,        // ISO-8601 — drive the OTP countdown
     val status: String?,                    // SUCCESS / FAILURE — check it even on a successful Result
-    val message: String?
+    val message: String?,
+    val failureCode: ActivationFailureCode?,  // null on success; UNKNOWN for a code newer than this SDK
+    val failureCodeRaw: String?
 )
 
-data class ActivateResponse(val tokenUniqueReference: String?, val status: String?, val message: String?)
+data class ActivateResponse(
+    val tokenUniqueReference: String?,
+    val status: String?,                    // SUCCESS / FAILURE
+    val message: String?,
+    val failureCode: ActivationFailureCode?,  // null on success; UNKNOWN for a code newer than this SDK
+    val failureCodeRaw: String?,
+    val attemptsRemaining: Int?,            // code attempts left where a cap applies (0 when exhausted/locked)
+    val recommendDelete: RecommendDelete?,  // MUST / MAY after an exhausted cycle; null otherwise
+    val recommendDeleteRaw: String?
+)
 data class TokenStatusUpdateResponse(val tokenUniqueReference: String?, val status: String?, val message: String?)
 
 data class TransactionSummary(
@@ -2246,11 +2270,13 @@ data class TransactionResponse(             // tap terminal outcome (makeCardPay
     val cardScheme: String?,                // "VISA", "MASTERCARD", …
     val cardExpiry: String?,                // YYMM
     val merchantTransactionReference: String?,  // SDK-MINTED reference — receipt/status lookup key
-    val merchantOrderId: String?,               // your order id, echoed back (never a lookup key)
     val transactionType: String?, val maskedTokenLast4: String?,
     val merchantStatus: String?, val transactionId: String?, val aid: String?,
+    val responseStatus: ResponseStatus?,        // APPROVED / DECLINED / FAILED / PENDING / Unknown — branch on this
+    val responseStatusReason: String?,          // the stated cause; display, never parse
     val creditTransactionId: String?,           // merchant-bank credit id (approved + supported only)
-    val isCreditConfirmationSupported: Boolean? // true ⇒ the SDK will poll and fire onCreditConfirmation
+    val isCreditConfirmationSupported: Boolean?, // true ⇒ the SDK will poll and fire onCreditConfirmation
+    val sdkErrorCode: SdkErrorCode?             // set ⇒ never attempted / SDK failure, not a payment outcome
 )
 
 data class TransactionInfo(                 // history row
