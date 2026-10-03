@@ -30,6 +30,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
     private lateinit var customerId: String
     private lateinit var accountName: String
     private lateinit var bvn: String
+    private lateinit var email: String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +43,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         customerId = intent.getStringExtra(EXTRA_CUSTOMER_ID) ?: run { finish(); return }
         accountName = intent.getStringExtra(EXTRA_ACCOUNT_NAME) ?: run { finish(); return }
         bvn = intent.getStringExtra(EXTRA_BVN) ?: run { finish(); return }
+        email = intent.getStringExtra(EXTRA_EMAIL) ?: run { finish(); return }
 
         bindAccountDetails()
 
@@ -112,10 +114,10 @@ class AccountEligibilityActivity : AppCompatActivity() {
     }
 
     private fun buildTokenizationParams(): TokenizationRequestParams {
-        // Account number, bank, customer id, account name and BVN are what the user entered on
-        // the previous screen. The customer id is also the consumer identifier: the one id this
-        // app knows the customer by. The remaining contact details come from the shared sample
-        // source (res/values/sample_data.xml).
+        // Account number, bank, customer id, account name, BVN and email are what the user
+        // entered on the previous screen. The customer id is also the consumer identifier: the
+        // one id this app knows the customer by; the email is also the wallet account id. The
+        // remaining contact details come from the shared sample source (res/values/sample_data.xml).
         val sample = co.veyra.bank.SampleData.active(this)
         return TokenizationRequestParams.builder(
             accountNumber = accountNumber,
@@ -126,8 +128,8 @@ class AccountEligibilityActivity : AppCompatActivity() {
             bvn = bvn,
             accountHolderAddress = sample.fullAddress,
             mobileNumber = sample.mobileNumber,
-            walletAccountId = sample.emailAddress,
-            emailAddress = sample.emailAddress,
+            walletAccountId = email,
+            emailAddress = email,
         )
             .clientRequestId(UUID.randomUUID().toString())
             .accountNumberSource(AccountNumberSource.MANUAL)
@@ -149,6 +151,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         private const val EXTRA_CUSTOMER_ID = "extra_customer_id"
         private const val EXTRA_ACCOUNT_NAME = "extra_account_name"
         private const val EXTRA_BVN = "extra_bvn"
+        private const val EXTRA_EMAIL = "extra_email"
 
         fun intent(
             context: Context,
@@ -158,6 +161,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
             customerId: String,
             accountName: String,
             bvn: String,
+            email: String,
         ): Intent =
             Intent(context, AccountEligibilityActivity::class.java).apply {
                 putExtra(EXTRA_ACCOUNT_NUMBER, accountNumber)
@@ -166,6 +170,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
                 putExtra(EXTRA_CUSTOMER_ID, customerId)
                 putExtra(EXTRA_ACCOUNT_NAME, accountName)
                 putExtra(EXTRA_BVN, bvn)
+                putExtra(EXTRA_EMAIL, email)
             }
     }
 }
