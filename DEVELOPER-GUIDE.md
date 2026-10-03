@@ -949,9 +949,11 @@ val active = tokens.firstOrNull { it.isActive }
 payButtons.isEnabled = active?.requiresOnline != true
 ```
 
-`Token`: `tokenId`, `tokenUniqueReference`, `devicePAN`, `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `expiryDate`, `cardScheme`, `cardType`, `isActive` (the card payments use), `activationMethods` (non-null while activation is pending), `transactions` (last 3), `requiresOnline` (see below), helpers `getMaskedPAN()` / `getLastFourDigits()`.
+`Token`: `tokenId`, `tokenUniqueReference`, `devicePAN`, `cardHolderName` (the card's display name — scheme label + masked last four, e.g. `AFRIGO ****1234`; not a person's name, and the same value the card presents in EMV tag `5F20`), `expiryDate`, `cardScheme`, `cardType`, `isActive` (the card payments use), `activationMethods` (non-null while activation is pending), `transactions` (last 3), `requiresOnline` (see below), `deviceNotBound` (see below), helpers `getMaskedPAN()` / `getLastFourDigits()`.
 
 **`requiresOnline`** — `true` when the card cannot pay until the wallet has been **online** to refresh it. Render the card greyed-out and non-tappable and prompt the user to connect; the flag derives fresh on every read and clears on its own once the SDK's automatic refresh succeeds. There is no manual "refresh keys" call — key management is entirely SDK-owned.
+
+**`deviceNotBound`** — `true` when the backend refused to issue payment keys for this card to this device: the card was added on another phone, or on this one before the app was reinstalled or its data wiped. The SDK stops asking for keys for that card. Render it greyed-out and non-tappable with "Add this card again on this phone" — **not** "go online": while it is `true`, `requiresOnline` is always `false`, because connecting cannot fix it. Removing the card and adding it again on this phone is the only remedy, and removal is the only thing that clears the flag.
 
 #### Handling card states in your UI
 
@@ -961,13 +963,14 @@ A card is not simply "there or not" — it can be awaiting activation, frozen fo
 |---|---|---|---|---|
 | 1 | **Needs activation** | `token.activationMethods != null` | Show the card with an **"Activate"** badge/button that launches the [activation flow](#activation). Pay actions hidden. | `activate` succeeding, or `observeActivation` firing `onActivated`. |
 | 2 | **Requires online** | `requiresOnline == true` | **Grey the card out and make it non-tappable**; overlay a "Connect to the internet" hint; disable every pay affordance (tap surface, scan-to-pay, show-QR buttons). | Nothing you call — the SDK refreshes the card itself the next time the device is online. Re-read the list and the flag has cleared. |
+| 2 | **Not bound to this device** | `deviceNotBound == true` (`requiresOnline` is then always `false`) | Grey the card out and make it non-tappable; overlay "Add this card again on this phone" — **not** a connect hint; disable every pay affordance. | Only removing the card and adding it again on this phone. Going online does not help. |
 | 3 | **Inactive server-side** (suspended, expired) | `token.isActive == false`, with `token.status` saying **why** (`SUSPENDED` / `PENDING_ACTIVATION` / `EXPIRED` — a pay attempt refuses with the typed `WalletRefusalException.TokenNotActive`) | Grey the card out; word the indicator from `status` — "Suspended — contact your bank" vs "Expired — re-add the card". Disable pay affordances; don't offer retry — the state is issuer-controlled. | A later automatic status sync seeing the card active again. |
 | 4 | **Payable** | None of the above | Normal rendering; pay affordances enabled for the active card. | — |
 
 Two rules make this robust:
 
 - **Derive, don't cache.** Every state above is computed fresh on each read and clears itself — re-read the card list whenever your wallet screen (re)appears and after any payment attempt, rather than storing state.
-- **Gate the affordances, not just the card face.** Disabling only the card image but leaving a "Scan to pay" button live produces the refusal errors at pay time; disable the actions too, and treat the typed refusals (the `ONLINE_REQUIRED:` / `TOKEN_NOT_ACTIVE:` message prefixes) as the backstop, not the primary UX.
+- **Gate the affordances, not just the card face.** Disabling only the card image but leaving a "Scan to pay" button live produces the refusal errors at pay time; disable the actions too, and treat the typed refusals (the `ONLINE_REQUIRED:` / `TOKEN_NOT_ACTIVE:` / `DEVICE_NOT_BOUND:` message prefixes) as the backstop, not the primary UX.
 
 The sample's card list + pay-screen gating:
 
@@ -987,6 +990,11 @@ fun bind(card: Token) {
             cardView.isClickable = false      // non-tappable
             stateHint.text = "Connect to the internet to use this card"
         }
+        card.deviceNotBound -> {              // 2. keys refused to this device
+            cardView.alpha = 0.4f
+            cardView.isClickable = false
+            stateHint.text = "Add this card again on this phone"   // not "go online"
+        }
         !card.isActive -> {                   // 3. suspended/inactive server-side
             cardView.alpha = 0.4f
             cardView.isClickable = false
@@ -1003,7 +1011,7 @@ fun bind(card: Token) {
 
 // Screen-level gating — disable the pay actions with the active card, not just its face:
 val active = tokens.firstOrNull { it.isActive }
-val blocked = active == null || active.requiresOnline
+val blocked = active == null || active.requiresOnline || active.deviceNotBound
 scanToPayButton.isEnabled = !blocked
 showQrButton.isEnabled = !blocked
 ```
@@ -1036,6 +1044,9 @@ sdk.tokenisationService.setActiveToken(
     },
     onAmountExceedCardLimit = { event ->
         runOnUiThread { showError("That amount is too large for this card — try another card") }
+    },
+    onDeviceNotBound = { event ->
+        runOnUiThread { showError("Add this card again on this phone to pay with it") }
     }
 )
 ```
@@ -1380,6 +1391,7 @@ catalogued in [SDK error codes](#sdk-error-codes--the-complete-sdkerrorcode-cata
 | `ONLINE_REQUIRED:` | `error.message?.contains("ONLINE_REQUIRED") == true` |
 | `AMOUNT_EXCEEDS_CARD_LIMIT:` | `error.message?.contains("AMOUNT_EXCEEDS_CARD_LIMIT") == true` |
 | `TOKEN_NOT_ACTIVE:` | `error.message?.contains("TOKEN_NOT_ACTIVE") == true` |
+| `DEVICE_NOT_BOUND:` | `error.message?.contains("DEVICE_NOT_BOUND") == true` |
 | `AUTH_CANCELLED:` | The customer dismissed the authentication sheet the SDK raised. Nothing was sent — let them start the payment again. |
 | `AUTH_FAILED:` | Authentication was attempted and did not succeed. Offer a retry. |
 | `AUTH_UNAVAILABLE:` | The device has no enrolled biometric and no screen lock, so no authentication is possible. Send the user to system settings; retrying cannot help. |
@@ -1505,7 +1517,7 @@ re-charge**. You never have to work out which happened — check `getLastTransac
 
 The wallet SDK's refusals are typed `WalletRefusalException` subtypes plus the message prefixes
 documented above (`NO_NETWORK_CONNECTION:`, `ONLINE_REQUIRED:`, `AMOUNT_EXCEEDS_CARD_LIMIT:`,
-`TOKEN_NOT_ACTIVE:`, `AUTH_*`), and its digitisation failures carry `error.code`
+`TOKEN_NOT_ACTIVE:`, `DEVICE_NOT_BOUND:`, `AUTH_*`), and its digitisation failures carry `error.code`
 (`CONFIG_ERROR` / `TOKENIZATION_ERROR` / `UNEXPECTED_ERROR`). `NO_NETWORK_CONNECTION` is deliberately
 the **same** name in both SDKs and on all three platforms — one condition, one code.
 
@@ -1591,13 +1603,13 @@ call can hand you.
 | `refreshTransactionStatus(...)` / `reconcilePendingTransactions()` (wallet) | the updated history row | As above | Poll answers `09`, `09` + escalated, `25`, or the settled outcome — same rules as the merchant poll |
 | `digitizeAccount(...)` / `checkAccountEligibility(...)` | `responseCode`, `responseStatus`, `responseStatusReason`, `status`, `error.code` | `status`: `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** `"APPROVED"`, `"APPROVE_REQUIRE_AUTH"`, `"DECLINED"` — and anything else means the token is **discarded**. `error.code` is `CONFIG_ERROR` / `TOKENIZATION_ERROR` / `UNEXPECTED_ERROR`. The issuer's cause arrives in `message` — see [Add a card (tokenisation)](#add-a-card-tokenisation--every-code-status-and-cause) |
 | `requestActivationCode(...)` / `activate(...)` | `status`, `failureCode`, `attemptsRemaining` | `"SUCCESS"` / `"FAILURE"` | **A different vocabulary:** the typed `failureCode` (`CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `CODE_REQUEST_RATE_LIMITED`, `NO_PENDING_ACTIVATION`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, `UNKNOWN`) |
-| `observePaymentRefusals(tur, ...)` / the same handlers via `setActiveToken` | `RequireOnlineEvent` / `AmountExceedCardLimitEvent` | — | — Refused **before anything was sent**, so there is no response code by design. Fires on all three rails (`rail`: `TAP`, `CPM_QR`, `MPM_QR`). Per card: a handler hears only its own token |
-| `getTokens()` / `getToken(...)` / `onTokenStatusChanged` | `Token.status`, `.isActive`, `.requiresOnline`; the observer's `canPay` | `ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `EXPIRED` / `DEACTIVATED` / `UNKNOWN` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
+| `observePaymentRefusals(tur, ...)` / the same handlers via `setActiveToken` | `RequireOnlineEvent` / `AmountExceedCardLimitEvent` / `DeviceNotBoundEvent` | — | — Refused **before anything was sent**, so there is no response code by design. Fires on all three rails (`rail`: `TAP`, `CPM_QR`, `MPM_QR`). Per card: a handler hears only its own token |
+| `getTokens()` / `getToken(...)` / `onTokenStatusChanged` | `Token.status`, `.isActive`, `.requiresOnline`, `.deviceNotBound`; the observer's `canPay` | `ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `EXPIRED` / `DEACTIVATED` / `UNKNOWN` | — Card lifecycle, not a payment outcome. **Branch on `canPay`**, not on the status name |
 | `inspectScannedQr(payload)` | `MpmScanResult` | `Verified` / `Rejected` | **A different vocabulary:** `MALFORMED`, `MISSING_SIGNATURE`, `UNKNOWN_KEY`, `BAD_SIGNATURE`, `EXPIRED`. Every rejection ends the flow — no payment was attempted |
 
 **Reading the table:** a dash in the code column means that call has no response code *by design* —
 minting one would assert that a payment was attempted and something on the wire answered. Where a
-call can refuse before anything is sent (card out of keys, over its limit, not active, no network,
+call can refuse before anything is sent (card out of keys, over its limit, not active, not bound to this device, no network,
 authentication dismissed), you get a **typed error**, not a code — those are catalogued under
 [Typed errors](#typed-errors) and [SDK error codes](#sdk-error-codes--the-complete-sdkerrorcode-catalogue).
 
@@ -1718,18 +1730,21 @@ When the customer's phone is tapped on a terminal, the wallet's `onTransactionCo
 
 The SDK also vibrates the phone itself — once on success, twice on decline/error — so your UI feedback is supplementary.
 
-### Refused payments — `onRequireOnline` and `onAmountExceedCardLimit`
+### Refused payments — `onRequireOnline`, `onAmountExceedCardLimit` and `onDeviceNotBound`
 
 A payment can be refused **before anything is sent**, when the card's payment keys cannot carry the amount. This is not a terminal decline and has no response code: on the tap rail it ends the tap at the protocol level, so `onTransactionCompleted` fires with `"DECLINED"` and these callbacks tell you *why*.
 
-They are two callbacks rather than one because the advice differs, and giving the payer the wrong one wastes their time:
+They are separate callbacks rather than one because the advice differs, and giving the payer the wrong one wastes their time:
 
 | Callback | Meaning | What to tell the payer |
 |---|---|---|
 | `onRequireOnline` | The card's keys need refreshing and the wallet could not reach the server | "Connect to the internet and try again" — this genuinely fixes it |
 | `onAmountExceedCardLimit` | The amount is over the card's per-payment cap | "Pay a smaller amount or use another card". **Never say "go online"** — a refreshed key carries the same cap, so they would connect, retry and fail identically |
+| `onDeviceNotBound` | The backend issues this card's payment keys only to the device it was added on, and this is not that device (or the app was reinstalled or its data wiped since) | "Add this card again on this phone". Going online does not help and neither does a smaller amount — removing the card and adding it again is the only remedy |
 
-Both carry `amountMinorUnits` (name the amount that failed) and `rail` (`"TAP"`, `"CPM_QR"` or `"MPM_QR"`). `onAmountExceedCardLimit` also carries `cardLimitMinorUnits` — the cap, when the SDK can read it, or `null`; show the figure only when it is non-null rather than printing a guess.
+All three carry `amountMinorUnits` (name the amount that failed) and `rail` (`"TAP"`, `"CPM_QR"` or `"MPM_QR"`). `onAmountExceedCardLimit` also carries `cardLimitMinorUnits` — the cap, when the SDK can read it, or `null`; show the figure only when it is non-null rather than printing a guess. `onDeviceNotBound` delivers a `DeviceNotBoundEvent(tokenId, tokenUniqueReference, amountMinorUnits, rail, message)`, whose `message` is prefixed `DEVICE_NOT_BOUND`.
+
+**`onDeviceNotBound` is a card state too.** When the SDK's automatic key request (key top-up, token refresh) is refused this way, it remembers the refusal for that card, stops every automatic key request for it, and sets `Token.deviceNotBound`. From then on a tap on that card is declined with no refresh attempted, and a QR payment refuses with `WalletRefusalException.DeviceNotBound` before anything is sent — so, unlike the other two, it is right to grey the card out (see [Handling card states in your UI](#handling-card-states-in-your-ui)).
 
 **Timing on the tap rail.** `onRequireOnline` arrives at the earliest moment it is actually true: immediately if the device is already offline, otherwise only after the SDK's automatic background refresh has failed. If that refresh succeeds — the usual case on a working connection, within about a second — **nothing fires** and the next tap simply works. So treat the absence of this callback after a declined tap as "ask them to tap again", not as an error.
 
@@ -1748,6 +1763,7 @@ sdk.tokenisationService.observePaymentRefusals(
     tokenUniqueReference = card.tokenUniqueReference!!,
     onRequireOnline = { event -> promptToConnect(event.amountMinorUnits) },
     onAmountExceedCardLimit = { event -> offerSmallerAmount(event.cardLimitMinorUnits) },
+    onDeviceNotBound = { event -> promptToAddCardAgain(event.tokenUniqueReference) },
 )
 // when the screen goes:
 sdk.tokenisationService.stopObservingPaymentRefusals(card.tokenUniqueReference!!)
@@ -1907,6 +1923,7 @@ The values you can see on the tokenisation surfaces:
 | `UNKNOWN_TOKEN_REQUESTOR` / `TOKEN_REQUESTOR_MISMATCH` | The token requestor is unknown, or does not own this token |
 | `LOCAL_TRANSACTION_DATE_AND_HASH_REQUIRED` / `LOCAL_TRANSACTION_DATE_INVALID` | A transaction-status read was called without a usable date + hash pair |
 | `DUPLICATE_STATE` | The same state was written twice |
+| `DEVICE_NOT_BOUND` | Payment keys were requested for a card from a device other than the one it was added on (or after the app was reinstalled or its data wiped). The SDK surfaces it as `Token.deviceNotBound` / `WalletRefusalException.DeviceNotBound` and stops asking; the remedy is to remove the card and add it again on this phone |
 | `INTERNAL_ERROR` | Anything unclassified on the server |
 
 Both fields are on the result: `TokenisationResponse.responseStatus` /
@@ -1988,12 +2005,16 @@ keys. This is the push version of that same value:
 
 ```kotlin
 WalletKeyStateObserver.onKeyStateChanged { state ->
-    // state.tokenUniqueReference, state.requiresOnline
+    // state.tokenUniqueReference, state.requiresOnline, state.deviceNotBound
 }
 ```
 
 `requiresOnline` here is **the same value `getTokens()` reports** — the SDK reads one function for
 both, so a callback can never contradict the list you are about to draw.
+
+`CardKeyState.deviceNotBound` (default `false`) mirrors `Token.deviceNotBound`. A card the backend
+refused to issue keys to on this device is announced as `requiresOnline = false, deviceNotBound = true`
+— render it as "add this card again on this phone", not as a connect prompt.
 
 **Read this limit before you word your UI.** It fires from the two moments the SDK is actually
 executing: a payment consuming a key, and a refresh delivering new ones. Payment keys *also* expire
@@ -2058,6 +2079,7 @@ The consolidated playbook. "Safe to retry" means no money can have moved.
 | `WalletRefusalException.OnlineRequired` (message prefix `ONLINE_REQUIRED:`) | Wallet payments | After going online | Prompt to connect; the SDK refreshes the card itself. Pre-empt with `requiresOnline` (grey the card out). |
 | `WalletRefusalException.AmountExceedsCardLimit` (message prefix `AMOUNT_EXCEEDS_CARD_LIMIT:`) | Wallet payments | **Not by retrying** | The amount is larger than this card can carry in one payment. Going online does **not** help — offer a smaller amount or another card. |
 | `WalletRefusalException.TokenNotActive` (message prefix `TOKEN_NOT_ACTIVE:`) | Wallet payments | No (until active) | Card is suspended/inactive server-side. Show why; it unfreezes automatically when a sync sees it active. Don't build retry loops. |
+| `WalletRefusalException.DeviceNotBound` (message prefix `DEVICE_NOT_BOUND:`) | Wallet payments | **Not by retrying** | The card's payment keys are issued only to the device it was added on — this is another device, or the app was reinstalled. Going online does **not** help, nor does a smaller amount — ask the user to remove the card and add it again on this phone. Pre-empt with `deviceNotBound`. |
 | `NO_NETWORK_CONNECTION` (SoftPOS `SdkErrorCode`; wallet message prefix `NO_NETWORK_CONNECTION:`) | Any backend call, both SDKs | Yes, once connected | The device has no working internet connection and the call never left it. Ask the user to connect and retry. |
 | `AUTH_CANCELLED:` | Wallet QR payments | Yes | The customer dismissed the sheet the SDK raised. Nothing was sent; offer the payment again. |
 | `AUTH_FAILED:` | Wallet QR payments | Yes | Authentication did not succeed. Offer a retry. |
@@ -2079,7 +2101,7 @@ either a card you have wrongly greyed out or a promise of a refresh that cannot 
   the connection. The payment provably never went through, so it is safe to retry — but the user's
   connection is not the problem and telling them to check it wastes their time.
 
-The three pre-proof refusals above are **typed exceptions** — `when` on the `WalletRefusalException` subtype instead of string-matching the message (the message prefixes are unchanged, so existing string checks keep working):
+The four pre-proof refusals above are **typed exceptions** — `when` on the `WalletRefusalException` subtype instead of string-matching the message (the message prefixes are unchanged, so existing string checks keep working):
 
 ```kotlin
 onFailure = { e ->
@@ -2087,6 +2109,7 @@ onFailure = { e ->
         is WalletRefusalException.OnlineRequired -> promptToConnect()
         is WalletRefusalException.AmountExceedsCardLimit -> offerSmallerAmountOrOtherCard()
         is WalletRefusalException.TokenNotActive -> showCardUnavailable()
+        is WalletRefusalException.DeviceNotBound -> promptToAddCardAgain()
         else -> showError(e.message)
     }
 }
@@ -2114,6 +2137,7 @@ data class Token(
     val activationMethods: List<ActivationMethod>?,  // non-null while activation is pending
     val transactions: List<TransactionSummary>,      // last 3
     val requiresOnline: Boolean,            // true: card can't pay until the wallet has been online — grey it out
+    val deviceNotBound: Boolean = false,    // true: keys refused to this device — re-add the card here; requiresOnline is then false
     val status: TokenStatus?,               // ACTIVE / PENDING_ACTIVATION / SUSPENDED / DEACTIVATED / EXPIRED / UNKNOWN;
                                             // null = never status-synced. A value this build doesn't know reads as UNKNOWN
     val statusRaw: String?                  // the stored wire value behind status — logs / forward compatibility
