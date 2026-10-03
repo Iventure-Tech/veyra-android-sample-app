@@ -163,6 +163,12 @@
     <string name="home_greeting">Welcome back</string>
     <string name="home_settings">Settings</string>
     <string name="home_actions_label">Contactless</string>
+    <string name="home_signed_in_as">Signed in as %1$s</string>
+    <string name="home_signed_out">Signed out</string>
+    <string name="home_switch_customer">Switch</string>
+    <string name="home_sign_out">Sign out</string>
+    <string name="home_sign_in">Sign in</string>
+    <string name="home_signed_out_locked">Sign in to use the wallet and get paid</string>
     <string name="home_get_paid_locked">Register as a merchant in Settings to accept payments</string>
     <string name="home_nfc_hint">NFC switches on automatically inside Get paid and Pay, and off when you leave.</string>
     <string name="home_get_paid">Get paid</string>

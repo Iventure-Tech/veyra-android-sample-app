@@ -23,6 +23,29 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 
 > **iOS note:** tap **acceptance** on iPhone reads the customer's Android Veyra wallet over CoreNFC. Tap-to-**pay** (card emulation) is not available on iOS — Apple restricts card emulation — so the iOS wallet pays by QR (scan-to-pay and show-QR-to-pay).
 
+### Migrating from 1.x to 2.0.0
+
+2.0.0 keeps every card, key, merchant and transaction **per customer**, so the SDK has to be told who the customer is. The breaking changes:
+
+| 1.x | 2.0.0 |
+|---|---|
+| `VeyraSdk.initialize(activity, config)` | `VeyraSdk.initialize(activity, customerId, config)` |
+| `VeyraSoftPOSSdk.initialize(activity, config)` | `VeyraSoftPOSSdk.initialize(activity, customerId, config)` |
+| `VeyraWalletSdk.initialize(context, config, activity)` | `VeyraWalletSdk.initialize(context, customerId, config, activity)` |
+| `VeyraSoftPOSSdk.storedMerchant(context)` | `VeyraSoftPOSSdk.storedMerchant(context, customerId)` |
+| `VeyraSoftPOSSdk.isMerchantRegistered(context)` | `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` |
+| `merchantService.clearStoredMerchant()` | **Removed.** Call `signOut()` when the customer logs out; a successful registration overwrites the stored merchant, so re-registering needs no clear. |
+| — | **New:** `signOut()` on `VeyraSdk`, `VeyraSoftPOSSdk` and `VeyraWalletSdk`. |
+
+What to change in your app:
+
+1. Pass the id of the customer your app has authenticated to `initialize` — **on every launch**, not only the first. The SDK does not remember who is signed in.
+2. Call `signOut()` when the customer logs out.
+3. Register your observers again after each `initialize` — a sign-out or a switch to another customer drops them.
+4. Expect existing customers to start empty: data written by 1.x is not tied to any customer, so the SDK **erases it** on the first 2.0.0 launch instead of guessing whose it was. Customers add their cards again, and merchants register again.
+
+See [Customers: signing in, signing out, switching](#customers-signing-in-signing-out-switching) for the full behaviour.
+
 ---
 
 ## Requirements
@@ -162,7 +185,7 @@ dependencies {
 Facade for a combined SoftPOS + Wallet app. It owns the exclusive mode and hands out the two member SDKs. Package `co.veyra.sdk`.
 
 ```kotlin
-val sdk = VeyraSdk.initialize(this, VeyraSdkConfig(softposConfig, walletConfig))
+val sdk = VeyraSdk.initialize(this, customerId, VeyraSdkConfig(softposConfig, walletConfig))
 val wallet  = sdk.wallet    // VeyraWalletSdk
 val softpos = sdk.softpos   // VeyraSoftPOSSdk
 ```
@@ -171,7 +194,8 @@ val softpos = sdk.softpos   // VeyraSoftPOSSdk
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, config)` | `activity` — an `AppCompatActivity`; `config` — `VeyraSdkConfig(softpos, wallet)` | Initialises the facade and installs the exclusive-mode arbiter. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app. |
+| `initialize(activity, customerId, config)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSdkConfig(softpos, wallet)` | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `IllegalArgumentException` when `customerId` is blank. |
+| `signOut()` (static) | — | The customer has logged out: stops everything both SDKs run for them and drops every observer registration. Their cards, keys, merchant and history stay on the device for when they sign in again. |
 | `getInstance()` | — | The current instance, or `null` if not yet initialised. |
 | `softpos` | — | The `VeyraSoftPOSSdk`. Throws `IllegalStateException` if that SDK has not been initialised yet (each of your screens initialises its own SDK — see the samples). |
 | `wallet` | — | The `VeyraWalletSdk`. Same behaviour. |
@@ -186,14 +210,17 @@ val softpos = sdk.softpos   // VeyraSoftPOSSdk
 Package `co.veyra.softpos.payment.sdk`. Process singleton; initialise on (or before) each screen that accepts payments, so reader arming binds to that screen's lifecycle.
 
 ```kotlin
-val sdk = VeyraSoftPOSSdk.initialize(this, softposConfig)
+val sdk = VeyraSoftPOSSdk.initialize(this, customerId, softposConfig)
 ```
 
 **Methods & services:**
 
 | Member | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, config)` | `activity` — `AppCompatActivity`; `config` — `VeyraSoftPosSdkConfig` | Initialises (or re-binds) the singleton. Idempotent; re-binds NFC reader + lifecycle to the new activity on every call. Throws `VeyraSdkException` (`MISSING_MANDATORY_CONFIG`) when credentials are missing for the environment. |
+| `initialize(activity, customerId, config)` | `activity` — `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSoftPosSdkConfig` | Initialises (or re-binds) the singleton and signs `customerId` in. Idempotent; re-binds NFC reader + lifecycle to the new activity on every call. The same customer again changes nothing; a different customer stops the previous customer's work and opens the new customer's merchant and transactions. Throws `VeyraSdkException` (`MISSING_MANDATORY_CONFIG`) when credentials are missing for the environment, and `IllegalArgumentException` when `customerId` is blank. |
+| `signOut()` (static) | — | The customer has logged out: stops every poll and watch the SDK runs for them and drops every observer registration. Their merchant and transactions stay on the device. Until the next `initialize` there is no merchant. |
+| `storedMerchant(context, customerId)` (static) | `context`; `customerId` | Init-free read of that customer's stored merchant — see [Merchant status](#merchant-status--isregistered--ismerchantactive--refreshstatus--activate--deactivate). |
+| `isMerchantRegistered(context, customerId)` (static) | `context`; `customerId` | Init-free registration check for that customer. |
 | `getInstance()` | — | Current instance or `null`. |
 | `cardPaymentService` | — | Tap acceptance — [`makeCardPayment`](#makecardpayment) and friends. |
 | `merchantService` | — | Merchant registration, status, profile, banks. |
@@ -207,20 +234,50 @@ The reader arms on resume and disarms on pause automatically. If NFC is unavaila
 Package `co.veyra.wallet.sdk`. Process singleton. The environment is set **once at initialisation** and applies to all subsequent SDK calls.
 
 ```kotlin
-val sdk = VeyraWalletSdk.initialize(context, walletConfig, activity = this)
+val sdk = VeyraWalletSdk.initialize(context, customerId, walletConfig, activity = this)
 ```
 
 **Methods:**
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(context, config, activity?)` | `context` — app context; `config` — `VeyraWalletSdkConfig`; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. Throws `IllegalArgumentException` when `clientId`/`clientSecret` are missing for TEST/LIVE. |
+| `initialize(context, customerId, config, activity?)` | `context` — app context; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraWalletSdkConfig`; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton and signs `customerId` in. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. The same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. Throws `IllegalArgumentException` when `customerId` is blank or `clientId`/`clientSecret` are missing for TEST/LIVE. |
+| `signOut()` (static) | — | The customer has logged out: stops every loop, poll, worker and observer the SDK runs for them. Their cards, keys, history and receipts stay on the device. Until the next `initialize` there are no cards and a tap is answered "application not found". |
 | `getInstance()` | — | Current instance or `null`. |
 | `tokenisationService` | — | The wallet service — every wallet operation hangs off it. |
 | `getTokenRequestorId()` | — | The token requestor ID from config. |
 | `getPaymentApplicationInstanceId()` | — | This install's `payment_application_instance_id` — **SDK-generated** (`VYRA` + 32 hex chars), minted on first use, persisted install-scoped, never backed up, new on reinstall. Read-only; the app cannot set or regenerate it. |
 | `getClientId()` / `getClientSecret()` | — | The OAuth credentials in effect. |
 | `getAppVersion()` | — | The app version reported to the backend. |
+
+---
+
+## Customers: signing in, signing out, switching
+
+The SDK keeps everything it stores **per customer**: wallet cards, payment keys, transaction history and receipts, the registered merchant and merchant transactions. One phone can be shared by several of your customers, and none of them sees another's data. The `customerId` you pass never leaves the device — the SDK only uses a hash of it to name that customer's storage.
+
+Who is signed in is **your app's** to remember, not the SDK's. The SDK holds it only in memory, for the life of the process:
+
+- **Pass the customer on every launch.** Call `initialize` with the authenticated customer's id each time your app starts (and on each screen that initialises an SDK, as today). Use a stable id from your own login — the same customer must always get the same id, or their data will not be found.
+- **Same customer again — nothing happens.** Repeated `initialize` calls with the same id stop nothing and download nothing.
+- **A different customer — the SDK switches.** The previous customer's work (key refreshes, status polls, pending-payment checks, background workers) is stopped, and the new customer's cards and merchant are opened from the device.
+- **Sign out with `signOut()`** (`VeyraWalletSdk.signOut()`, `VeyraSoftPOSSdk.signOut()`, or `VeyraSdk.signOut()` in a combined app). It stops every loop, poll, worker and observer for the customer. Their cards, keys, history, merchant and transactions **stay on the device**: when they sign in again nothing is downloaded for a card that still has its keys, and a card without keys gets them in the background after sign-in.
+- **Register observers again after `initialize`.** A sign-out and a switch to another customer both drop every observer registration (`onTransactionResolved`, `onTokenStatusChanged`, `onKeyStateChanged`, `onMerchantStatusChanged`, credit confirmations, refusal handlers). Register them right after each `initialize` call that signs a customer in.
+- **Nobody signed in means no data.** After `signOut()`, and in a fresh process where your app has not called `initialize` yet (the app was killed, the phone restarted), there are no cards and no merchant, and an NFC tap from a terminal is answered "application not found" — no payment is made. A wallet or SoftPOS call that needs the customer's data — cards, payments, the stored merchant, transactions — throws `co.veyra.common.customer.NoActiveCustomerException` (an `IllegalStateException`); catch it to send the user to your sign-in. A request already on its way when the customer signs out still completes for that customer: its answer is kept with their data, and you hear about it when they sign in again. Initialise with the customer as soon as your app knows who they are.
+- **The init-free reads take the customer.** `VeyraSoftPOSSdk.storedMerchant(context, customerId)` and `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` read that customer's merchant without signing anyone in.
+- **Re-registering a merchant needs no clear.** A successful registration overwrites the customer's stored merchant.
+
+```kotlin
+// Your login succeeded (or the app starts with a remembered session):
+val sdk = VeyraWalletSdk.initialize(context, session.customerId, walletConfig, activity = this)
+TokenLifecycleObserver.onTokenStatusChanged { change -> /* ... */ }  // register again after every initialize
+
+// Your customer logs out:
+VeyraWalletSdk.signOut()
+session.clear()
+```
+
+> **Upgrading from 1.x:** data stored by 1.x belongs to no customer, so the first 2.0.0 launch **erases** it rather than migrating it. Your customers add their cards again, and merchants register again. See [Migrating from 1.x to 2.0.0](#migrating-from-1x-to-200).
 
 ---
 
@@ -334,7 +391,7 @@ Service accessors: `sdk.merchantService`, `sdk.cardPaymentService`, `sdk.transac
 
 ### Merchant registration & profile
 
-A device must have a **registered, active merchant** before it can accept payments. Registration persists the merchant on the device (SDK-owned storage, cleared on uninstall); the backend assigns the merchant ID, terminal ID and category code.
+A device must have a **registered, active merchant** before it can accept payments. Registration persists the merchant on the device for the signed-in customer (SDK-owned storage, kept across sign-out, cleared on uninstall); the backend assigns the merchant ID, terminal ID and category code.
 
 ---
 
@@ -408,14 +465,15 @@ sdk.merchantService.getBanks { banks ->
 | Method | Description |
 |---------|-------------|
 | `isRegistered(): Boolean` | `true` when a complete merchant (ID, terminal, name, acquirer, MCC, country) is stored on this device. |
-| **`VeyraSoftPOSSdk.isMerchantRegistered(context)`** (static) | The same check **without initialising the SDK** — no lifecycle binding, no NFC arming. Gate your Home screen's Get-paid entry on this (initialise the SDK only on payment screens). |
-| **`VeyraSoftPOSSdk.storedMerchant(context)`** (static) | Init-free read of the persisted `StoredMerchantData` (or `null`) — e.g. for pre-filling or merchant-type checks before any payment screen exists. |
+| **`VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)`** (static) | The same check for `customerId` **without initialising the SDK** — no lifecycle binding, no NFC arming, nobody signed in. Gate your Home screen's Get-paid entry on this (initialise the SDK only on payment screens). |
+| **`VeyraSoftPOSSdk.storedMerchant(context, customerId)`** (static) | Init-free read of that customer's persisted `StoredMerchantData` (or `null`) — e.g. for pre-filling or merchant-type checks before any payment screen exists. |
 | `isMerchantActive(): Boolean` | `true` when the last known backend status is `ACTIVE` (a merchant with no status yet counts active). Payments are refused for inactive merchants. |
 | `refreshStatus()` | Refresh the backend status immediately (the SDK also polls it periodically while your app is foregrounded). Call at the activation moment. |
 | `activate { response -> }` / `deactivate { response -> }` | Activate / deactivate this merchant on the backend. Callback gets `MerchantStatusResponse(merchantId, merchantStatus)` or `null` on failure. |
 | `getStoredMerchantData(): StoredMerchantData?` | The merchant persisted by the last successful registration (all profile fields + backend-assigned ones), or `null`. |
 | `getStoredMerchantId(): String?` / `hasStoredMerchant(): Boolean` | Convenience reads. |
-| `clearStoredMerchant()` | Clear the stored merchant (logout / re-registration). |
+
+There is no call to clear the stored merchant: a successful registration overwrites it, and when the customer logs out call `VeyraSoftPOSSdk.signOut()` — see [Customers](#customers-signing-in-signing-out-switching).
 
 ---
 
@@ -1245,7 +1303,7 @@ reference the merchant's own app supplied — a value a wallet never sees. The w
 
 Fires only on a genuine `PENDING` → final transition: a poll that leaves the row pending, and a
 later write that backfills merchant details onto an already-final row, both wake nothing. Register
-once at start-up, no replay (read `getTransactions` on appear), last registration wins, delivered
+once after each `initialize` (a sign-out or customer switch drops it), no replay (read `getTransactions` on appear), last registration wins, delivered
 on the main thread.
 
 ##### Merchant credit confirmation (wallet side)
@@ -1674,7 +1732,7 @@ TransactionResolvedObserver.onTransactionResolved { resolution ->
 
 Four things worth knowing before you rely on it:
 
-- **Register once, at start-up** — not per payment. It fires for *any* transaction that resolves,
+- **Register once, after each `initialize`** — not per payment. A sign-out or a switch to another customer drops the registration, so register again after the `initialize` that signs the customer in. It fires for *any* transaction that resolves,
   including one started in an earlier app session and settled by a later poll. That is the case that
   matters most: a tap that resolves after your app was backgrounded or killed.
 - **It does not replay.** If your app was not running when the row settled, nothing is queued for you —
@@ -1983,7 +2041,7 @@ TokenLifecycleObserver.onTokenStatusChanged { change ->
 - **Branch on `canPay`, not on `status`.** It is the same predicate the SDK's own payment gates
   use, so a status added to the backend after your build shipped is correctly reported as *not*
   payable instead of falling through a `when` that has never heard of it.
-- **Register once, at start-up** — not per card screen. The card that matters is the one no screen
+- **Register once, after each `initialize`** — not per card screen (a sign-out or customer switch drops it). The card that matters is the one no screen
   is showing.
 - **It does not replay.** If your app was not running when the issuer suspended the card, nothing
   is queued — read `getTokens()` at start-up. The observer is a convenience over the store, not a
@@ -2049,7 +2107,7 @@ gate uses, so you cannot end up more permissive than the gate that will refuse t
 that is not `ACTIVE`, including a status newer than your build, is `false`.
 
 Only genuine changes fire (a poll re-applying the same status wakes nothing), registration is
-single-listener with last-registration-wins, there is no replay, and delivery is on the main
+single-listener with last-registration-wins (and dropped on sign-out or a customer switch — register again after `initialize`), there is no replay, and delivery is on the main
 thread. Same channel on iOS (`VeyraSoftPOS.shared.merchant.onMerchantStatusChanged { … }`) and
 React Native (`merchant.onMerchantStatusChanged(listener)`).
 

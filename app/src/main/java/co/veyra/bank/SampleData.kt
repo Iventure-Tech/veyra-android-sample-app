@@ -131,5 +131,5 @@ object SampleData {
      * [personal] before any registration.
      */
     fun active(context: Context): Merchant =
-        if (co.veyra.softpos.payment.sdk.VeyraSoftPOSSdk.storedMerchant(context)?.merchantType == "BUSINESS") business(context) else personal(context)
+        if (co.veyra.softpos.payment.sdk.VeyraSoftPOSSdk.storedMerchant(context, VeyraBank.customerId(context))?.merchantType == "BUSINESS") business(context) else personal(context)
 }

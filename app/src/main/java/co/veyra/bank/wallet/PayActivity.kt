@@ -55,7 +55,7 @@ class PayActivity : AppCompatActivity() {
         // initialised the wallet SDK; re-initialising here is an idempotent no-op that
         // keeps this flow openable standalone.
         co.veyra.bank.VeyraBank.ensureInitialized(this)
-        sdk = VeyraWalletSdk.initialize(this, co.veyra.bank.VeyraBank.walletConfig(this), activity = this)
+        sdk = VeyraWalletSdk.initialize(this, co.veyra.bank.VeyraBank.customerId(this), co.veyra.bank.VeyraBank.walletConfig(this), activity = this)
 
         binding = ActivityPayBinding.inflate(layoutInflater)
         setContentView(binding.root)

@@ -10,6 +10,14 @@
   (Merchant / PersonalMerchant / BusinessMerchant).
 -->
 <resources>
+    <!-- The demo customers this app can sign in to the SDKs. A banking app passes the id of the
+         customer it has authenticated, on every launch; the SDKs never remember it. Two, so the
+         Home screen can show a switch between customers. -->
+    <string-array name="sample_customer_ids">
+        <item>demo-customer-1</item>
+        <item>demo-customer-2</item>
+    </string-array>
+
 
     <!-- Common identity — used whether the user registers as Personal or Business, and for
          both receiving (SoftPOS merchant) and paying (Wallet tokenisation).

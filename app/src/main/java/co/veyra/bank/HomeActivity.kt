@@ -3,13 +3,13 @@ package co.veyra.bank
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.widget.Button
 import android.widget.ImageButton
 import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import co.veyra.bank.softpos.GetPaidActivity
 import co.veyra.bank.wallet.PayActivity
-import co.veyra.sdk.VeyraSdk
 
 /**
  * Neo-bank home. NFC mode is implicit — no switch anywhere:
@@ -28,23 +28,40 @@ import co.veyra.sdk.VeyraSdk
  */
 class HomeActivity : AppCompatActivity() {
 
-    private lateinit var sdk: VeyraSdk
     private lateinit var cardGetPaid: View
+    private lateinit var cardPay: View
     private lateinit var getPaidSubtitle: TextView
+    private lateinit var customerLabel: TextView
+    private lateinit var switchCustomerButton: Button
+    private lateinit var signInOutButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_home)
 
-        sdk = VeyraBank.ensureInitialized(this)
+        // Every launch tells the SDKs who is logged in; a signed-out app tells them nothing.
+        if (VeyraBank.isSignedIn(this)) VeyraBank.signIn(this)
 
         cardGetPaid = findViewById(R.id.cardGetPaid)
+        cardPay = findViewById(R.id.cardPay)
         getPaidSubtitle = findViewById(R.id.getPaidSubtitle)
+        customerLabel = findViewById(R.id.customerLabel)
+        switchCustomerButton = findViewById(R.id.switchCustomerButton)
+        signInOutButton = findViewById(R.id.signInOutButton)
+
+        switchCustomerButton.setOnClickListener {
+            VeyraBank.switchCustomer(this)
+            reflectMerchantState()
+        }
+        signInOutButton.setOnClickListener {
+            if (VeyraBank.isSignedIn(this)) VeyraBank.signOut(this) else VeyraBank.signIn(this)
+            reflectMerchantState()
+        }
 
         cardGetPaid.setOnClickListener {
             startActivity(Intent(this, GetPaidActivity::class.java))
         }
-        findViewById<View>(R.id.cardPay).setOnClickListener {
+        cardPay.setOnClickListener {
             startActivity(Intent(this, PayActivity::class.java))
         }
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener { anchor ->
@@ -66,6 +83,7 @@ class HomeActivity : AppCompatActivity() {
      * initialised SoftPOS SDK and its `merchantService`).
      */
     private fun showMerchantMenu(anchor: android.view.View) {
+        if (!VeyraBank.isSignedIn(this)) return // merchant settings are a signed-in customer's
         if (!VeyraBank.isMerchantRegistered(this)) {
             startActivity(
                 Intent(this, GetPaidActivity::class.java)
@@ -90,11 +108,26 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun reflectMerchantState() {
-        val registered = VeyraBank.isMerchantRegistered(this)
+        val signedIn = VeyraBank.isSignedIn(this)
+        customerLabel.text = if (signedIn) {
+            getString(R.string.home_signed_in_as, VeyraBank.customerId(this))
+        } else {
+            getString(R.string.home_signed_out)
+        }
+        switchCustomerButton.visibility = if (signedIn) View.VISIBLE else View.GONE
+        signInOutButton.text = getString(if (signedIn) R.string.home_sign_out else R.string.home_sign_in)
+
+        val registered = signedIn && VeyraBank.isMerchantRegistered(this)
         cardGetPaid.isEnabled = registered
         cardGetPaid.alpha = if (registered) 1f else 0.45f
         getPaidSubtitle.text = getString(
-            if (registered) R.string.home_get_paid_subtitle else R.string.home_get_paid_locked
+            when {
+                !signedIn -> R.string.home_signed_out_locked
+                registered -> R.string.home_get_paid_subtitle
+                else -> R.string.home_get_paid_locked
+            }
         )
+        cardPay.isEnabled = signedIn
+        cardPay.alpha = if (signedIn) 1f else 0.45f
     }
 }
