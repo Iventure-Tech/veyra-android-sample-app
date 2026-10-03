@@ -102,6 +102,7 @@ class TokenizationRequestActivity : AppCompatActivity() {
         binding.customerIdEditText.setText(co.veyra.bank.VeyraBank.customerId(this))
         binding.accountNameEditText.setText(sample.accountName)
         binding.bvnEditText.setText(sample.bvn)
+        binding.emailEditText.setText(sample.emailAddress)
     }
     
     private fun fetchBanks(accountNumber: String?) {
@@ -191,10 +192,14 @@ class TokenizationRequestActivity : AppCompatActivity() {
         val customerId = binding.customerIdEditText.text?.toString()?.trim().orEmpty()
         val accountName = binding.accountNameEditText.text?.toString()?.trim().orEmpty()
         val bvn = binding.bvnEditText.text?.toString()?.trim().orEmpty()
+        val email = binding.emailEditText.text?.toString()?.trim().orEmpty()
         when {
             customerId.isEmpty() -> { showError(getString(R.string.customer_id_required), binding.customerIdInputLayout); return }
             accountName.isEmpty() -> { showError(getString(R.string.account_name_required), binding.accountNameInputLayout); return }
             bvn.isEmpty() -> { showError(getString(R.string.bvn_required), binding.bvnInputLayout); return }
+            !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
+                showError(getString(R.string.email_required), binding.emailInputLayout); return
+            }
         }
 
         // The card belongs to the customer entered here: sign them in first (switching the SDKs
@@ -215,8 +220,9 @@ class TokenizationRequestActivity : AppCompatActivity() {
         binding.errorTextView.visibility = View.GONE
         clearFieldErrors()
 
-        val sample = co.veyra.bank.SampleData.active(this)
-        val params = VerifyAccountParams.Builder(accountNumber, bank.institutionCode, sample.emailAddress)
+        // The wallet account id is the entered email: the SDK hashes it and the issuer compares
+        // that hash with the email/phone registered on the account.
+        val params = VerifyAccountParams.Builder(accountNumber, bank.institutionCode, email)
             .accountHolderName(accountName)
             .accountNumberSource(AccountNumberSource.MANUAL)
             .build()
@@ -235,6 +241,7 @@ class TokenizationRequestActivity : AppCompatActivity() {
                                     customerId,
                                     accountName,
                                     bvn,
+                                    email,
                                 )
                             )
                             finish()
@@ -282,5 +289,6 @@ class TokenizationRequestActivity : AppCompatActivity() {
         binding.customerIdInputLayout.error = null
         binding.accountNameInputLayout.error = null
         binding.bvnInputLayout.error = null
+        binding.emailInputLayout.error = null
     }
 }

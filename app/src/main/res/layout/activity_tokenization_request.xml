@@ -139,8 +139,9 @@
     </com.google.android.material.textfield.TextInputLayout>
 
     <!-- Who is adding the card, as the user enters it. The customer id is signed in to the
-         SDKs and sent as the consumer id; name and BVN go with the eligibility check and
-         the digitise request. Pre-filled, editable. -->
+         SDKs and sent as the consumer id; name, BVN and email go with the eligibility check
+         and the digitise request (the email is also the wallet account id). Pre-filled,
+         editable. -->
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/customerIdInputLayout"
         style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
@@ -243,6 +244,40 @@
             android:paddingBottom="16dp" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/emailInputLayout"
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:hint="@string/email_hint"
+        android:layout_marginTop="16dp"
+        app:hintTextColor="#FFFFFF"
+        app:hintEnabled="true"
+        app:boxStrokeColor="#FFFFFF"
+        app:boxStrokeWidth="0dp"
+        app:boxStrokeWidthFocused="2dp"
+        app:boxBackgroundMode="none"
+        app:boxBackgroundColor="@android:color/transparent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/bvnInputLayout">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/emailEditText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textEmailAddress"
+            android:minHeight="64dp"
+            android:textSize="18sp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#80FFFFFF"
+            android:background="@drawable/input_background"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp" />
+    </com.google.android.material.textfield.TextInputLayout>
+
     <TextView
         android:id="@+id/errorTextView"
         android:layout_width="0dp"
@@ -254,7 +289,7 @@
         android:layout_marginTop="8dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/bvnInputLayout" />
+        app:layout_constraintTop_toBottomOf="@id/emailInputLayout" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/submitButton"
