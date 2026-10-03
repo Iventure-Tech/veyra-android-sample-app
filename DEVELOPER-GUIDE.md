@@ -506,9 +506,9 @@ Arm the reader for one sale and wait for the customer's tap. **Non-terminal even
 ```kotlin
 val request = TransactionRequest.Builder(
     amount = 32500L,                                   // MINOR units: ₦325.00
-    currency = "0566"                                  // ISO 4217 numeric, 4 digits
-).merchantOrderId("ORDER-42")                          // optional: YOUR order id, not a key
- .build()                                              // txType defaults to PURCHASE
+    currency = "0566",                                 // ISO 4217 numeric, 4 digits
+    merchantOrderId = "ORDER-42",                      // required: YOUR order id, never a key
+).build()                                              // txType defaults to PURCHASE
 
 // The transaction reference is minted by the SDK — read it back off the response
 // (`response.merchantTransactionReference`) and key your receipts and lookups off that.
@@ -546,8 +546,8 @@ try {
 |-----------|----------|-------------|
 | `amount` | **Mandatory** | **Minor units** (`Long`), e.g. ₦325.00 → `32500L`. Must be > 0. |
 | `currency` | **Mandatory** | ISO 4217 numeric, 3–4 digits (padded to 4, e.g. `"0566"`). |
+| `merchantOrderId` | **Mandatory** | **Your** order / basket / invoice id for this sale (`String`, non-blank, at most 255 characters). A blank one throws `VeyraSdkException` with `INVALID_REQUEST` from the builder, before anything is sent. Stored and echoed by the gateway and shown on the transaction detail and receipt, on your side and on the paying wallet's. Never validated for uniqueness and never used as a lookup key, so the same value may appear on two payments — which is exactly what links the attempts of a retried sale. |
 | `txType` | Optional | `TxType.PURCHASE`, `REFUND`, `CASH_ADVANCE`, `RECURRING_PURCHASE`, `PRE_AUTH_COMPLETION`, `OTHER`. **Defaults to `PURCHASE`** when omitted — pass a value only for a non-purchase transaction. |
-| `.merchantOrderId(String?)` | Optional | **Your** order / basket / invoice id. Stored and echoed by the gateway and shown on the transaction detail and receipt. Never validated for uniqueness and never used as a lookup key, so the same value may appear on two payments — which is exactly what links the attempts of a retried sale. |
 | `.performed3ds(Boolean)` | Optional | Whether your app performed 3-D Secure. Default `false`. |
 
 > **The transaction reference is no longer yours to supply.** `Builder` used to take a mandatory
@@ -585,7 +585,7 @@ Poll `contextStatus(txRef)` on a short interval (the sample uses 2.5 s). States:
 val client = ContextPaymentClient(context, Environment.TEST, clientId, clientSecret)
 val created = client.createContextPayment(
     merchantId, amountMinorUnits, "566",
-    merchantOrderId = "ORDER-42",            // optional: YOUR order id (1.0.15+), never a lookup key
+    merchantOrderId = "ORDER-42",            // required: YOUR order id, never a lookup key
     onExpired = { blankQr(); showHint("This payment code has expired — start a new payment") },
 ) ?: run { showError("Could not create payment QR"); return }
 
@@ -646,7 +646,12 @@ lifecycleScope.launch {
 
 `charge(scanned, merchantOrderId = …)` returns `PaymentResponse`: the response triple — `responseCode` (the wire literal: display it, never branch on it), `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING` — **branch on this**; `PENDING` means the outcome is unknown, so never re-charge) and `responseStatusReason` — plus `message`, `transactionId`, `merchantStatus`, `merchantTransactionReference` (**the SDK-minted reference — fetch the receipt with `generateTransactionReceipt(it)`**) and `merchantOrderId` echoed back. A transport failure throws and records nothing.
 
-> **1.0.15+:** the old `charge(scanned, merchantTransactionReference, …)` shape no longer compiles — it is retained only as an `ERROR`-level deprecation that tells you what to do. That is deliberate: had the inert parameter simply been deleted, `charge(scanned, myReference)` would have kept compiling and bound your reference to `merchantOrderId` (both are `String?`), turning a value the SDK ignored into a stored, echoed, portal-visible order id. Drop the argument and pass `merchantOrderId` by name, as above.
+> **The order id is required on every merchant payment** — tap (`TransactionRequest.Builder`),
+> customer QR (`charge(scanned, merchantOrderId)`) and merchant QR
+> (`createContextPayment(…, merchantOrderId, …)`). Omitting it does not compile; a blank value throws
+> `VeyraSdkException` with `SdkErrorCode.INVALID_REQUEST` before anything is sent. Pass `merchantOrderId`
+> by name, as above: the pre-1.0.15 `charge(scanned, merchantTransactionReference, …)` overload is gone,
+> so a reference passed positionally would now be taken as your order id.
 
 ---
 
@@ -1484,7 +1489,7 @@ needs reconciling: fix what the code names and re-initiate.
 | Code | Raised when | What to do |
 |---|---|---|
 | `MISSING_MANDATORY_CONFIG` | Initialise, payment, QR or token call without an environment, client credentials, terminal id or merchant id | An integration bug, not a user-facing error. Fix `VeyraSoftPosSdkConfig` (or register the merchant, which supplies terminal/merchant ids). |
-| `INVALID_REQUEST` | Payment request failed validation — amount not greater than zero, or a missing / non-4-digit ISO 4217 currency. `message` names the failed check | Fix the input and call again. Safe: nothing was sent. |
+| `INVALID_REQUEST` | Payment request failed validation — amount not greater than zero, a missing / non-4-digit ISO 4217 currency, or a blank (or over-255-character) `merchantOrderId`. `message` names the failed check | Fix the input and call again. Safe: nothing was sent. |
 | `PAYMENT_CANCELLED` | The merchant cancelled the pending payment before a card was tapped | Return to the amount screen. Not an error to report — `message` is `"Payment cancelled"`. |
 | `TRANSACTION_IN_PROGRESS` | `makeCardPayment` (or a rail call) while another payment is still running | Wait for the in-flight callback. Never queue a second payment; disable the pay button while one is live. |
 | `MERCHANT_NOT_ACTIVE` | The merchant account is not `ACTIVE` | Gate your get-paid entry on `isRegistered` + `isMerchantActive()`, and call `refreshStatus()` while awaiting activation. |
