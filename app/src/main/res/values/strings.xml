@@ -8,6 +8,12 @@
     <string name="enter_account_number">Enter your account details</string>
     <string name="account_number_hint">Account Number</string>
     <string name="bank_hint">Select Bank</string>
+    <string name="customer_id_hint">Customer ID</string>
+    <string name="account_name_hint">Account Name</string>
+    <string name="bvn_hint">BVN</string>
+    <string name="customer_id_required">Enter the customer ID</string>
+    <string name="account_name_required">Enter the account name</string>
+    <string name="bvn_required">Enter the BVN</string>
     <string name="loading_banks">Loading banks…</string>
     <string name="no_banks_found">No banks found for this account</string>
     <!-- The device has no working connection: distinct from "no banks found", which is an

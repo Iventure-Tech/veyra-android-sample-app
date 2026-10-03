@@ -94,9 +94,14 @@ class TokenizationRequestActivity : AppCompatActivity() {
 
         }
         
-        // Pre-populate the account number to tokenise from the shared sample source — the
-        // SAME account the SoftPOS merchant flow receives into (res/values/sample_data.xml).
-        binding.accountNumberEditText.setText(co.veyra.bank.SampleData.active(this).accountNumber)
+        // Pre-populate from the shared sample source — the SAME account the SoftPOS merchant
+        // flow receives into (res/values/sample_data.xml) — and the signed-in customer. All of
+        // it is editable: what the user submits is what is sent.
+        val sample = co.veyra.bank.SampleData.active(this)
+        binding.accountNumberEditText.setText(sample.accountNumber)
+        binding.customerIdEditText.setText(co.veyra.bank.VeyraBank.customerId(this))
+        binding.accountNameEditText.setText(sample.accountName)
+        binding.bvnEditText.setText(sample.bvn)
     }
     
     private fun fetchBanks(accountNumber: String?) {
@@ -183,6 +188,21 @@ class TokenizationRequestActivity : AppCompatActivity() {
             return
         }
 
+        val customerId = binding.customerIdEditText.text?.toString()?.trim().orEmpty()
+        val accountName = binding.accountNameEditText.text?.toString()?.trim().orEmpty()
+        val bvn = binding.bvnEditText.text?.toString()?.trim().orEmpty()
+        when {
+            customerId.isEmpty() -> { showError(getString(R.string.customer_id_required), binding.customerIdInputLayout); return }
+            accountName.isEmpty() -> { showError(getString(R.string.account_name_required), binding.accountNameInputLayout); return }
+            bvn.isEmpty() -> { showError(getString(R.string.bvn_required), binding.bvnInputLayout); return }
+        }
+
+        // The card belongs to the customer entered here: sign them in first (switching the SDKs
+        // if someone else was signed in), so the card is added to that customer's wallet.
+        if (!co.veyra.bank.VeyraBank.isSignedIn(this) || co.veyra.bank.VeyraBank.customerId(this) != customerId) {
+            co.veyra.bank.VeyraBank.signIn(this, customerId)
+        }
+
         val sdk = VeyraWalletSdk.getInstance()
         if (sdk == null) {
             showError("SDK not initialized")
@@ -193,11 +213,11 @@ class TokenizationRequestActivity : AppCompatActivity() {
         binding.submitButton.text = getString(R.string.checking_eligibility)
         binding.tryAgainButton.visibility = View.GONE
         binding.errorTextView.visibility = View.GONE
-        binding.accountNumberInputLayout.error = null
+        clearFieldErrors()
 
         val sample = co.veyra.bank.SampleData.active(this)
         val params = VerifyAccountParams.Builder(accountNumber, bank.institutionCode, sample.emailAddress)
-            .accountHolderName(sample.accountName)
+            .accountHolderName(accountName)
             .accountNumberSource(AccountNumberSource.MANUAL)
             .build()
 
@@ -211,7 +231,10 @@ class TokenizationRequestActivity : AppCompatActivity() {
                                     this@TokenizationRequestActivity,
                                     accountNumber,
                                     bank.institutionCode,
-                                    bank.name
+                                    bank.name,
+                                    customerId,
+                                    accountName,
+                                    bvn,
                                 )
                             )
                             finish()
@@ -243,9 +266,21 @@ class TokenizationRequestActivity : AppCompatActivity() {
         return accountNumber.length == 10 && accountNumber.all { it.isDigit() }
     }
 
-    private fun showError(message: String) {
+    /** Shows [message] and marks [field] — the account number unless another field is at fault. */
+    private fun showError(
+        message: String,
+        field: com.google.android.material.textfield.TextInputLayout = binding.accountNumberInputLayout,
+    ) {
+        clearFieldErrors()
         binding.errorTextView.text = message
         binding.errorTextView.visibility = View.VISIBLE
-        binding.accountNumberInputLayout.error = message
+        field.error = message
+    }
+
+    private fun clearFieldErrors() {
+        binding.accountNumberInputLayout.error = null
+        binding.customerIdInputLayout.error = null
+        binding.accountNameInputLayout.error = null
+        binding.bvnInputLayout.error = null
     }
 }
