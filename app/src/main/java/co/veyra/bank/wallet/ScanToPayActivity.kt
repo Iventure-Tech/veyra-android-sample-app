@@ -41,7 +41,7 @@ class ScanToPayActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         co.veyra.bank.VeyraBank.ensureInitialized(this)
-        sdk = VeyraWalletSdk.initialize(this, co.veyra.bank.VeyraBank.walletConfig(this), activity = this)
+        sdk = VeyraWalletSdk.initialize(this, co.veyra.bank.VeyraBank.customerId(this), co.veyra.bank.VeyraBank.walletConfig(this), activity = this)
         setContentView(R.layout.activity_scan_to_pay)
 
         findViewById<MaterialButton>(R.id.cancelScanButton).setOnClickListener { finish() }

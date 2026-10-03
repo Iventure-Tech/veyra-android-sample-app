@@ -51,6 +51,38 @@
                 app:tint="@color/bank_text_secondary" />
         </LinearLayout>
 
+        <!-- Customer bar: who the app has signed in to the SDKs, switch, sign out -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/customerLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@color/bank_text_secondary"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/switchCustomerButton"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/home_switch_customer"
+                android:textColor="@color/bank_text_primary" />
+
+            <Button
+                android:id="@+id/signInOutButton"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/bank_text_primary" />
+        </LinearLayout>
+
         <!-- Balance card — deep-red, echoing a wallet card -->
         <FrameLayout
             android:layout_width="match_parent"
