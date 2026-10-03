@@ -94,6 +94,8 @@
     <string name="activation_pending_badge">Activation required</string>
     <!-- Frozen card — the wallet must go online before this card can pay -->
     <string name="requires_online_badge">Connect to internet</string>
+    <!-- Card added on another device (or before a reinstall): only adding it again here helps -->
+    <string name="device_not_bound_refusal">This card can\'t pay on this phone — remove it and add it again on this phone</string>
 
     <!-- Card activity -->
     <string name="recent_activity">Recent activity</string>
