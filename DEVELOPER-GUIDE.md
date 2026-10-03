@@ -34,6 +34,7 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 | `VeyraWalletSdk.initialize(context, config, activity)` | `VeyraWalletSdk.initialize(context, customerId, config, activity)` |
 | `VeyraSoftPOSSdk.storedMerchant(context)` | `VeyraSoftPOSSdk.storedMerchant(context, customerId)` |
 | `VeyraSoftPOSSdk.isMerchantRegistered(context)` | `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` |
+| `TransactionRequest.Builder(amount, currency).merchantOrderId(id)` — order id optional; `charge(scanned)` and `createContextPayment(…)` without it | **Required** on every merchant payment: `TransactionRequest.Builder(amount, currency, merchantOrderId)`, `charge(scanned, merchantOrderId)`, `createContextPayment(…, merchantOrderId, …)`. A blank one is refused with `INVALID_REQUEST` before anything is sent. The deprecated `charge(scanned, merchantTransactionReference, …)` overload is removed. |
 | `merchantService.clearStoredMerchant()` | **Removed.** Call `signOut()` when the customer logs out; a successful registration overwrites the stored merchant, so re-registering needs no clear. |
 | — | **New:** `signOut()` on `VeyraSdk`, `VeyraSoftPOSSdk` and `VeyraWalletSdk`. |
 
