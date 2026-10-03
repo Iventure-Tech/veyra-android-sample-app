@@ -1179,8 +1179,9 @@ class GetPaidActivity : AppCompatActivity() {
         lastOriginalTransactionReference = ""
         val request = TransactionRequest.Builder(
             amount = currentAmountMinorUnits,
-            currency = currentPaymentCurrencyCode
-        ).merchantOrderId(nextSampleOrderId()).build()
+            currency = currentPaymentCurrencyCode,
+            merchantOrderId = nextSampleOrderId(),
+        ).build()
         
         // Initiate payment using SDK. makeCardPayment claims SOFTPOS at the point of use;
         // in this combined app the claim is refused only while a wallet payment is
