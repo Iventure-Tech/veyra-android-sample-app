@@ -14,6 +14,7 @@ import co.veyra.softpos.payment.sdk.CurrencyUtils
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.api.mpm.MpmScanResult
 import co.veyra.wallet.sdk.api.mpm.VerifiedPaymentContext
+import co.veyra.wallet.sdk.exception.WalletRefusalException
 import com.google.android.material.button.MaterialButton
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -126,7 +127,12 @@ class ScanToPayActivity : AppCompatActivity() {
                         // so there is no unresolved payment to report as pending.
                         state = ResultState.REFUSED,
                         title = getString(R.string.declined),
-                        message = error.message ?: "Payment failed",
+                        message = if (error is WalletRefusalException.DeviceNotBound) {
+                            // Card added on another device: retrying can never succeed here.
+                            getString(R.string.device_not_bound_refusal)
+                        } else {
+                            error.message ?: "Payment failed"
+                        },
                     )
                 },
             )

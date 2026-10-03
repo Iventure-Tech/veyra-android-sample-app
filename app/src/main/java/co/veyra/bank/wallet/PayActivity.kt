@@ -26,6 +26,7 @@ import co.veyra.wallet.sdk.TransactionSummary
 import co.veyra.wallet.sdk.VeyraWalletSdkConfig
 import co.veyra.wallet.sdk.Token
 import co.veyra.wallet.sdk.TransactionResponse
+import co.veyra.wallet.sdk.exception.WalletRefusalException
 import co.veyra.wallet.sdk.util.CurrencyUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -236,7 +237,13 @@ class PayActivity : AppCompatActivity() {
         ) { result ->
             result.fold(
                 onSuccess = { qr -> showPaymentQrDialog(qr, amountText) },
-                onFailure = { e -> Toast.makeText(this, e.message, Toast.LENGTH_LONG).show() },
+                onFailure = { e ->
+                    // A device-not-bound refusal has already been shown by the onDeviceNotBound
+                    // callback registered when this card was armed; don't say it twice.
+                    if (e !is WalletRefusalException.DeviceNotBound) {
+                        Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
+                    }
+                },
             )
         }
     }
@@ -559,6 +566,16 @@ class PayActivity : AppCompatActivity() {
                             },
                             Toast.LENGTH_LONG,
                         ).show()
+                    }
+                },
+                // The card was added on another device, or before this app was reinstalled, and
+                // will never be given payment keys here. Neither going online nor a smaller amount
+                // helps — only removing the card and adding it again on this phone. Fires for the
+                // tap and for both QR rails while this card is the active one.
+                onDeviceNotBound = {
+                    runOnUiThread {
+                        Toast.makeText(this, R.string.device_not_bound_refusal, Toast.LENGTH_LONG).show()
+                        loadCards()
                     }
                 }
             )
