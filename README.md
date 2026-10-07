@@ -29,8 +29,9 @@ with per-outcome guidance — lives in this repository.
 - Android Studio (or the Android SDK + JDK 17) and a physical NFC-capable device running
   Android 9+ (API 28) — NFC and device attestation don't work on the emulator.
 - **Veyra onboarding credentials**: Maven repository username/password (the SDK repository
-  is authenticated), OAuth client id/secret, payment app provider id, and token requestor
-  id. The app talks to the Veyra TEST environment.
+  is authenticated), payment app provider id, token requestor id, and whatever your
+  [connection mode](#choose-a-connection-mode) needs. The app talks to the Veyra TEST
+  environment.
 - The test account details from your onboarding pack (the prefill identity in
   `app/src/main/res/values/sample_data.xml` is a placeholder — digitisation is checked
   against the issuer's test records).
@@ -45,9 +46,11 @@ with per-outcome guidance — lives in this repository.
    # edit veyra.properties
    ```
 
-3. Optionally update `app/src/main/res/values/sample_data.xml` with your test account
+3. Set `veyra.connection.mode` in `veyra.properties` — there is no default, and the app
+   refuses to start until it is set (see [Choose a connection mode](#choose-a-connection-mode)).
+4. Optionally update `app/src/main/res/values/sample_data.xml` with your test account
    details so the forms prefill usefully.
-4. Connect your device and run:
+5. Connect your device and run:
 
    ```bash
    ./gradlew :app:installDebug
@@ -59,11 +62,37 @@ The SDK artifacts resolve from the Veyra Maven repository
 (`https://repo.veyra.co/releases`) using the repository credentials in your
 `veyra.properties` — no local files, no extra setup.
 
+## Choose a connection mode
+
+Both SDKs need a `connection` — how they reach Veyra. The sample uses one mode for both, read
+from `veyra.connection.mode` in `veyra.properties`:
+
+| Mode | What it needs | Your bank backend serves |
+|---|---|---|
+| `directWithAssertion` (recommended) | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `viaAppBackend` | `veyra.bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
+| `directWithClientSecret` (**deprecated**) | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
+
+`veyra.bankSessionToken` is a **placeholder** for your app's own login session, sent to your bank
+backend as a bearer token. The two callbacks that call your backend are in
+`app/src/main/java/co/veyra/bank/connection/` — short, and meant to be copied. The relay is called
+from the SDK's background work too, not only from screens. The full contract — the assertion's
+claims, the relay envelope, and how a relay reports a failure — is in
+[Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
+
+> **Upgrading from SDK 2.x?** Each SDK config builder now takes a required `connection` instead
+> of `clientId` / `clientSecret`; staying on client credentials is a one-line change —
+> `connection = VeyraConnection.DirectWithClientSecret(clientId, clientSecret)`. See
+> [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An existing
+> `veyra.properties` keeps its keys; add `veyra.connection.mode` (and the bank-backend values for
+> the backend modes) from `veyra.properties.example`.
+
 ## Where things are
 
 | Path | What it shows |
 |---|---|
 | `app/src/main/java/co/veyra/bank/VeyraBank.kt` | SDK configuration & initialisation (both SDKs via the combined facade) |
+| `app/src/main/java/co/veyra/bank/connection/` | The connection to Veyra: mode selection, the assertion provider and the relay that call your bank backend |
 | `app/src/main/java/co/veyra/bank/HomeActivity.kt` | Home: entry to both flows, mode readout |
 | `app/src/main/java/co/veyra/bank/softpos/` | The merchant (Get paid) flow — all three acceptance rails |
 | `app/src/main/java/co/veyra/bank/wallet/` | The wallet (Pay) flow — add card, activation, payments, history |

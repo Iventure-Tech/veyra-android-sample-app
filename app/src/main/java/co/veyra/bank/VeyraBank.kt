@@ -73,8 +73,8 @@ object VeyraBank {
             paymentAppProviderId = requireNotNull(context.getString(R.string.payment_app_provider_id).takeIf { it.isNotBlank() }) {
                 "veyra.paymentAppProviderId must be set in veyra.properties (copy veyra.properties.example)"
             },
-            clientId = context.getString(R.string.client_id),
-            clientSecret = context.getString(R.string.client_secret)
+            // How the SDK reaches Veyra: from the git-ignored veyra.properties.
+            connection = co.veyra.bank.connection.AppConnection.connection(),
         )
             .enableNfc(true)
             .build()
@@ -91,8 +91,7 @@ object VeyraBank {
             co.veyra.common.Environment.TEST,
             paymentAppProviderId,
             tokenRequestorId,
-            clientId = context.getString(R.string.client_id).takeIf { it.isNotBlank() },
-            clientSecret = context.getString(R.string.client_secret).takeIf { it.isNotBlank() }
+            connection = co.veyra.bank.connection.AppConnection.connection(),
         )
             .appVersion(context.getString(R.string.app_version).takeIf { it.isNotBlank() })
             .walletProviderTokenizationRecommendationStandardVersion(

@@ -978,8 +978,6 @@ class GetPaidActivity : AppCompatActivity() {
             val client = ContextPaymentClient(
                 this@GetPaidActivity,
                 Environment.TEST,
-                getString(R.string.client_id),
-                getString(R.string.client_secret),
             )
             contextClient = client
             // The SDK owns the expiry timer; blank the QR the moment it fires (an expired

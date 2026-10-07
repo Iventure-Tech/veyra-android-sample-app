@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Credentials and onboarding identifiers (client_id, client_secret,
-         payment_app_provider_id, token_requestor_id) are injected from veyra.properties
-         at build time — see app/build.gradle and veyra.properties.example. Only
-         non-secret configuration lives here. -->
+    <!-- Onboarding identifiers (payment_app_provider_id, token_requestor_id) are injected
+         from veyra.properties at build time, and the connection to Veyra (mode, client id/secret,
+         bank backend) comes from the same file — see app/build.gradle and
+         veyra.properties.example. Only non-secret configuration lives here. -->
 
     <string name="app_version">1.0.0</string>
 
