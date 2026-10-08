@@ -19,6 +19,14 @@ def veyraProp = { String key ->
     }
     return value
 }
+// The connection values (mode, client id/secret, bank backend, bank session) are optional at
+// build time: which ones a mode needs depends on the mode, so an unset value reaches BuildConfig
+// as "" and the app refuses to start naming it (see connection/AppConnection.kt).
+def connectionValue = { String key ->
+    def v = veyraProps.getProperty(key)?.trim() ?: ''
+    if (v.startsWith('your-')) v = ''
+    '"' + v.replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
 
 android {
     namespace 'co.veyra.bank'
@@ -34,10 +42,15 @@ android {
 
         // Injected as string resources so the rest of the app reads them like any other
         // config value (see VeyraBank.kt).
-        resValue "string", "client_id", veyraProp('veyra.clientId')
-        resValue "string", "client_secret", veyraProp('veyra.clientSecret')
         resValue "string", "payment_app_provider_id", veyraProp('veyra.paymentAppProviderId')
         resValue "string", "token_requestor_id", veyraProp('veyra.tokenRequestorId')
+
+        // How both SDKs reach Veyra — see connection/AppConnection.kt.
+        buildConfigField 'String', 'VEYRA_CONNECTION_MODE', connectionValue('veyra.connection.mode')
+        buildConfigField 'String', 'VEYRA_CLIENT_ID', connectionValue('veyra.clientId')
+        buildConfigField 'String', 'VEYRA_CLIENT_SECRET', connectionValue('veyra.clientSecret')
+        buildConfigField 'String', 'BANK_BACKEND_BASE_URL', connectionValue('veyra.bankBackendBaseUrl')
+        buildConfigField 'String', 'BANK_SESSION_TOKEN', connectionValue('veyra.bankSessionToken')
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -63,6 +76,7 @@ android {
 
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 
     lint {
@@ -88,10 +102,16 @@ dependencies {
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
     implementation 'com.google.zxing:core:3.5.2'
 
+    // HTTP client for the two calls this app makes to its own bank backend (connection/)
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
     // JSON (activation method persistence in the wallet flow)
     implementation 'com.google.code.gson:gson:2.10.1'
 
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    testImplementation 'org.json:json:20231013'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 }
