@@ -11,9 +11,9 @@ import org.json.JSONObject
 
 /**
  * `DirectWithAssertion`: fetch a short-lived assertion for the signed-in user from **your bank
- * backend's endpoint** (`POST {base}/sdk-assertion`). See the integration guide for the claims it
- * must sign — `iss`, `sub`, `aud` equal to the [audience] the SDK passes here, `exp` ≤ 5 min, a
- * unique `jti`, `acr`, and `cnf.jkt` equal to the [jkt] the SDK passes here.
+ * backend's endpoint** (`POST {base}/sdk-assertion`). See the integration guide for the minimum
+ * claims — `iss`, `sub`, `aud` equal to the [audience] the SDK passes here, `iat`, `exp` ≤ 5 min
+ * and a unique `jti` — plus the optional `cnf.jkt` (the [jkt] the SDK passes here) and `acr`.
  *
  * Request `{"jkt": "<jkt>", "audience": "<Veyra API base URL>"}` with your app's own session;
  * response `{"assertion": "<compact JWT>"}`.
