@@ -293,7 +293,7 @@ session.clear()
 
 You pass **one provider** to `initialize`, and it says how the SDK reaches the Veyra backend. The
 same provider serves both SDKs. There is **no default**: which kind you implement is your decision
-as the payment app provider. The types live in `co.veyra.common.connection` (`VeyraProvider`,
+as the payment app provider. The types live in `co.veyra.common.providers` (`VeyraProvider`,
 `VeyraAuthProvider`, `VeyraProxyProvider`, `VeyraProviderType`, `VeyraRelayException`).
 
 ### Choosing a provider

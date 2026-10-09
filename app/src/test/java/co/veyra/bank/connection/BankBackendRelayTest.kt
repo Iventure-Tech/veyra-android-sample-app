@@ -1,6 +1,6 @@
 package co.veyra.bank.connection
 
-import co.veyra.common.connection.VeyraRelayException
+import co.veyra.common.providers.VeyraRelayException
 import co.veyra.common.net.NetworkFailureKind
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
