@@ -40,7 +40,7 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 | — | **New:** `SdkErrorCode.NOT_AUTHENTICATED` (SoftPOS) and the `NOT_AUTHENTICATED:` message prefix (wallet): the SDK could not obtain credentials, so nothing was sent. |
 
 Replace the client id and secret with a provider. Either your backend signs an assertion for the
-signed-in user (`VeyraAuthProvider`), or every call goes through your backend
+signed-in user (`VeyraAssertionProvider`), or every call goes through your backend
 (`VeyraProxyProvider`):
 
 ```kotlin
@@ -50,7 +50,7 @@ VeyraSoftPOSSdk.initialize(activity, customerId, config)
 
 // 3.0.0
 val config = VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId).build()
-VeyraSoftPOSSdk.initialize(activity, customerId, config, MyAuthProvider(bankApi))   // or MyProxyProvider(bankApi)
+VeyraSoftPOSSdk.initialize(activity, customerId, config, MyAssertionProvider(bankApi))   // or MyProxyProvider(bankApi)
 ```
 
 Each needs one endpoint on your backend; see
@@ -205,7 +205,7 @@ val softpos = sdk.softpos   // VeyraSoftPOSSdk
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, customerId, config, provider)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSdkConfig(softpos, wallet)`; `provider` — your `VeyraAuthProvider` or `VeyraProxyProvider`, shared by both SDKs (see [Connecting to Veyra](#connecting-to-veyra)) | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `IllegalArgumentException` when `customerId` is blank or the provider is unusable (naming the problem). |
+| `initialize(activity, customerId, config, provider)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSdkConfig(softpos, wallet)`; `provider` — your `VeyraAssertionProvider` or `VeyraProxyProvider`, shared by both SDKs (see [Connecting to Veyra](#connecting-to-veyra)) | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `IllegalArgumentException` when `customerId` is blank or the provider is unusable (naming the problem). |
 | `signOut()` (static) | — | The customer has logged out: stops everything both SDKs run for them and drops every observer registration. Their cards, keys, merchant and history stay on the device for when they sign in again. |
 | `getInstance()` | — | The current instance, or `null` if not yet initialised. |
 | `softpos` | — | The `VeyraSoftPOSSdk`. Throws `IllegalStateException` if that SDK has not been initialised yet (each of your screens initialises its own SDK — see the samples). |
@@ -294,13 +294,13 @@ session.clear()
 You pass **one provider** to `initialize`, and it says how the SDK reaches the Veyra backend. The
 same provider serves both SDKs. There is **no default**: which kind you implement is your decision
 as the payment app provider. The types live in `co.veyra.common.providers` (`VeyraProvider`,
-`VeyraAuthProvider`, `VeyraProxyProvider`, `VeyraProviderType`, `VeyraRelayException`).
+`VeyraAssertionProvider`, `VeyraProxyProvider`, `VeyraProviderType`, `VeyraRelayException`).
 
 ### Choosing a provider
 
 | Provider | `providerType` | The SDK… | Choose it when |
 |---|---|---|---|
-| `VeyraAuthProvider` | `AUTHENTICATION` | calls Veyra itself, with a token it obtains by exchanging a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the logged-in user (recommended) |
+| `VeyraAssertionProvider` | `AUTHENTICATION` | calls Veyra itself, with a token it obtains by exchanging a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the logged-in user (recommended) |
 | `VeyraProxyProvider` | `REQUEST_PROCESSOR` | calls **nothing** itself: every call is handed to your provider, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
 **The interface you implement is the method.** Each interface supplies its `providerType` by
@@ -317,7 +317,7 @@ Rules that hold for every provider:
   blank `clientId`. SoftPOS throws `VeyraSdkException` with `MISSING_MANDATORY_CONFIG`; the wallet
   and `VeyraSdk` throw `IllegalArgumentException`. (Kotlin also refuses to compile a class that
   implements both, until it overrides `providerType` itself.)
-- **One kind per process, with no fallback.** A `VeyraAuthProvider` whose `assertion` returns
+- **One kind per process, with no fallback.** A `VeyraAssertionProvider` whose `assertion` returns
   nothing fails with `NOT_AUTHENTICATED`; the SDK never tries another method. Initialising again
   with the other kind throws `IllegalStateException`.
 - **Initialise re-binds the provider.** The provider you pass on each `initialize` is the one the
@@ -331,11 +331,11 @@ Rules that hold for every provider:
 
 ### Implementing a provider
 
-**`VeyraAuthProvider`** — your client id, and one function that gets an assertion from your
+**`VeyraAssertionProvider`** — your client id, and one function that gets an assertion from your
 backend. The SDK calls it only when it needs a new token:
 
 ```kotlin
-class MyAuthProvider(private val bank: MyBankApi) : VeyraAuthProvider {
+class MyAssertionProvider(private val bank: MyBankApi) : VeyraAssertionProvider {
     override val clientId = "your-client-id"          // public, issued at onboarding
 
     /** A JWT from your backend for the signed-in user, or null when nobody is signed in. */
@@ -364,7 +364,7 @@ sent — see [the failure contract](#the-proxy-providers-failure-contract).
 ### Initialising with your provider
 
 ```kotlin
-val provider = MyAuthProvider(bankApi)                // or MyProxyProvider(bankApi)
+val provider = MyAssertionProvider(bankApi)                // or MyProxyProvider(bankApi)
 
 val softposConfig = VeyraSoftPosSdkConfig.builder(Environment.TEST, paymentAppProviderId).build()
 val walletConfig = VeyraWalletSdkConfig.builder(Environment.TEST, paymentAppProviderId, tokenRequestorId).build()
@@ -376,22 +376,22 @@ VeyraWalletSdk.initialize(context, customerId, walletConfig, provider, activity)
 ```
 
 The sample reads the kind from `veyra.properties` (`veyra.connection.mode`: `directWithAssertion`
-for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`; required — the app
+for its `VeyraAssertionProvider`, `viaAppBackend` for its `VeyraProxyProvider`; required — the app
 refuses to start without it) and builds the provider in
 `app/src/main/java/co/veyra/bank/connection/AppConnection.kt`. Its two providers,
-`BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied. The
+`BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied. Each mode reads only its own settings: `directWithAssertion` needs the client id and your backend URL, `viaAppBackend` only your backend URL, and `directWithClientSecret` only the client id and secret. The
 template `veyra.properties.example` ships with `directWithClientSecret`, the sample's
 `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only**, so the sample runs
 before your backend has either endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
-`VeyraAuthProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both are
+`VeyraAssertionProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both are
 authenticated with your app's **own** session (the sample sends a placeholder bearer token from
 `veyra.properties` — replace it with your login session); neither is a Veyra credential.
 
 ```
-POST {your backend}/sdk-assertion                          (VeyraAuthProvider)
+POST {your backend}/sdk-assertion                          (VeyraAssertionProvider)
      {"audience": "<audience>", "jkt": "<jkt>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns null)
 
@@ -508,7 +508,7 @@ data. **Forward the bytes unmodified.** The SDK's log export does not go through
 
 It exists only so apps already on client credentials keep working until their cut-over date; it is
 retired per payment app provider. Don't build a new integration on it: a client secret inside an
-app can be extracted. Implement `VeyraAuthProvider` or `VeyraProxyProvider`.
+app can be extracted. Implement `VeyraAssertionProvider` or `VeyraProxyProvider`.
 
 ---
 
@@ -1664,7 +1664,7 @@ Two kinds of surface, marked throughout:
 | `SdkModeException` | Combined apps only: a payment's mode claim refused while the other mode's payment is mid-flight (e.g. `makeCardPayment` during a wallet payment), or both SDKs initialised without the `VeyraSdk` facade | Prompt the user to finish/cancel the other payment first. **Never occurs in a standalone single-SDK app.** |
 | `TokenizationRequestValidationException` | `digitizeAccount` params with a blank required field (synchronous; carries `fieldName`) | Fix the missing input before calling. |
 | `VeyraSdkException` (`errorCode = MISSING_MANDATORY_CONFIG`) | SoftPOS initialise / payment without an environment or with an unusable provider | Fix your configuration or provider. |
-| `VeyraSdkException` (`errorCode = NOT_AUTHENTICATED`) | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAuthProvider.assertion` returned `null` or threw, or the token endpoint refused the client | Nothing was sent. With a `VeyraAuthProvider` this usually means nobody is signed in to your app: send the user to sign-in, then retry. |
+| `VeyraSdkException` (`errorCode = NOT_AUTHENTICATED`) | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAssertionProvider.assertion` returned `null` or threw, or the token endpoint refused the client | Nothing was sent. With a `VeyraAssertionProvider` this usually means nobody is signed in to your app: send the user to sign-in, then retry. |
 | `VeyraSdkException` (`errorCode = NO_NETWORK_CONNECTION`) | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — when the device has no working internet connection | Tell the user to connect and try again. Nothing was sent, so nothing needs undoing or reconciling. |
 | `IllegalArgumentException` | `cpmCustomerQrService.inspect` on a payload that isn't a Veyra payment QR | Not an error — show "not a payment code, try again" and stay armed for another scan. |
 
@@ -1722,7 +1722,7 @@ needs reconciling: fix what the code names and re-initiate.
 | `MERCHANT_PROFILE_INCOMPLETE` | The stored merchant profile has no settlement account number / institution code | Finish onboarding (update the merchant) before taking payments — there is nowhere to settle to. |
 | `NFC_MODE_REFUSED` | The NFC mode arbiter refused SOFTPOS — a wallet payment is mid-flight (combined apps only) | Prompt the user to finish or cancel the other payment. **Never occurs in a SoftPOS-only app.** |
 | `NO_NFC_TAG` | The tap produced no usable ISO-DEP target (also raised by the kernel, below) | Transient — ask for another tap; the reader stays armed. |
-| `NOT_AUTHENTICATED` | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAuthProvider.assertion` returned `null` or threw, or the token endpoint refused the client | Nothing was sent: no response code, nothing stored or polled. With a `VeyraAuthProvider` it usually means nobody is signed in — send the user to sign-in, then retry. The SDK never falls back to another connection mode. |
+| `NOT_AUTHENTICATED` | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAssertionProvider.assertion` returned `null` or threw, or the token endpoint refused the client | Nothing was sent: no response code, nothing stored or polled. With a `VeyraAssertionProvider` it usually means nobody is signed in — send the user to sign-in, then retry. The SDK never falls back to another connection mode. |
 | `NO_NETWORK_CONNECTION` | **Any** SoftPOS backend call on a device with no working internet connection — DNS never resolved, or the radio has no usable network | "Connect to the internet and try again." The call provably never left the device, so nothing was charged and nothing is polling. Do **not** confuse with `91` / `ISSUER_SWITCH_NOT_AVAILABLE` (reached the network, refused) or with the wallet's `ONLINE_REQUIRED` (a *card* state). |
 
 #### 2. Card-read failures — "unknown card, tap again"
