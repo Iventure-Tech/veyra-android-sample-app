@@ -7,9 +7,11 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The provider this app passes to `initialize` — one for both SDKs — chosen in the untracked
- * `veyra.properties` (see `veyra.properties.example`). Which kind is a
- * decision this app makes, so there is no default: an unset or unknown mode stops the app at
- * startup, naming what to set.
+ * `veyra.properties` (see `veyra.properties.example`). Which kind is a decision this app makes, so there is no default:
+ * an unset or unknown mode stops the app at startup, naming what to set.
+ *
+ * Each mode builds its own provider from its own settings only: the client-secret provider never
+ * sees the bank backend, and the backend providers never see a secret.
  */
 object AppConnection {
 
@@ -20,37 +22,50 @@ object AppConnection {
             .build()
     }
 
+    private val bankSession: () -> String? = { BuildConfig.BANK_SESSION_TOKEN.ifBlank { null } }
+
     /** The provider for both SDKs. Built per call; the SDK re-binds it on every initialise. */
-    fun provider(): VeyraProvider = from(
+    fun provider(): VeyraProvider = forMode(
         mode = BuildConfig.VEYRA_CONNECTION_MODE,
-        clientId = BuildConfig.VEYRA_CLIENT_ID,
-        clientSecret = BuildConfig.VEYRA_CLIENT_SECRET,
-        bankBackendBaseUrl = BuildConfig.BANK_BACKEND_BASE_URL,
-        bankSession = { BuildConfig.BANK_SESSION_TOKEN },
-        http = http,
+        assertion = { assertionProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http) },
+        proxy = { proxyProvider(BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http) },
+        clientSecret = { clientSecretProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.VEYRA_CLIENT_SECRET) },
     )
 
-    internal fun from(
+    /** Builds only the selected mode's provider; the others are never invoked. */
+    internal fun forMode(
         mode: String,
+        assertion: () -> VeyraProvider,
+        proxy: () -> VeyraProvider,
+        clientSecret: () -> VeyraProvider,
+    ): VeyraProvider = when (mode) {
+        "directWithAssertion" -> assertion()
+        "viaAppBackend" -> proxy()
+        "directWithClientSecret" -> clientSecret()
+        else -> error(
+            "veyra.connection.mode is not set (got \"$mode\"). Copy veyra.properties.example to veyra.properties in the project root " +
+                "and choose directWithAssertion, viaAppBackend or directWithClientSecret.",
+        )
+    }
+
+    /** `directWithAssertion`: your client id, and the bank backend that signs the assertion. */
+    internal fun assertionProvider(
         clientId: String,
-        clientSecret: String,
         bankBackendBaseUrl: String,
         bankSession: () -> String?,
         http: OkHttpClient,
-    ): VeyraProvider = when (mode) {
-        "directWithClientSecret" ->
-            ClientSecretCredentials(clientId, clientSecret)
+    ): VeyraProvider = BankBackendAssertionProvider(clientId, required(bankBackendBaseUrl), bankSession, http)
 
-        "directWithAssertion" -> BankBackendAssertionProvider(clientId, required(bankBackendBaseUrl), bankSession, http)
+    /** `viaAppBackend`: only the bank backend that relays the SDK's calls — no client id, no secret. */
+    internal fun proxyProvider(
+        bankBackendBaseUrl: String,
+        bankSession: () -> String?,
+        http: OkHttpClient,
+    ): VeyraProvider = BankBackendRelay(required(bankBackendBaseUrl), bankSession, http)
 
-        "viaAppBackend" -> BankBackendRelay(required(bankBackendBaseUrl), bankSession, http)
-
-        else -> error(
-            "veyra.connection.mode is not set (got \"$mode\"). Copy veyra.properties.example to " +
-                "veyra.properties in the project root and choose directWithClientSecret, " +
-                "directWithAssertion or viaAppBackend.",
-        )
-    }
+    /** `directWithClientSecret` (deprecated, testing only): just the client id and secret. */
+    internal fun clientSecretProvider(clientId: String, clientSecret: String): VeyraProvider =
+        ClientSecretCredentials(clientId, clientSecret)
 
     private fun required(baseUrl: String): String =
         baseUrl.trimEnd('/').ifBlank { error("veyra.bankBackendBaseUrl must be set in veyra.properties for this mode") }

@@ -1,6 +1,6 @@
 package co.veyra.bank.connection
 
-import co.veyra.common.providers.VeyraAuthProvider
+import co.veyra.common.providers.VeyraAssertionProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,7 +27,7 @@ class BankBackendAssertionProvider(
     /** Your bank app's session. This demo uses a placeholder token from local config. */
     private val bankSession: () -> String?,
     private val http: OkHttpClient,
-) : VeyraAuthProvider {
+) : VeyraAssertionProvider {
 
     override suspend fun assertion(audience: String, jkt: String): String? = withContext(Dispatchers.IO) {
         val session = bankSession()?.takeIf { it.isNotBlank() } ?: return@withContext null // logged out

@@ -72,7 +72,7 @@ from `veyra.connection.mode` in `veyra.properties`:
 
 | Mode | Provider it builds | What it needs | Your bank backend serves |
 |---|---|---|---|
-| `directWithAssertion` (recommended) | `VeyraAuthProvider` | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `directWithAssertion` (recommended) | `VeyraAssertionProvider` | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
 | `viaAppBackend` | `VeyraProxyProvider` | `veyra.bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `directWithClientSecret` (**deprecated**) | `VeyraClientSecretProvider` | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
 
@@ -84,7 +84,7 @@ claims, the request envelope, and how a proxy provider reports a failure — is 
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
 
 > **Upgrading from SDK 2.x?** The config builders no longer take `clientId` / `clientSecret`;
-> `initialize` takes one provider instead: a `VeyraAuthProvider` (recommended) or a
+> `initialize` takes one provider instead: a `VeyraAssertionProvider` (recommended) or a
 > `VeyraProxyProvider`. See
 > [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An existing
 > `veyra.properties` keeps its keys; add `veyra.connection.mode` (and the bank-backend values for
@@ -95,7 +95,7 @@ claims, the request envelope, and how a proxy provider reports a failure — is 
 | Path | What it shows |
 |---|---|
 | `app/src/main/java/co/veyra/bank/VeyraBank.kt` | SDK configuration & initialisation (both SDKs via the combined facade) |
-| `app/src/main/java/co/veyra/bank/connection/` | How the SDKs reach Veyra: mode selection, and the two providers (`VeyraAuthProvider`, `VeyraProxyProvider`) that call your bank backend |
+| `app/src/main/java/co/veyra/bank/connection/` | How the SDKs reach Veyra: mode selection, and the two providers (`VeyraAssertionProvider`, `VeyraProxyProvider`) that call your bank backend |
 | `app/src/main/java/co/veyra/bank/HomeActivity.kt` | Home: entry to both flows, mode readout |
 | `app/src/main/java/co/veyra/bank/softpos/` | The merchant (Get paid) flow — all three acceptance rails |
 | `app/src/main/java/co/veyra/bank/wallet/` | The wallet (Pay) flow — add card, activation, payments, history |
