@@ -352,7 +352,7 @@ independent):
 // DirectWithAssertion (recommended)
 val connection = VeyraConnection.DirectWithAssertion(
     clientId = "your-client-id",
-    assertionProvider = AssertionProvider { jkt -> myBankApi.sdkAssertion(jkt) },  // JWT, or null
+    assertionProvider = AssertionProvider { jkt, audience -> myBankApi.sdkAssertion(jkt, audience) },  // JWT, or null
 )
 
 // ViaAppBackend
@@ -380,7 +380,7 @@ authenticated with your app's **own** session (the sample sends a placeholder be
 
 ```
 POST {your backend}/sdk-assertion                          (DirectWithAssertion)
-     {"jkt": "<jkt>"}
+     {"jkt": "<jkt>", "audience": "<audience>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns null)
 
 POST {your backend}/veyra-relay/{post|get|put|delete|patch} (ViaAppBackend)
@@ -396,7 +396,7 @@ POST {your backend}/veyra-relay/{post|get|put|delete|patch} (ViaAppBackend)
 |---|---|
 | `iss` | your issuer, as registered with Veyra |
 | `sub` | the signed-in user: stable and pairwise — never an account number or customer id |
-| `aud` | Veyra's token issuer, as agreed at onboarding |
+| `aud` | exactly the `audience` the SDK passed in: the base URL of the Veyra API, `https://api.uat.veyra.co` (`TEST`) or `https://api.veyra.co` (`LIVE`) |
 | `iat`, `exp` | issued-at and expiry; `exp` at most **5 minutes** after `iat` |
 | `jti` | unique per assertion |
 | `acr` | the authentication level of the user's session |
@@ -408,6 +408,11 @@ refused), never more than once at a time. `jkt` is the thumbprint of this instal
 proof-of-possession key; the access token is bound to that key, which is generated on the device
 and cannot be exported (Android Keystore). Returning `null` or throwing fails the call with
 `NOT_AUTHENTICATED` and sends nothing. `signOut` drops cached tokens but keeps the per-install key.
+
+`audience` is the base URL of the Veyra API the SDK will redeem the assertion at
+(`https://api.uat.veyra.co` on `TEST`, `https://api.veyra.co` on `LIVE`). **Check it before you
+sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
+refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
 **`/veyra-relay/{method}` forwards the envelope (version 1, public API).** Each relay `request` is
 one JSON string; the relay method called is the HTTP method your backend uses towards Veyra:
