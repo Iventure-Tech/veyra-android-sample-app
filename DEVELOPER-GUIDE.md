@@ -23,40 +23,6 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 
 > **iOS note:** tap **acceptance** on iPhone reads the customer's Android Veyra wallet over CoreNFC. Tap-to-**pay** (card emulation) is not available on iOS — Apple restricts card emulation — so the iOS wallet pays by QR (scan-to-pay and show-QR-to-pay).
 
-### Migrating from 2.x to 3.0.0
-
-3.0.0 makes **how the SDK reaches Veyra** an explicit, required choice: one provider you pass to
-`initialize` — see [Connecting to Veyra](#connecting-to-veyra). The breaking changes:
-
-| 2.x | 3.0.0 |
-|---|---|
-| `VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, clientId, clientSecret)` | `VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId)` |
-| `VeyraWalletSdkConfig.builder(environment, paymentAppProviderId, tokenRequestorId, clientId, clientSecret)` | `VeyraWalletSdkConfig.builder(environment, paymentAppProviderId, tokenRequestorId)` |
-| `VeyraSdk.initialize(activity, customerId, config)` | `VeyraSdk.initialize(activity, customerId, config, provider)` |
-| `VeyraSoftPOSSdk.initialize(activity, customerId, config)` | `VeyraSoftPOSSdk.initialize(activity, customerId, config, provider)` |
-| `VeyraWalletSdk.initialize(context, customerId, config, activity)` | `VeyraWalletSdk.initialize(context, customerId, config, provider, activity)` |
-| `ContextPaymentClient(context, environment, clientId, clientSecret)` | `ContextPaymentClient(context, environment)` — it uses the SoftPOS SDK's provider |
-| `VeyraWalletSdk.getClientId()` / `getClientSecret()` | **Removed.** |
-| — | **New:** `SdkErrorCode.NOT_AUTHENTICATED` (SoftPOS) and the `NOT_AUTHENTICATED:` message prefix (wallet): the SDK could not obtain credentials, so nothing was sent. |
-
-Replace the client id and secret with a provider. Either your backend signs an assertion for the
-signed-in user (`VeyraAssertionProvider`), or every call goes through your backend
-(`VeyraProxyProvider`):
-
-```kotlin
-// 2.x
-val config = VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, clientId, clientSecret).build()
-VeyraSoftPOSSdk.initialize(activity, customerId, config)
-
-// 3.0.0
-val config = VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId).build()
-VeyraSoftPOSSdk.initialize(activity, customerId, config, MyAssertionProvider(bankApi))   // or MyProxyProvider(bankApi)
-```
-
-Each needs one endpoint on your backend; see
-[Your bank backend](#your-bank-backend--the-two-endpoints-the-sample-calls). Apps still on 2.x keep
-working while you migrate.
-
 ---
 
 ## Requirements
