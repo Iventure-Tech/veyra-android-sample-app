@@ -15,7 +15,13 @@ import co.veyra.wallet.sdk.VeyraWalletSdkConfig
 object VeyraBank {
 
     fun ensureInitialized(activity: AppCompatActivity): VeyraSdk =
-        VeyraSdk.initialize(activity, customerId(activity), VeyraSdkConfig(softposConfig(activity), walletConfig(activity)))
+        VeyraSdk.initialize(activity, customerId(activity), VeyraSdkConfig(softposConfig(activity), walletConfig(activity)), provider())
+
+    /**
+     * How both SDKs reach Veyra: one provider, chosen in the git-ignored veyra.properties. Pass the
+     * same one to every SDK `initialize`.
+     */
+    fun provider(): co.veyra.common.connection.VeyraProvider = co.veyra.bank.connection.AppConnection.provider()
 
     // ── The app's own login session ───────────────────────────────────────────────
     // Who is logged in is the banking app's to remember, never the SDK's: the SDKs are told on
@@ -72,9 +78,7 @@ object VeyraBank {
             // the same identifier the wallet config carries.
             paymentAppProviderId = requireNotNull(context.getString(R.string.payment_app_provider_id).takeIf { it.isNotBlank() }) {
                 "veyra.paymentAppProviderId must be set in veyra.properties (copy veyra.properties.example)"
-            },
-            // How the SDK reaches Veyra: from the git-ignored veyra.properties.
-            connection = co.veyra.bank.connection.AppConnection.connection(),
+            }
         )
             .enableNfc(true)
             .build()
@@ -91,7 +95,6 @@ object VeyraBank {
             co.veyra.common.Environment.TEST,
             paymentAppProviderId,
             tokenRequestorId,
-            connection = co.veyra.bank.connection.AppConnection.connection(),
         )
             .appVersion(context.getString(R.string.app_version).takeIf { it.isNotBlank() })
             .walletProviderTokenizationRecommendationStandardVersion(

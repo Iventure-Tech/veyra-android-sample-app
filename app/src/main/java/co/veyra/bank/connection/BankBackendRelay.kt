@@ -1,6 +1,6 @@
 package co.veyra.bank.connection
 
-import co.veyra.common.connection.VeyraBackendRelay
+import co.veyra.common.connection.VeyraProxyProvider
 import co.veyra.common.connection.VeyraRelayException
 import co.veyra.common.net.NetworkFailureKind
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +29,7 @@ class BankBackendRelay(
     /** Your bank app's session. This demo uses a placeholder token from local config. */
     private val bankSession: () -> String?,
     private val http: OkHttpClient,
-) : VeyraBackendRelay {
+) : VeyraProxyProvider {
 
     override suspend fun post(request: String) = forward("post", request)
     override suspend fun get(request: String) = forward("get", request)

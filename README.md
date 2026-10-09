@@ -30,7 +30,7 @@ with per-outcome guidance — lives in this repository.
   Android 9+ (API 28) — NFC and device attestation don't work on the emulator.
 - **Veyra onboarding credentials**: Maven repository username/password (the SDK repository
   is authenticated), payment app provider id, token requestor id, and whatever your
-  [connection mode](#choose-a-connection-mode) needs. The app talks to the Veyra TEST
+  [provider](#choose-a-provider) needs. The app talks to the Veyra TEST
   environment.
 - The test account details from your onboarding pack (the prefill identity in
   `app/src/main/res/values/sample_data.xml` is a placeholder — digitisation is checked
@@ -46,8 +46,11 @@ with per-outcome guidance — lives in this repository.
    # edit veyra.properties
    ```
 
-3. Set `veyra.connection.mode` in `veyra.properties` — there is no default, and the app
-   refuses to start until it is set (see [Choose a connection mode](#choose-a-connection-mode)).
+3. `veyra.connection.mode` comes set to `directWithClientSecret` — the deprecated
+   `VeyraClientSecretProvider`, **for testing only** — so the sample runs with just your
+   `veyra.clientId` and `veyra.clientSecret`. Switch it to `directWithAssertion` or
+   `viaAppBackend` to try the providers a real app ships (see [Choose a provider](#choose-a-provider)).
+   It is required: with it blank the app refuses to start.
 4. Optionally update `app/src/main/res/values/sample_data.xml` with your test account
    details so the forms prefill usefully.
 5. Connect your device and run:
@@ -62,27 +65,27 @@ The SDK artifacts resolve from the Veyra Maven repository
 (`https://repo.veyra.co/releases`) using the repository credentials in your
 `veyra.properties` — no local files, no extra setup.
 
-## Choose a connection mode
+## Choose a provider
 
-Both SDKs need a `connection` — how they reach Veyra. The sample uses one mode for both, read
+Both SDKs share one **provider** — how they reach Veyra. The sample builds it from the mode read
 from `veyra.connection.mode` in `veyra.properties`:
 
-| Mode | What it needs | Your bank backend serves |
-|---|---|---|
-| `directWithAssertion` (recommended) | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"jkt": …, "audience": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
-| `viaAppBackend` | `veyra.bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
-| `directWithClientSecret` (**deprecated**) | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
+| Mode | Provider it builds | What it needs | Your bank backend serves |
+|---|---|---|---|
+| `directWithAssertion` (recommended) | `VeyraAuthProvider` | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `viaAppBackend` | `VeyraProxyProvider` | `veyra.bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
+| `directWithClientSecret` (**deprecated**) | `VeyraClientSecretProvider` | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
 
 `veyra.bankSessionToken` is a **placeholder** for your app's own login session, sent to your bank
-backend as a bearer token. The two callbacks that call your backend are in
-`app/src/main/java/co/veyra/bank/connection/` — short, and meant to be copied. The relay is called
+backend as a bearer token. The two providers that call your backend are in
+`app/src/main/java/co/veyra/bank/connection/` — short, and meant to be copied. The proxy provider is called
 from the SDK's background work too, not only from screens. The full contract — the assertion's
-claims, the relay envelope, and how a relay reports a failure — is in
+claims, the request envelope, and how a proxy provider reports a failure — is in
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
 
-> **Upgrading from SDK 2.x?** Each SDK config builder now takes a required `connection` instead
-> of `clientId` / `clientSecret`; staying on client credentials is a one-line change —
-> `connection = VeyraConnection.DirectWithClientSecret(clientId, clientSecret)`. See
+> **Upgrading from SDK 2.x?** The config builders no longer take `clientId` / `clientSecret`;
+> `initialize` takes one provider instead: a `VeyraAuthProvider` (recommended) or a
+> `VeyraProxyProvider`. See
 > [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An existing
 > `veyra.properties` keeps its keys; add `veyra.connection.mode` (and the bank-backend values for
 > the backend modes) from `veyra.properties.example`.
@@ -92,7 +95,7 @@ claims, the relay envelope, and how a relay reports a failure — is in
 | Path | What it shows |
 |---|---|
 | `app/src/main/java/co/veyra/bank/VeyraBank.kt` | SDK configuration & initialisation (both SDKs via the combined facade) |
-| `app/src/main/java/co/veyra/bank/connection/` | The connection to Veyra: mode selection, the assertion provider and the relay that call your bank backend |
+| `app/src/main/java/co/veyra/bank/connection/` | How the SDKs reach Veyra: mode selection, and the two providers (`VeyraAuthProvider`, `VeyraProxyProvider`) that call your bank backend |
 | `app/src/main/java/co/veyra/bank/HomeActivity.kt` | Home: entry to both flows, mode readout |
 | `app/src/main/java/co/veyra/bank/softpos/` | The merchant (Get paid) flow — all three acceptance rails |
 | `app/src/main/java/co/veyra/bank/wallet/` | The wallet (Pay) flow — add card, activation, payments, history |
