@@ -25,33 +25,32 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 
 ### Migrating from 2.x to 3.0.0
 
-3.0.0 makes **how the SDK reaches Veyra** an explicit, required choice — see
-[Connecting to Veyra](#connecting-to-veyra). The breaking changes:
+3.0.0 makes **how the SDK reaches Veyra** an explicit, required choice: one provider you pass to
+`initialize` — see [Connecting to Veyra](#connecting-to-veyra). The breaking changes:
 
 | 2.x | 3.0.0 |
 |---|---|
-| `VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, clientId, clientSecret)` | `VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, connection)` |
-| `VeyraWalletSdkConfig.builder(environment, paymentAppProviderId, tokenRequestorId, clientId, clientSecret)` | `VeyraWalletSdkConfig.builder(environment, paymentAppProviderId, tokenRequestorId, connection)` |
-| `ContextPaymentClient(context, environment, clientId, clientSecret)` | `ContextPaymentClient(context, environment)` — it uses the SoftPOS SDK's connection |
+| `VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, clientId, clientSecret)` | `VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId)` |
+| `VeyraWalletSdkConfig.builder(environment, paymentAppProviderId, tokenRequestorId, clientId, clientSecret)` | `VeyraWalletSdkConfig.builder(environment, paymentAppProviderId, tokenRequestorId)` |
+| `VeyraSdk.initialize(activity, customerId, config)` | `VeyraSdk.initialize(activity, customerId, config, provider)` |
+| `VeyraSoftPOSSdk.initialize(activity, customerId, config)` | `VeyraSoftPOSSdk.initialize(activity, customerId, config, provider)` |
+| `VeyraWalletSdk.initialize(context, customerId, config, activity)` | `VeyraWalletSdk.initialize(context, customerId, config, provider, activity)` |
+| `ContextPaymentClient(context, environment, clientId, clientSecret)` | `ContextPaymentClient(context, environment)` — it uses the SoftPOS SDK's provider |
 | `VeyraWalletSdk.getClientId()` / `getClientSecret()` | **Removed.** |
 | — | **New:** `SdkErrorCode.NOT_AUTHENTICATED` (SoftPOS) and the `NOT_AUTHENTICATED:` message prefix (wallet): the SDK could not obtain credentials, so nothing was sent. |
 
-Replace the client id and secret with a connection. Either your backend signs an assertion for
-the signed-in user, or every call goes through your backend:
+Replace the client id and secret with a provider. Either your backend signs an assertion for the
+signed-in user (`VeyraAuthProvider`), or every call goes through your backend
+(`VeyraProxyProvider`):
 
 ```kotlin
 // 2.x
-VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, clientId, clientSecret)
+val config = VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, clientId, clientSecret).build()
+VeyraSoftPOSSdk.initialize(activity, customerId, config)
 
-// 3.0.0 — DirectWithAssertion (recommended)
-val connection = VeyraConnection.DirectWithAssertion(
-    clientId = "your-client-id",
-    assertionProvider = AssertionProvider { audience, jkt -> myBankApi.sdkAssertion(audience, jkt) },
-)
-// 3.0.0 — or ViaAppBackend
-val connection = VeyraConnection.ViaAppBackend(MyRelay())
-
-VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, connection)
+// 3.0.0
+val config = VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId).build()
+VeyraSoftPOSSdk.initialize(activity, customerId, config, MyAuthProvider(bankApi))   // or MyProxyProvider(bankApi)
 ```
 
 Each needs one endpoint on your backend; see
@@ -126,7 +125,7 @@ dependencies {
 | `co.veyra:wallet-sdk` | Wallet SDK (same transitive core) | 24 |
 | `co.veyra:veyra-sdk` | Combined facade + exclusive mode manager; depends on both SDKs | 28 |
 | `co.veyra:veyra-core` | Mode contract (`NfcMode`, `SdkModeException`); no other dependencies | 24 |
-| `co.veyra:veyra-common` | Shared infrastructure (`Environment`, the connection types, logging, token cache) | 24 |
+| `co.veyra:veyra-common` | Shared infrastructure (`Environment`, the provider types, logging, token cache) | 24 |
 
 There is deliberately **no fat AAR** — the combined offering is the thin `veyra-sdk` artifact that pulls the others transitively.
 
@@ -197,7 +196,7 @@ dependencies {
 Facade for a combined SoftPOS + Wallet app. It owns the exclusive mode and hands out the two member SDKs. Package `co.veyra.sdk`.
 
 ```kotlin
-val sdk = VeyraSdk.initialize(this, customerId, VeyraSdkConfig(softposConfig, walletConfig))
+val sdk = VeyraSdk.initialize(this, customerId, VeyraSdkConfig(softposConfig, walletConfig), provider)
 val wallet  = sdk.wallet    // VeyraWalletSdk
 val softpos = sdk.softpos   // VeyraSoftPOSSdk
 ```
@@ -206,7 +205,7 @@ val softpos = sdk.softpos   // VeyraSoftPOSSdk
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, customerId, config)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSdkConfig(softpos, wallet)` | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `IllegalArgumentException` when `customerId` is blank. |
+| `initialize(activity, customerId, config, provider)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSdkConfig(softpos, wallet)`; `provider` — your `VeyraAuthProvider` or `VeyraProxyProvider`, shared by both SDKs (see [Connecting to Veyra](#connecting-to-veyra)) | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `IllegalArgumentException` when `customerId` is blank or the provider is unusable (naming the problem). |
 | `signOut()` (static) | — | The customer has logged out: stops everything both SDKs run for them and drops every observer registration. Their cards, keys, merchant and history stay on the device for when they sign in again. |
 | `getInstance()` | — | The current instance, or `null` if not yet initialised. |
 | `softpos` | — | The `VeyraSoftPOSSdk`. Throws `IllegalStateException` if that SDK has not been initialised yet (each of your screens initialises its own SDK — see the samples). |
@@ -222,14 +221,14 @@ val softpos = sdk.softpos   // VeyraSoftPOSSdk
 Package `co.veyra.softpos.payment.sdk`. Process singleton; initialise on (or before) each screen that accepts payments, so reader arming binds to that screen's lifecycle.
 
 ```kotlin
-val sdk = VeyraSoftPOSSdk.initialize(this, customerId, softposConfig)
+val sdk = VeyraSoftPOSSdk.initialize(this, customerId, softposConfig, provider)
 ```
 
 **Methods & services:**
 
 | Member | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, customerId, config)` | `activity` — `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSoftPosSdkConfig` | Initialises (or re-binds) the singleton and signs `customerId` in. Idempotent; re-binds NFC reader + lifecycle to the new activity on every call. The same customer again changes nothing; a different customer stops the previous customer's work and opens the new customer's merchant and transactions. Throws `VeyraSdkException` (`MISSING_MANDATORY_CONFIG`) when the `connection` is unusable (naming the field), and `IllegalArgumentException` when `customerId` is blank. |
+| `initialize(activity, customerId, config, provider)` | `activity` — `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSoftPosSdkConfig`; `provider` — the same provider as the wallet's | Initialises (or re-binds) the singleton and signs `customerId` in. Idempotent; re-binds NFC reader + lifecycle to the new activity on every call. The same customer again changes nothing; a different customer stops the previous customer's work and opens the new customer's merchant and transactions. Throws `VeyraSdkException` (`MISSING_MANDATORY_CONFIG`) when the provider is unusable (naming the problem), `IllegalStateException` when a different kind of provider is already in use in this process, and `IllegalArgumentException` when `customerId` is blank. |
 | `signOut()` (static) | — | The customer has logged out: stops every poll and watch the SDK runs for them and drops every observer registration. Their merchant and transactions stay on the device. Until the next `initialize` there is no merchant. |
 | `storedMerchant(context, customerId)` (static) | `context`; `customerId` | Init-free read of that customer's stored merchant — see [Merchant status](#merchant-status--isregistered--ismerchantactive--refreshstatus--activate--deactivate). |
 | `isMerchantRegistered(context, customerId)` (static) | `context`; `customerId` | Init-free registration check for that customer. |
@@ -246,14 +245,14 @@ The reader arms on resume and disarms on pause automatically. If NFC is unavaila
 Package `co.veyra.wallet.sdk`. Process singleton. The environment is set **once at initialisation** and applies to all subsequent SDK calls.
 
 ```kotlin
-val sdk = VeyraWalletSdk.initialize(context, customerId, walletConfig, activity = this)
+val sdk = VeyraWalletSdk.initialize(context, customerId, walletConfig, provider, activity = this)
 ```
 
 **Methods:**
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(context, customerId, config, activity?)` | `context` — app context; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraWalletSdkConfig`; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton and signs `customerId` in. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. The same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. Throws `IllegalArgumentException` when `customerId` is blank or the `connection` is unusable (naming the field), and `IllegalStateException` when a different connection mode is already in use in this process. |
+| `initialize(context, customerId, config, provider, activity?)` | `context` — app context; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraWalletSdkConfig`; `provider` — the same provider as SoftPOS's; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton and signs `customerId` in. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. The same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. Throws `IllegalArgumentException` when `customerId` is blank or the provider is unusable (naming the problem), and `IllegalStateException` when a different kind of provider is already in use in this process. |
 | `signOut()` (static) | — | The customer has logged out: stops every loop, poll, worker and observer the SDK runs for them. Their cards, keys, history and receipts stay on the device. Until the next `initialize` there are no cards and a tap is answered "application not found". |
 | `getInstance()` | — | Current instance or `null`. |
 | `tokenisationService` | — | The wallet service — every wallet operation hangs off it. |
@@ -280,7 +279,7 @@ Who is signed in is **your app's** to remember, not the SDK's. The SDK holds it 
 
 ```kotlin
 // Your login succeeded (or the app starts with a remembered session):
-val sdk = VeyraWalletSdk.initialize(context, session.customerId, walletConfig, activity = this)
+val sdk = VeyraWalletSdk.initialize(context, session.customerId, walletConfig, provider, activity = this)
 TokenLifecycleObserver.onTokenStatusChanged { change -> /* ... */ }  // register again after every initialize
 
 // Your customer logs out:
@@ -292,79 +291,111 @@ session.clear()
 
 ## Connecting to Veyra
 
-Both SDKs take a **required** `connection` in their configuration builder. It says how the SDK
-reaches the Veyra backend. There is **no default** and the SDK never infers one from which fields
-happen to be set: which mode you use is your decision as the payment app provider. All connection
-types live in `co.veyra.common.connection` (`VeyraConnection`, `AssertionProvider`,
-`VeyraBackendRelay`, `VeyraRelayException`).
+You pass **one provider** to `initialize`, and it says how the SDK reaches the Veyra backend. The
+same provider serves both SDKs. There is **no default**: which kind you implement is your decision
+as the payment app provider. The types live in `co.veyra.common.connection` (`VeyraProvider`,
+`VeyraAuthProvider`, `VeyraProxyProvider`, `VeyraProviderType`, `VeyraRelayException`).
 
-### Choosing a connection mode
+### Choosing a provider
 
-| Mode | The SDK… | Choose it when |
-|---|---|---|
-| `DirectWithAssertion` | calls Veyra itself, with a token it obtains by exchanging a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the logged-in user (recommended) |
-| `ViaAppBackend` | calls **nothing** itself: every call is handed to your app, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
-| `DirectWithClientSecret` *(deprecated)* | calls Veyra itself with a client id and secret held in the app | only until your cut-over date — a secret inside an app can be extracted |
+| Provider | `providerType` | The SDK… | Choose it when |
+|---|---|---|---|
+| `VeyraAuthProvider` | `AUTHENTICATION` | calls Veyra itself, with a token it obtains by exchanging a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the logged-in user (recommended) |
+| `VeyraProxyProvider` | `REQUEST_PROCESSOR` | calls **nothing** itself: every call is handed to your provider, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
-Rules that hold for every mode:
+**The interface you implement is the method.** Each interface supplies its `providerType` by
+default, so you never set a mode: the SDK reads it from the provider you pass. The deprecated
+`VeyraClientSecretProvider` exists only so apps already on client credentials keep working until
+their cut-over date; don't build a new integration on it.
 
-- **One mode per SDK for the life of the process, with no fallback.** A `DirectWithAssertion` SDK
-  whose provider returns nothing fails with `NOT_AUTHENTICATED`; it never tries another mode.
-  Initialising again with a different mode fails with an `IllegalStateException`.
-- **Invalid configuration fails at initialise, naming the field** (a blank `clientId`, a blank
-  `clientSecret`, a missing connection): SoftPOS throws `VeyraSdkException` with
-  `MISSING_MANDATORY_CONFIG`; the wallet throws `IllegalArgumentException`.
-- **The SoftPOS and wallet SDKs choose independently.** A combined app may run the wallet on one
-  mode and SoftPOS on another; each keeps its own tokens.
-- **Initialise re-binds the connection.** The provider or relay you pass on each `initialize` is
-  the one the SDK uses from then on — background work included.
+Rules that hold for every provider:
+
+- **One provider for both SDKs.** Pass the same object to `VeyraSdk.initialize` and to each SDK's
+  own `initialize`. Each SDK still keeps its own token cache and device key.
+- **Exactly one kind.** `initialize` refuses, naming the problem: no provider; a provider that
+  implements both interfaces; a `providerType` that contradicts the interface it implements; and a
+  blank `clientId`. SoftPOS throws `VeyraSdkException` with `MISSING_MANDATORY_CONFIG`; the wallet
+  and `VeyraSdk` throw `IllegalArgumentException`. (Kotlin also refuses to compile a class that
+  implements both, until it overrides `providerType` itself.)
+- **One kind per process, with no fallback.** A `VeyraAuthProvider` whose `assertion` returns
+  nothing fails with `NOT_AUTHENTICATED`; the SDK never tries another method. Initialising again
+  with the other kind throws `IllegalStateException`.
+- **Initialise re-binds the provider.** The provider you pass on each `initialize` is the one the
+  SDK uses from then on — background work included.
 - **A call is never sent without credentials.** When the SDK cannot obtain a token the call fails
   with `NOT_AUTHENTICATED` and nothing is sent: SoftPOS reports `SdkErrorCode.NOT_AUTHENTICATED`
   (no response code, nothing stored or polled); the wallet's failure message starts with
   `NOT_AUTHENTICATED:`.
 - Every backend call (token requests included) carries `X-Veyra-Sdk-Version` and
-  `X-Veyra-Connection` (`DIRECT_CLIENT_SECRET`, `DIRECT_ASSERTION` or `VIA_APP_BACKEND`).
+  `X-Veyra-Connection` (`DIRECT_ASSERTION`, `VIA_APP_BACKEND` or `DIRECT_CLIENT_SECRET`).
 
-### Initialising each mode — wallet and SoftPOS
+### Implementing a provider
 
-Build the connection once and pass it to each builder (or a different one to each — they are
-independent):
+**`VeyraAuthProvider`** — your client id, and one function that gets an assertion from your
+backend. The SDK calls it only when it needs a new token:
 
 ```kotlin
-// DirectWithAssertion (recommended)
-val connection = VeyraConnection.DirectWithAssertion(
-    clientId = "your-client-id",
-    assertionProvider = AssertionProvider { audience, jkt -> myBankApi.sdkAssertion(audience, jkt) },  // JWT, or null
-)
+class MyAuthProvider(private val bank: MyBankApi) : VeyraAuthProvider {
+    override val clientId = "your-client-id"          // public, issued at onboarding
 
-// ViaAppBackend
-val connection = VeyraConnection.ViaAppBackend(MyRelay())
-
-// Then, whichever mode:
-val softposConfig = VeyraSoftPosSdkConfig.builder(Environment.TEST, paymentAppProviderId, connection).build()
-val walletConfig = VeyraWalletSdkConfig.builder(Environment.TEST, paymentAppProviderId, tokenRequestorId, connection).build()
+    /** A JWT from your backend for the signed-in user, or null when nobody is signed in. */
+    override suspend fun assertion(audience: String, jkt: String): String? =
+        bank.sdkAssertion(audience, jkt)               // POST {your backend}/sdk-assertion, your session
+}
 ```
 
-The sample reads the mode from `veyra.properties` (`veyra.connection.mode`, no default — the app
-refuses to start until it is set) and builds the connection in
-`app/src/main/java/co/veyra/bank/connection/AppConnection.kt`. Its two callbacks,
+**`VeyraProxyProvider`** — five functions, one per HTTP method. The SDK calls them for every
+backend call:
+
+```kotlin
+class MyProxyProvider(private val bank: MyBankApi) : VeyraProxyProvider {
+    override suspend fun post(request: String) = bank.veyraProxy("post", request)
+    override suspend fun get(request: String) = bank.veyraProxy("get", request)
+    override suspend fun put(request: String) = bank.veyraProxy("put", request)
+    override suspend fun delete(request: String) = bank.veyraProxy("delete", request)
+    override suspend fun patch(request: String) = bank.veyraProxy("patch", request)
+}
+```
+
+`bank.veyraProxy` sends the envelope to `POST {your backend}/veyra-relay/{method}` and returns
+Veyra's body unchanged. On failure it throws `VeyraRelayException`, saying whether the request was
+sent — see [the failure contract](#the-proxy-providers-failure-contract).
+
+### Initialising with your provider
+
+```kotlin
+val provider = MyAuthProvider(bankApi)                // or MyProxyProvider(bankApi)
+
+val softposConfig = VeyraSoftPosSdkConfig.builder(Environment.TEST, paymentAppProviderId).build()
+val walletConfig = VeyraWalletSdkConfig.builder(Environment.TEST, paymentAppProviderId, tokenRequestorId).build()
+
+// A combined app: the facade first, then each SDK on its own screen — the same provider each time.
+VeyraSdk.initialize(activity, customerId, VeyraSdkConfig(softposConfig, walletConfig), provider)
+VeyraSoftPOSSdk.initialize(activity, customerId, softposConfig, provider)
+VeyraWalletSdk.initialize(context, customerId, walletConfig, provider, activity)
+```
+
+The sample reads the kind from `veyra.properties` (`veyra.connection.mode`: `directWithAssertion`
+for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`; no default — the app
+refuses to start until it is set) and builds the provider in
+`app/src/main/java/co/veyra/bank/connection/AppConnection.kt`. Its two providers,
 `BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied.
 
 ### Your bank backend — the two endpoints the sample calls
 
-`DirectWithAssertion` and `ViaAppBackend` each need one endpoint on **your** backend. Both are
+`VeyraAuthProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both are
 authenticated with your app's **own** session (the sample sends a placeholder bearer token from
 `veyra.properties` — replace it with your login session); neither is a Veyra credential.
 
 ```
-POST {your backend}/sdk-assertion                          (DirectWithAssertion)
+POST {your backend}/sdk-assertion                          (VeyraAuthProvider)
      {"audience": "<audience>", "jkt": "<jkt>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns null)
 
-POST {your backend}/veyra-relay/{post|get|put|delete|patch} (ViaAppBackend)
+POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
      body: the SDK's envelope, unchanged
-  →  your backend authenticates to Veyra with its own client-credentials token (held
-     server-side), sends path + query + headers + body to the Veyra API unmodified, and
+  →  your backend authenticates to Veyra with its own OAuth client-credentials token (held
+     server-side; an API key is not accepted), sends path + query + headers + body to the Veyra API unmodified, and
      answers with Veyra's status and body unchanged
 ```
 
@@ -417,8 +448,9 @@ and cannot be exported (Android Keystore). Returning `null` or throwing fails th
 sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
 refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
-**`/veyra-relay/{method}` forwards the envelope (version 1, public API).** Each relay `request` is
-one JSON string; the relay method called is the HTTP method your backend uses towards Veyra:
+**`/veyra-relay/{method}` forwards the envelope (version 1, public API).** Each `request` your
+proxy provider receives is one JSON string; the function called is the HTTP method your backend
+uses towards Veyra:
 
 ```json
 { "v": 1,
@@ -437,9 +469,9 @@ one JSON string; the relay method called is the HTTP method your backend uses to
   status, throw `VeyraRelayException(kind = OTHER, neverSent = false, httpStatus = <status>)` rather
   than inventing a body — the SDK treats it exactly as that status on a direct connection.
 
-### The relay failure contract
+### The proxy provider's failure contract
 
-A relay signals failure by throwing `VeyraRelayException(kind, neverSent, httpStatus)`, and
+A proxy provider signals failure by throwing `VeyraRelayException(kind, neverSent, httpStatus)`, and
 **must say whether the request was sent**:
 
 - `neverSent = true` **only** when the request provably never left the device — no network, or the
@@ -449,7 +481,7 @@ A relay signals failure by throwing `VeyraRelayException(kind, neverSent, httpSt
   answer, or whenever you cannot tell. The payment stays `PENDING` and the SDK reconciles it. **When
   in doubt, `false`**: it is the safe direction.
 - `httpStatus` when your backend answered with a non-2xx status.
-- **Any other exception** counts as `neverSent = false`, and so does a relay call that outlives the
+- **Any other exception** counts as `neverSent = false`, and so does a call that outlives the
   SDK's own timeout for that request.
 
 The sample's `BankBackendRelay.classify` is the reference: `UnknownHostException` /
@@ -457,23 +489,23 @@ The sample's `BankBackendRelay.classify` is the reference: `UnknownHostException
 never sent; `SocketTimeoutException` → `TIMEOUT`, may have been sent; anything else → `OTHER`, may
 have been sent.
 
-**Your relay is called from background work too** — status polling, payment-key refresh, credit
+**Your proxy provider is called from background work too** — status polling, payment-key refresh, credit
 confirmations and Android `WorkManager` jobs — not only from calls your app makes, so it must not
-depend on a screen being up (the sample's relay holds no reference to any activity). If the OS
+depend on a screen being up (the sample's holds no reference to any activity). If the OS
 starts your process for background work before your app has initialised the SDK, there is no
-relay: that cycle is skipped and nothing fails.
+provider: that cycle is skipped and nothing fails.
 
-**What the relay can see.** Request and response bodies pass through your app and backend. Key
-material is end-to-end encrypted to the device and payment proofs are MACed, so the relay cannot
+**What your backend can see.** Request and response bodies pass through your app and backend. Key
+material is end-to-end encrypted to the device and payment proofs are MACed, so your backend cannot
 read or forge either; it **can** read account and identity fields, and it could alter plain answers
 such as a transaction status. That is acceptable only because you, the provider, already hold that
-data. **Forward the bytes unmodified.** The SDK's log export does not go through the relay.
+data. **Forward the bytes unmodified.** The SDK's log export does not go through your provider.
 
-### `DirectWithClientSecret` is deprecated
+### `VeyraClientSecretProvider` is deprecated
 
 It exists only so apps already on client credentials keep working until their cut-over date; it is
-retired per provider. Don't build a new integration on it: a client secret inside an app can be
-extracted. Use `DirectWithAssertion` or `ViaAppBackend`.
+retired per payment app provider. Don't build a new integration on it: a client secret inside an
+app can be extracted. Implement `VeyraAuthProvider` or `VeyraProxyProvider`.
 
 ---
 
@@ -491,7 +523,6 @@ extracted. Use `DirectWithAssertion` or `ViaAppBackend`.
 val softposConfig = VeyraSoftPosSdkConfig.builder(
     Environment.TEST,
     paymentAppProviderId = "your-payment-app-provider-id",
-    connection = connection   // required — see Connecting to Veyra
 )
     .enableNfc(true)
     .build()
@@ -503,7 +534,6 @@ val softposConfig = VeyraSoftPosSdkConfig.builder(
 |-----------|----------|-------------|
 | `environment` | **Mandatory** | `Environment.TEST` or `Environment.LIVE`. Determines the server host; set once, applies to all SDK calls. |
 | `paymentAppProviderId` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet config's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. Must not be blank. |
-| `connection` | **Mandatory** | How the SDK reaches Veyra: `VeyraConnection.DirectWithAssertion`, `ViaAppBackend` or (deprecated) `DirectWithClientSecret`. No default — see [Connecting to Veyra](#connecting-to-veyra). |
 | `enableNfc(Boolean)` | Optional | Arm the NFC reader capability at init. Default `true`. |
 | `merchantId(String)` | Optional | Merchant ID override (same note). |
 | `merchantNameAndLocation(String)` | Optional | Merchant name/location override for receipts and EMV data (same note). |
@@ -519,7 +549,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
     Environment.TEST,
     paymentAppProviderId = "your-provider-id",
     tokenRequestorId = "50100000001",
-    connection = connection   // required — see Connecting to Veyra
 )
     .appVersion("1.2.0")
     .walletProviderTokenizationRecommendationStandardVersion("1.0")
@@ -536,7 +565,6 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `environment` | **Mandatory** | `Environment.TEST` or `LIVE`. |
 | `paymentAppProviderId` | **Mandatory** | Your payment-app provider identifier, assigned by Veyra. Sent in every tokenisation and eligibility request. |
 | `tokenRequestorId` | **Mandatory** | Token requestor ID assigned by the scheme. |
-| `connection` | **Mandatory** | How the SDK reaches Veyra — see [Connecting to Veyra](#connecting-to-veyra). An unusable one (e.g. a blank `clientId`) makes `initialize` throw `IllegalArgumentException` naming the field. |
 | `enableNfc(Boolean)` | Optional | Enable NFC/HCE at init. Default `true`. |
 | `appVersion(String)` | Optional | App version sent in digitise requests (falls back to your package version). |
 | `walletProviderTokenizationRecommendationStandardVersion(String)` | **Required before digitising** | Standard version for the tokenisation recommendation (e.g. `"1.0"`). Digitise throws if unset. |
@@ -551,8 +579,8 @@ One shared enum for both SDKs (`co.veyra.common.Environment`).
 
 | Value | Description |
 |-------|-------------|
-| `TEST` | Test / staging servers. A `connection` is required. |
-| `LIVE` | Production servers. A `connection` is required. |
+| `TEST` | Test / staging servers. A provider is required at `initialize`. |
+| `LIVE` | Production servers. A provider is required at `initialize`. |
 
 Server hosts and endpoint paths are resolved by the SDK from the environment — you never supply URLs.
 
@@ -775,7 +803,7 @@ Returns (`CreatedPaymentContext`): `txRef` (poll key), `mpmPayload` (**render th
 Poll `contextStatus(txRef)` on a short interval (the sample uses 2.5 s). States: `PENDING` (QR live) → `IN_FLIGHT` (wallet push settling) → `APPROVED` / `DECLINED` (settled — `responseCode` carries the rail outcome) or `EXPIRED`. Convenience: `isSettled` (`APPROVED || DECLINED`), `isApproved`. On settlement the payment is also recorded in the merchant's local history under the same `txRef`, so receipts work like any other rail.
 
 ```kotlin
-val client = ContextPaymentClient(context, Environment.TEST)   // uses the SoftPOS SDK's connection
+val client = ContextPaymentClient(context, Environment.TEST)   // uses the SoftPOS SDK's provider
 val created = client.createContextPayment(
     merchantId, amountMinorUnits, "566",
     merchantOrderId = "ORDER-42",            // required: YOUR order id, never a lookup key
@@ -1632,8 +1660,8 @@ Two kinds of surface, marked throughout:
 |---|---|---|
 | `SdkModeException` | Combined apps only: a payment's mode claim refused while the other mode's payment is mid-flight (e.g. `makeCardPayment` during a wallet payment), or both SDKs initialised without the `VeyraSdk` facade | Prompt the user to finish/cancel the other payment first. **Never occurs in a standalone single-SDK app.** |
 | `TokenizationRequestValidationException` | `digitizeAccount` params with a blank required field (synchronous; carries `fieldName`) | Fix the missing input before calling. |
-| `VeyraSdkException` (`errorCode = MISSING_MANDATORY_CONFIG`) | SoftPOS initialise / payment without an environment or with an unusable `connection` | Fix your configuration. |
-| `VeyraSdkException` (`errorCode = NOT_AUTHENTICATED`) | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `AssertionProvider` returned `null` or threw, or the token endpoint refused the client | Nothing was sent. Under `DirectWithAssertion` this usually means nobody is signed in to your app: send the user to sign-in, then retry. |
+| `VeyraSdkException` (`errorCode = MISSING_MANDATORY_CONFIG`) | SoftPOS initialise / payment without an environment or with an unusable provider | Fix your configuration or provider. |
+| `VeyraSdkException` (`errorCode = NOT_AUTHENTICATED`) | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAuthProvider.assertion` returned `null` or threw, or the token endpoint refused the client | Nothing was sent. With a `VeyraAuthProvider` this usually means nobody is signed in to your app: send the user to sign-in, then retry. |
 | `VeyraSdkException` (`errorCode = NO_NETWORK_CONNECTION`) | **Any** SoftPOS backend call — register / refresh status / activate / deactivate / update merchant, settlement banks, create payment context, take a payment — when the device has no working internet connection | Tell the user to connect and try again. Nothing was sent, so nothing needs undoing or reconciling. |
 | `IllegalArgumentException` | `cpmCustomerQrService.inspect` on a payload that isn't a Veyra payment QR | Not an error — show "not a payment code, try again" and stay armed for another scan. |
 
@@ -1683,7 +1711,7 @@ needs reconciling: fix what the code names and re-initiate.
 
 | Code | Raised when | What to do |
 |---|---|---|
-| `MISSING_MANDATORY_CONFIG` | Initialise, payment, QR or token call without an environment, a usable `connection`, terminal id or merchant id | An integration bug, not a user-facing error. Fix `VeyraSoftPosSdkConfig` (or register the merchant, which supplies terminal/merchant ids). |
+| `MISSING_MANDATORY_CONFIG` | Initialise, payment, QR or token call without an environment, a usable provider, terminal id or merchant id | An integration bug, not a user-facing error. Fix `VeyraSoftPosSdkConfig` (or register the merchant, which supplies terminal/merchant ids). |
 | `INVALID_REQUEST` | Payment request failed validation — amount not greater than zero, a missing / non-4-digit ISO 4217 currency, or a blank (or over-255-character) `merchantOrderId`. `message` names the failed check | Fix the input and call again. Safe: nothing was sent. |
 | `PAYMENT_CANCELLED` | The merchant cancelled the pending payment before a card was tapped | Return to the amount screen. Not an error to report — `message` is `"Payment cancelled"`. |
 | `TRANSACTION_IN_PROGRESS` | `makeCardPayment` (or a rail call) while another payment is still running | Wait for the in-flight callback. Never queue a second payment; disable the pay button while one is live. |
@@ -1691,7 +1719,7 @@ needs reconciling: fix what the code names and re-initiate.
 | `MERCHANT_PROFILE_INCOMPLETE` | The stored merchant profile has no settlement account number / institution code | Finish onboarding (update the merchant) before taking payments — there is nowhere to settle to. |
 | `NFC_MODE_REFUSED` | The NFC mode arbiter refused SOFTPOS — a wallet payment is mid-flight (combined apps only) | Prompt the user to finish or cancel the other payment. **Never occurs in a SoftPOS-only app.** |
 | `NO_NFC_TAG` | The tap produced no usable ISO-DEP target (also raised by the kernel, below) | Transient — ask for another tap; the reader stays armed. |
-| `NOT_AUTHENTICATED` | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `AssertionProvider` returned `null` or threw, or the token endpoint refused the client | Nothing was sent: no response code, nothing stored or polled. Under `DirectWithAssertion` it usually means nobody is signed in — send the user to sign-in, then retry. The SDK never falls back to another connection mode. |
+| `NOT_AUTHENTICATED` | **Any** SoftPOS backend call when the SDK could not obtain credentials — your `VeyraAuthProvider.assertion` returned `null` or threw, or the token endpoint refused the client | Nothing was sent: no response code, nothing stored or polled. With a `VeyraAuthProvider` it usually means nobody is signed in — send the user to sign-in, then retry. The SDK never falls back to another connection mode. |
 | `NO_NETWORK_CONNECTION` | **Any** SoftPOS backend call on a device with no working internet connection — DNS never resolved, or the radio has no usable network | "Connect to the internet and try again." The call provably never left the device, so nothing was charged and nothing is polling. Do **not** confuse with `91` / `ISSUER_SWITCH_NOT_AVAILABLE` (reached the network, refused) or with the wallet's `ONLINE_REQUIRED` (a *card* state). |
 
 #### 2. Card-read failures — "unknown card, tap again"
@@ -1768,7 +1796,7 @@ re-charge**. You never have to work out which happened — check `getLastTransac
 | Code | Raised when | What to do |
 |---|---|---|
 | `MERCHANT_REGISTRATION_NETWORK_ERROR` | Registration could not reach the backend | Retry when connected; nothing was created. |
-| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | `message` carries the status. A `401`/`403` here is almost always a wrong `clientId` / `clientSecret` (`DirectWithClientSecret`); a `4xx` on registration means the profile was refused — show `message`. |
+| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | `message` carries the status. A `401`/`403` here is almost always a wrong `clientId` / `clientSecret` (the deprecated `VeyraClientSecretProvider`); a `4xx` on registration means the profile was refused — show `message`. |
 | `MERCHANT_REGISTRATION_PARSE_ERROR` | The registration response could not be parsed | Retry; if it persists the merchant may in fact be registered — call `refreshStatus()` before registering again. |
 | `ISSUER_NETWORK_ERROR` | The OAuth token fetch failed at transport level | Retry when connected. Nothing was sent onward — the authenticated call never started. |
 
