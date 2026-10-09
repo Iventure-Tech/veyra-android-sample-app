@@ -46,8 +46,11 @@ with per-outcome guidance — lives in this repository.
    # edit veyra.properties
    ```
 
-3. Set `veyra.connection.mode` in `veyra.properties` — there is no default, and the app
-   refuses to start until it is set (see [Choose a provider](#choose-a-provider)).
+3. `veyra.connection.mode` comes set to `directWithClientSecret` — the deprecated
+   `VeyraClientSecretProvider`, **for testing only** — so the sample runs with just your
+   `veyra.clientId` and `veyra.clientSecret`. Switch it to `directWithAssertion` or
+   `viaAppBackend` to try the providers a real app ships (see [Choose a provider](#choose-a-provider)).
+   It is required: with it blank the app refuses to start.
 4. Optionally update `app/src/main/res/values/sample_data.xml` with your test account
    details so the forms prefill usefully.
 5. Connect your device and run:

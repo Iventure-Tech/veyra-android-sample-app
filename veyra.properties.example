@@ -11,8 +11,11 @@ veyra.repoPassword=your-repo-password
 veyra.paymentAppProviderId=your-payment-app-provider-id
 veyra.tokenRequestorId=your-token-requestor-id
 
-# ── How both SDKs connect to Veyra ────────────────────────────────────────────
-# REQUIRED, no default — the app refuses to start until it is set. One of:
+# ── Which provider both SDKs use ───────────────────────────────────────────────
+# REQUIRED — the app refuses to start without it. This template sets directWithClientSecret
+# (the deprecated VeyraClientSecretProvider) so the sample runs against Veyra with just the
+# client id and secret from your onboarding pack — FOR TESTING ONLY. A real app uses
+# directWithAssertion or viaAppBackend. One of:
 #   directWithAssertion     the SDK calls Veyra with an assertion your bank backend signs
 #                           (needs clientId + bankBackendBaseUrl; your backend serves
 #                           POST /sdk-assertion)
@@ -21,7 +24,7 @@ veyra.tokenRequestorId=your-token-requestor-id
 #                           POST /veyra-relay/{method})
 #   directWithClientSecret  DEPRECATED — the SDK calls Veyra with a client secret held in the
 #                           app (needs clientId + clientSecret); retired per provider
-veyra.connection.mode=
+veyra.connection.mode=directWithClientSecret
 
 # OAuth client issued by Veyra. clientId: directWithAssertion and directWithClientSecret.
 # clientSecret: directWithClientSecret only.

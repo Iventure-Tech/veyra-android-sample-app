@@ -376,10 +376,13 @@ VeyraWalletSdk.initialize(context, customerId, walletConfig, provider, activity)
 ```
 
 The sample reads the kind from `veyra.properties` (`veyra.connection.mode`: `directWithAssertion`
-for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`; no default — the app
-refuses to start until it is set) and builds the provider in
+for its `VeyraAuthProvider`, `viaAppBackend` for its `VeyraProxyProvider`; required — the app
+refuses to start without it) and builds the provider in
 `app/src/main/java/co/veyra/bank/connection/AppConnection.kt`. Its two providers,
-`BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied.
+`BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied. The
+template `veyra.properties.example` ships with `directWithClientSecret`, the sample's
+`ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only**, so the sample runs
+before your backend has either endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
