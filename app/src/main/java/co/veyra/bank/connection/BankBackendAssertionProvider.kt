@@ -1,6 +1,6 @@
 package co.veyra.bank.connection
 
-import co.veyra.common.connection.VeyraAuthProvider
+import co.veyra.common.providers.VeyraAuthProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType

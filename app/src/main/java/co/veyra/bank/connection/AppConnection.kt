@@ -1,7 +1,7 @@
 package co.veyra.bank.connection
 
 import co.veyra.bank.BuildConfig
-import co.veyra.common.connection.VeyraProvider
+import co.veyra.common.providers.VeyraProvider
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -65,4 +65,4 @@ object AppConnection {
 class ClientSecretCredentials(
     override val clientId: String,
     override val clientSecret: String,
-) : co.veyra.common.connection.VeyraClientSecretProvider
+) : co.veyra.common.providers.VeyraClientSecretProvider

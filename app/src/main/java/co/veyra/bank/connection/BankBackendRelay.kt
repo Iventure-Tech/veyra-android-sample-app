@@ -1,7 +1,7 @@
 package co.veyra.bank.connection
 
-import co.veyra.common.connection.VeyraProxyProvider
-import co.veyra.common.connection.VeyraRelayException
+import co.veyra.common.providers.VeyraProxyProvider
+import co.veyra.common.providers.VeyraRelayException
 import co.veyra.common.net.NetworkFailureKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

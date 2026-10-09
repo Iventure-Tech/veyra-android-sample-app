@@ -21,7 +21,7 @@ object VeyraBank {
      * How both SDKs reach Veyra: one provider, chosen in the git-ignored veyra.properties. Pass the
      * same one to every SDK `initialize`.
      */
-    fun provider(): co.veyra.common.connection.VeyraProvider = co.veyra.bank.connection.AppConnection.provider()
+    fun provider(): co.veyra.common.providers.VeyraProvider = co.veyra.bank.connection.AppConnection.provider()
 
     // ── The app's own login session ───────────────────────────────────────────────
     // Who is logged in is the banking app's to remember, never the SDK's: the SDKs are told on
