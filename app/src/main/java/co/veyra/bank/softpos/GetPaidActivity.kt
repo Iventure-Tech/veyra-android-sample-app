@@ -334,7 +334,7 @@ class GetPaidActivity : AppCompatActivity() {
         // point of use, inert backstop on non-claiming screens); the SoftPOS SDK is
         // initialised here so its reader arming binds to this activity's lifecycle.
         co.veyra.bank.VeyraBank.ensureInitialized(this)
-        sdk = VeyraSoftPOSSdk.initialize(this, co.veyra.bank.VeyraBank.customerId(this), co.veyra.bank.VeyraBank.softposConfig(this))
+        sdk = VeyraSoftPOSSdk.initialize(this, co.veyra.bank.VeyraBank.customerId(this), co.veyra.bank.VeyraBank.softposConfig(this), co.veyra.bank.VeyraBank.provider())
 
 
         container = findViewById(R.id.container)

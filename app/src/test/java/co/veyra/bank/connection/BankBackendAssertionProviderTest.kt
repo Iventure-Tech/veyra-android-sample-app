@@ -19,7 +19,7 @@ class BankBackendAssertionProviderTest {
     @After fun tearDown() = server.shutdown()
 
     private fun provider(session: String? = "bank-session") =
-        BankBackendAssertionProvider(server.url("/").toString().trimEnd('/'), { session }, OkHttpClient())
+        BankBackendAssertionProvider("client-id", server.url("/").toString().trimEnd('/'), { session }, OkHttpClient())
 
     @Test
     fun postsTheThumbprintAndAudienceAndReturnsTheAssertion() = runBlocking {

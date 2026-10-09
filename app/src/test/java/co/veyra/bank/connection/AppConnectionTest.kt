@@ -1,6 +1,9 @@
 package co.veyra.bank.connection
 
-import co.veyra.common.connection.VeyraConnection
+import co.veyra.common.connection.VeyraAuthProvider
+import co.veyra.common.connection.VeyraProviderType
+import co.veyra.common.connection.VeyraProxyProvider
+import org.junit.Assert.assertEquals
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,11 +15,15 @@ class AppConnectionTest {
         AppConnection.from(mode, "id", "secret", base, { "s" }, OkHttpClient())
 
     @Test
-    fun eachModeBuildsItsConnection() {
+    fun eachModeBuildsItsProvider() {
         @Suppress("DEPRECATION")
-        assertTrue(from("directWithClientSecret") is VeyraConnection.DirectWithClientSecret)
-        assertTrue(from("directWithAssertion") is VeyraConnection.DirectWithAssertion)
-        assertTrue(from("viaAppBackend") is VeyraConnection.ViaAppBackend)
+        assertTrue(from("directWithClientSecret") is co.veyra.common.connection.VeyraClientSecretProvider)
+        val auth = from("directWithAssertion")
+        assertTrue(auth is VeyraAuthProvider && auth.clientId == "id")
+        assertEquals(VeyraProviderType.AUTHENTICATION, auth.providerType)
+        val request = from("viaAppBackend")
+        assertTrue(request is VeyraProxyProvider)
+        assertEquals(VeyraProviderType.REQUEST_PROCESSOR, request.providerType)
     }
 
     @Test
