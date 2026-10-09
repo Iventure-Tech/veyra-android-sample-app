@@ -84,13 +84,6 @@ from the SDK's background work too, not only from screens. The full contract —
 claims, the request envelope, and how a proxy provider reports a failure — is in
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
 
-> **Upgrading from SDK 2.x?** The config builders no longer take `clientId` / `clientSecret`;
-> `initialize` takes one provider instead: a `VeyraAssertionProvider` (recommended) or a
-> `VeyraProxyProvider`. See
-> [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An existing
-> `veyra.properties` keeps its keys; add the bank-backend values from `veyra.properties.example`
-> if you switch to a backend provider.
-
 ## Where things are
 
 | Path | What it shows |
