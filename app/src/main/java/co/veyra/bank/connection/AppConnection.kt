@@ -39,8 +39,7 @@ object AppConnection {
         http: OkHttpClient,
     ): VeyraProvider = when (mode) {
         "directWithClientSecret" ->
-            @Suppress("DEPRECATION")
-            co.veyra.common.connection.VeyraClientSecretProvider(clientId, clientSecret)
+            ClientSecretCredentials(clientId, clientSecret)
 
         "directWithAssertion" -> BankBackendAssertionProvider(clientId, required(bankBackendBaseUrl), bankSession, http)
 
@@ -56,3 +55,14 @@ object AppConnection {
     private fun required(baseUrl: String): String =
         baseUrl.trimEnd('/').ifBlank { error("veyra.bankBackendBaseUrl must be set in veyra.properties for this mode") }
 }
+
+/**
+ * The deprecated client-secret provider — **for testing only**, e.g. against UAT before your bank
+ * backend can sign assertions. A secret inside an app can be extracted: ship a
+ * [BankBackendAssertionProvider] or [BankBackendRelay] instead.
+ */
+@Suppress("DEPRECATION")
+class ClientSecretCredentials(
+    override val clientId: String,
+    override val clientSecret: String,
+) : co.veyra.common.connection.VeyraClientSecretProvider
