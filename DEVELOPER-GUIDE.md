@@ -267,7 +267,7 @@ as the payment app provider. The types live in `co.veyra.common.providers` (`Vey
 | Provider | `providerType` | The SDK… | Choose it when |
 |---|---|---|---|
 | `VeyraAssertionProvider` | `AUTHENTICATION` | calls Veyra itself, with a token it obtains by exchanging a short-lived **assertion your backend signs** for the signed-in user | your backend can sign a JWT for the logged-in user (recommended) |
-| `VeyraProxyProvider` | `REQUEST_PROCESSOR` | calls **nothing** itself: every call is handed to your provider, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
+| `VeyraProxyProvider` | `PROXY` | calls **nothing** itself: every call is handed to your provider, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
 **The interface you implement is the method.** Each interface supplies its `providerType` by
 default, so you never set a mode: the SDK reads it from the provider you pass.
@@ -291,7 +291,7 @@ Rules that hold for every provider:
   (no response code, nothing stored or polled); the wallet's failure message starts with
   `NOT_AUTHENTICATED:`.
 - Every backend call (token requests included) carries `X-Veyra-Sdk-Version` and
-  `X-Veyra-Connection` (`DIRECT_ASSERTION`, `VIA_APP_BACKEND` or `DIRECT_CLIENT_SECRET`).
+  `X-Veyra-Provider-Type` (your provider's `providerType`: `AUTHENTICATION` or `PROXY`).
 
 ### Implementing a provider
 
@@ -426,7 +426,7 @@ uses towards Veyra:
   "query": { "merchant_id": "…" },
   "headers": { "Content-Type": "application/json",
                "X-Veyra-Sdk-Version": "3.0.0",
-               "X-Veyra-Connection": "VIA_APP_BACKEND" },
+               "X-Veyra-Provider-Type": "PROXY" },
   "body": "<the request JSON, as a string>" }
 ```
 

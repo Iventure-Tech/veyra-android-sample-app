@@ -30,7 +30,7 @@ class AppConnectionTest {
     fun theProxyProviderNeedsNoClientIdOrSecret() {
         val provider = AppConnection.proxyProvider("https://bank.example", { "s" }, http)
         assertTrue(provider is VeyraProxyProvider)
-        assertEquals(VeyraProviderType.REQUEST_PROCESSOR, provider.providerType)
+        assertEquals(VeyraProviderType.PROXY, provider.providerType)
     }
 
     @Test
