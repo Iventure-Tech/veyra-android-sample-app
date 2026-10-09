@@ -270,9 +270,7 @@ as the payment app provider. The types live in `co.veyra.common.providers` (`Vey
 | `VeyraProxyProvider` | `REQUEST_PROCESSOR` | calls **nothing** itself: every call is handed to your provider, which forwards it through **your backend** | you want all traffic through your own backend, or cannot run a signer |
 
 **The interface you implement is the method.** Each interface supplies its `providerType` by
-default, so you never set a mode: the SDK reads it from the provider you pass. The deprecated
-`VeyraClientSecretProvider` exists only so apps already on client credentials keep working until
-their cut-over date; don't build a new integration on it.
+default, so you never set a mode: the SDK reads it from the provider you pass.
 
 Rules that hold for every provider:
 
@@ -470,12 +468,6 @@ material is end-to-end encrypted to the device and payment proofs are MACed, so 
 read or forge either; it **can** read account and identity fields, and it could alter plain answers
 such as a transaction status. That is acceptable only because you, the provider, already hold that
 data. **Forward the bytes unmodified.** The SDK's log export does not go through your provider.
-
-### `VeyraClientSecretProvider` is deprecated
-
-It exists only so apps already on client credentials keep working until their cut-over date; it is
-retired per payment app provider. Don't build a new integration on it: a client secret inside an
-app can be extracted. Implement `VeyraAssertionProvider` or `VeyraProxyProvider`.
 
 ---
 
@@ -1766,7 +1758,7 @@ re-charge**. You never have to work out which happened — check `getLastTransac
 | Code | Raised when | What to do |
 |---|---|---|
 | `MERCHANT_REGISTRATION_NETWORK_ERROR` | Registration could not reach the backend | Retry when connected; nothing was created. |
-| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | `message` carries the status. A `401`/`403` here is almost always a wrong `clientId` / `clientSecret` (the deprecated `VeyraClientSecretProvider`); a `4xx` on registration means the profile was refused — show `message`. |
+| `MERCHANT_REGISTRATION_HTTP_ERROR` | Registration was answered with an HTTP error — **also** what an OAuth token rejection reports | `message` carries the status. A `401`/`403` here is almost always a wrong `clientId` / `clientSecret`; a `4xx` on registration means the profile was refused — show `message`. |
 | `MERCHANT_REGISTRATION_PARSE_ERROR` | The registration response could not be parsed | Retry; if it persists the merchant may in fact be registered — call `refreshStatus()` before registering again. |
 | `ISSUER_NETWORK_ERROR` | The OAuth token fetch failed at transport level | Retry when connected. Nothing was sent onward — the authenticated call never started. |
 
