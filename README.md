@@ -69,7 +69,7 @@ from `veyra.connection.mode` in `veyra.properties`:
 
 | Mode | What it needs | Your bank backend serves |
 |---|---|---|
-| `directWithAssertion` (recommended) | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"jkt": …, "audience": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `directWithAssertion` (recommended) | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
 | `viaAppBackend` | `veyra.bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `directWithClientSecret` (**deprecated**) | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this mode is being retired |
 
@@ -81,8 +81,7 @@ claims, the relay envelope, and how a relay reports a failure — is in
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
 
 > **Upgrading from SDK 2.x?** Each SDK config builder now takes a required `connection` instead
-> of `clientId` / `clientSecret`; staying on client credentials is a one-line change —
-> `connection = VeyraConnection.DirectWithClientSecret(clientId, clientSecret)`. See
+> of `clientId` / `clientSecret`: use `DirectWithAssertion` (recommended) or `ViaAppBackend`. See
 > [Migrating from 2.x to 3.0.0](DEVELOPER-GUIDE.md#migrating-from-2x-to-300). An existing
 > `veyra.properties` keeps its keys; add `veyra.connection.mode` (and the bank-backend values for
 > the backend modes) from `veyra.properties.example`.

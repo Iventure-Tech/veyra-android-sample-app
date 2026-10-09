@@ -36,43 +36,27 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 | `VeyraWalletSdk.getClientId()` / `getClientSecret()` | **Removed.** |
 | — | **New:** `SdkErrorCode.NOT_AUTHENTICATED` (SoftPOS) and the `NOT_AUTHENTICATED:` message prefix (wallet): the SDK could not obtain credentials, so nothing was sent. |
 
-Staying on client credentials is a one-line change per SDK:
+Replace the client id and secret with a connection. Either your backend signs an assertion for
+the signed-in user, or every call goes through your backend:
 
 ```kotlin
 // 2.x
 VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, clientId, clientSecret)
-// 3.0.0
-VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId,
-    connection = VeyraConnection.DirectWithClientSecret(clientId, clientSecret))
+
+// 3.0.0 — DirectWithAssertion (recommended)
+val connection = VeyraConnection.DirectWithAssertion(
+    clientId = "your-client-id",
+    assertionProvider = AssertionProvider { audience, jkt -> myBankApi.sdkAssertion(audience, jkt) },
+)
+// 3.0.0 — or ViaAppBackend
+val connection = VeyraConnection.ViaAppBackend(MyRelay())
+
+VeyraSoftPosSdkConfig.builder(environment, paymentAppProviderId, connection)
 ```
 
-`DirectWithClientSecret` is **deprecated** — it keeps working until your cut-over date, and then you
-move to `DirectWithAssertion` or `ViaAppBackend`. On the wire it is unchanged, so apps on 2.x keep
+Each needs one endpoint on your backend; see
+[Your bank backend](#your-bank-backend--the-two-endpoints-the-sample-calls). Apps still on 2.x keep
 working while you migrate.
-
-### Migrating from 1.x to 2.0.0
-
-2.0.0 keeps every card, key, merchant and transaction **per customer**, so the SDK has to be told who the customer is. The breaking changes:
-
-| 1.x | 2.0.0 |
-|---|---|
-| `VeyraSdk.initialize(activity, config)` | `VeyraSdk.initialize(activity, customerId, config)` |
-| `VeyraSoftPOSSdk.initialize(activity, config)` | `VeyraSoftPOSSdk.initialize(activity, customerId, config)` |
-| `VeyraWalletSdk.initialize(context, config, activity)` | `VeyraWalletSdk.initialize(context, customerId, config, activity)` |
-| `VeyraSoftPOSSdk.storedMerchant(context)` | `VeyraSoftPOSSdk.storedMerchant(context, customerId)` |
-| `VeyraSoftPOSSdk.isMerchantRegistered(context)` | `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` |
-| `TransactionRequest.Builder(amount, currency).merchantOrderId(id)` — order id optional; `charge(scanned)` and `createContextPayment(…)` without it | **Required** on every merchant payment: `TransactionRequest.Builder(amount, currency, merchantOrderId)`, `charge(scanned, merchantOrderId)`, `createContextPayment(…, merchantOrderId, …)`. A blank one is refused with `INVALID_REQUEST` before anything is sent. The deprecated `charge(scanned, merchantTransactionReference, …)` overload is removed. |
-| `merchantService.clearStoredMerchant()` | **Removed.** Call `signOut()` when the customer logs out; a successful registration overwrites the stored merchant, so re-registering needs no clear. |
-| — | **New:** `signOut()` on `VeyraSdk`, `VeyraSoftPOSSdk` and `VeyraWalletSdk`. |
-
-What to change in your app:
-
-1. Pass the id of the customer your app has authenticated to `initialize` — **on every launch**, not only the first. The SDK does not remember who is signed in.
-2. Call `signOut()` when the customer logs out.
-3. Register your observers again after each `initialize` — a sign-out or a switch to another customer drops them.
-4. Expect existing customers to start empty: data written by 1.x is not tied to any customer, so the SDK **erases it** on the first 2.0.0 launch instead of guessing whose it was. Customers add their cards again, and merchants register again.
-
-See [Customers: signing in, signing out, switching](#customers-signing-in-signing-out-switching) for the full behaviour.
 
 ---
 
@@ -304,8 +288,6 @@ VeyraWalletSdk.signOut()
 session.clear()
 ```
 
-> **Upgrading from 1.x:** data stored by 1.x belongs to no customer, so the first 2.0.0 launch **erases** it rather than migrating it. Your customers add their cards again, and merchants register again. See [Migrating from 1.x to 2.0.0](#migrating-from-1x-to-200).
-
 ---
 
 ## Connecting to Veyra
@@ -352,15 +334,11 @@ independent):
 // DirectWithAssertion (recommended)
 val connection = VeyraConnection.DirectWithAssertion(
     clientId = "your-client-id",
-    assertionProvider = AssertionProvider { jkt, audience -> myBankApi.sdkAssertion(jkt, audience) },  // JWT, or null
+    assertionProvider = AssertionProvider { audience, jkt -> myBankApi.sdkAssertion(audience, jkt) },  // JWT, or null
 )
 
 // ViaAppBackend
 val connection = VeyraConnection.ViaAppBackend(MyRelay())
-
-// DirectWithClientSecret (deprecated)
-@Suppress("DEPRECATION")
-val connection = VeyraConnection.DirectWithClientSecret("your-client-id", "your-client-secret")
 
 // Then, whichever mode:
 val softposConfig = VeyraSoftPosSdkConfig.builder(Environment.TEST, paymentAppProviderId, connection).build()
@@ -380,7 +358,7 @@ authenticated with your app's **own** session (the sample sends a placeholder be
 
 ```
 POST {your backend}/sdk-assertion                          (DirectWithAssertion)
-     {"jkt": "<jkt>", "audience": "<audience>"}
+     {"audience": "<audience>", "jkt": "<jkt>"}
   →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns null)
 
 POST {your backend}/veyra-relay/{post|get|put|delete|patch} (ViaAppBackend)
@@ -493,10 +471,9 @@ data. **Forward the bytes unmodified.** The SDK's log export does not go through
 
 ### `DirectWithClientSecret` is deprecated
 
-It works exactly as in 2.x on the wire and keeps working until your cut-over date; it is retired
-per provider. A client secret inside an app can be extracted — move to `DirectWithAssertion` or
-`ViaAppBackend`. Never commit a secret to a tracked file (the sample keeps it in the git-ignored
-`veyra.properties`), and never put it in app resources: the SDK reads nothing from them.
+It exists only so apps already on client credentials keep working until their cut-over date; it is
+retired per provider. Don't build a new integration on it: a client secret inside an app can be
+extracted. Use `DirectWithAssertion` or `ViaAppBackend`.
 
 ---
 

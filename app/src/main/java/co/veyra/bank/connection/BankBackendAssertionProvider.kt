@@ -15,7 +15,7 @@ import org.json.JSONObject
  * claims — `iss`, `sub`, `aud` equal to the [audience] the SDK passes here, `iat`, `exp` ≤ 5 min
  * and a unique `jti` — plus the optional `cnf.jkt` (the [jkt] the SDK passes here) and `acr`.
  *
- * Request `{"jkt": "<jkt>", "audience": "<Veyra API base URL>"}` with your app's own session;
+ * Request `{"audience": "<Veyra API base URL>", "jkt": "<jkt>"}` with your app's own session;
  * response `{"assertion": "<compact JWT>"}`.
  * Returns null when no user is signed in (401), which the SDK reports as `NOT_AUTHENTICATED`
  * without sending anything; any other failure throws, with the same effect.
@@ -27,12 +27,12 @@ class BankBackendAssertionProvider(
     private val http: OkHttpClient,
 ) : AssertionProvider {
 
-    override suspend fun assertion(jkt: String, audience: String): String? = withContext(Dispatchers.IO) {
+    override suspend fun assertion(audience: String, jkt: String): String? = withContext(Dispatchers.IO) {
         val session = bankSession()?.takeIf { it.isNotBlank() } ?: return@withContext null // logged out
         val request = Request.Builder()
             .url("$baseUrl/sdk-assertion")
             .header("Authorization", "Bearer $session") // your bank session, not a Veyra credential
-            .post(JSONObject().put("jkt", jkt).put("audience", audience).toString().toRequestBody(JSON))
+            .post(JSONObject().put("audience", audience).put("jkt", jkt).toString().toRequestBody(JSON))
             .build()
         http.newCall(request).execute().use { response ->
             parse(response.code, response.body?.string().orEmpty())

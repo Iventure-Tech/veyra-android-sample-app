@@ -24,7 +24,7 @@ class BankBackendAssertionProviderTest {
     @Test
     fun postsTheThumbprintAndAudienceAndReturnsTheAssertion() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"assertion":"eyJ.a.b"}"""))
-        assertEquals("eyJ.a.b", provider().assertion("JKT-1", "https://api.uat.veyra.co"))
+        assertEquals("eyJ.a.b", provider().assertion("https://api.uat.veyra.co", "JKT-1"))
         val recorded = server.takeRequest()
         assertEquals("/sdk-assertion", recorded.path)
         val body = JSONObject(recorded.body.readUtf8())
@@ -35,7 +35,7 @@ class BankBackendAssertionProviderTest {
 
     @Test
     fun noSessionMeansNoAssertionAndNoCall() = runBlocking {
-        assertNull(provider(session = null).assertion("JKT", "https://api.uat.veyra.co"))
+        assertNull(provider(session = null).assertion("https://api.uat.veyra.co", "JKT"))
         assertEquals(0, server.requestCount)
     }
 
