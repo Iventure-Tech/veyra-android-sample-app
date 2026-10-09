@@ -19,9 +19,9 @@ def veyraProp = { String key ->
     }
     return value
 }
-// The connection values (mode, client id/secret, bank backend, bank session) are optional at
-// build time: which ones a mode needs depends on the mode, so an unset value reaches BuildConfig
-// as "" and the app refuses to start naming it (see connection/AppConnection.kt).
+// The connection values (client id/secret, bank backend, bank session) are optional at build
+// time: which ones are needed depends on the provider AppConnection.provider() returns, so an
+// unset value reaches BuildConfig as "" (see connection/AppConnection.kt).
 def connectionValue = { String key ->
     def v = veyraProps.getProperty(key)?.trim() ?: ''
     if (v.startsWith('your-')) v = ''
@@ -46,7 +46,6 @@ android {
         resValue "string", "token_requestor_id", veyraProp('veyra.tokenRequestorId')
 
         // How both SDKs reach Veyra — see connection/AppConnection.kt.
-        buildConfigField 'String', 'VEYRA_CONNECTION_MODE', connectionValue('veyra.connection.mode')
         buildConfigField 'String', 'VEYRA_CLIENT_ID', connectionValue('veyra.clientId')
         buildConfigField 'String', 'VEYRA_CLIENT_SECRET', connectionValue('veyra.clientSecret')
         buildConfigField 'String', 'BANK_BACKEND_BASE_URL', connectionValue('veyra.bankBackendBaseUrl')

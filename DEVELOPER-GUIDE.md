@@ -375,14 +375,15 @@ VeyraSoftPOSSdk.initialize(activity, customerId, softposConfig, provider)
 VeyraWalletSdk.initialize(context, customerId, walletConfig, provider, activity)
 ```
 
-The sample reads the kind from `veyra.properties` (`veyra.connection.mode`: `directWithAssertion`
-for its `VeyraAssertionProvider`, `viaAppBackend` for its `VeyraProxyProvider`; required — the app
-refuses to start without it) and builds the provider in
-`app/src/main/java/co/veyra/bank/connection/AppConnection.kt`. Its two providers,
-`BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied. Each mode reads only its own settings: `directWithAssertion` needs the client id and your backend URL, `viaAppBackend` only your backend URL, and `directWithClientSecret` only the client id and secret. The
-template `veyra.properties.example` ships with `directWithClientSecret`, the sample's
-`ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only**, so the sample runs
-before your backend has either endpoint.
+The sample has no mode setting either: `AppConnection.provider()` in
+`app/src/main/java/co/veyra/bank/connection/AppConnection.kt` returns one provider, and to switch
+you return a different one — exactly what your own app does. Its two backend providers,
+`BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied; each reads
+only its own values from `veyra.properties` (the assertion provider: `veyra.clientId` and
+`veyra.bankBackendBaseUrl`; the proxy provider: `veyra.bankBackendBaseUrl`). The sample ships
+returning `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs
+just `veyra.clientId` and `veyra.clientSecret` — so it runs before your backend has either
+endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
