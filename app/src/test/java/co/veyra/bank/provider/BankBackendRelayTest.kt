@@ -42,24 +42,32 @@ class BankBackendRelayTest {
     fun forwardsTheEnvelopeUnchangedAndReturnsTheBodyUnchanged() = runBlocking {
         val veyraBody = """{"response_code":"00","weird":"ü ✓"}"""
         server.enqueue(MockResponse().setBody(veyraBody))
-        val envelope = """{"v":1,"path":"/paymentgateway/v1/payment","headers":{},"body":"{}"}"""
+        val envelope = """{"version":1,"service":"SOFTPOS","method":"PATCH","path":"/merchants/M1","headers":{},"body":"{}"}"""
         assertEquals(veyraBody, relay().patch(envelope))
         val recorded = server.takeRequest()
-        assertEquals("/veyra-relay/patch", recorded.path)
+        assertEquals("/issuertokengateway/v1", recorded.path)
         assertEquals("POST", recorded.method)
         assertEquals(envelope, recorded.body.readUtf8())
         assertEquals("Bearer bank-session", recorded.getHeader("Authorization"))
     }
 
+    /** The envelope names the method, so every function posts to the one endpoint. */
     @Test
-    fun eachMethodHasItsOwnRoute() = runBlocking {
+    fun everyMethodPostsToTheOneIssuerTokenGatewayEndpoint() = runBlocking {
         repeat(5) { server.enqueue(MockResponse().setBody("ok")) }
         val r = relay()
         r.post("{}"); r.get("{}"); r.put("{}"); r.delete("{}"); r.patch("{}")
-        assertEquals(
-            listOf("post", "get", "put", "delete", "patch").map { "/veyra-relay/$it" },
-            List(5) { server.takeRequest().path },
-        )
+        val sent = List(5) { server.takeRequest() }
+        assertEquals(List(5) { "/issuertokengateway/v1" }, sent.map { it.path })
+        assertEquals(List(5) { "POST" }, sent.map { it.method })
+    }
+
+    /** The proxy's own failure is a 200 the SDK recognises, so the relay returns it unchanged. */
+    @Test
+    fun aProxyFailedBodyIsReturnedUnchangedForTheSdkToRead() = runBlocking {
+        val proxyFailed = """{"response_status":"PROXY_FAILED","response_status_reason":"UPSTREAM_TIMEOUT","never_sent":false}"""
+        server.enqueue(MockResponse().setBody(proxyFailed))
+        assertEquals(proxyFailed, relay().post("{}"))
     }
 
     /** A non-2xx came back: the request was delivered — may have been processed. */
