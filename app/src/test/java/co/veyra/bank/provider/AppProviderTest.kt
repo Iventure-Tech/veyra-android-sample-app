@@ -14,9 +14,18 @@ class AppProviderTest {
     private val http = OkHttpClient()
 
     @Test
-    fun theSampleShipsTheTestingOnlyClientSecretProvider() {
-        @Suppress("DEPRECATION")
-        assertTrue(AppProvider.provider() is co.veyra.common.providers.VeyraClientSecretProvider)
+    fun theSampleShipsTheProxyProvider() {
+        // The values are compiled in from the local, untracked config: with them the default is
+        // the proxy provider; without them (CI) it refuses, naming the missing bank backend.
+        if (co.veyra.bank.BuildConfig.BANK_BACKEND_BASE_URL.isNotBlank() &&
+            co.veyra.bank.BuildConfig.BANK_CLIENT_ID.isNotBlank() &&
+            co.veyra.bank.BuildConfig.BANK_CLIENT_SECRET.isNotBlank()
+        ) {
+            assertTrue(AppProvider.provider() is VeyraProxyProvider)
+        } else {
+            val e = runCatching { AppProvider.provider() }.exceptionOrNull()
+            assertTrue("$e", e is IllegalStateException && e.message.orEmpty().contains("must be set"))
+        }
     }
 
     @Test

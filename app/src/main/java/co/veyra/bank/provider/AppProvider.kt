@@ -39,14 +39,14 @@ object AppProvider {
     /**
      * The provider for both SDKs. Built per call; the SDK re-binds it on every initialise.
      *
-     * Return ONE of the three. The sample ships with the client-secret provider so it runs with
-     * just your onboarding client id and secret — **for testing only**; a real app returns
-     * [assertionProvider] or [proxyProvider].
+     * Return ONE of the three. The sample ships with [proxyProvider]: every SDK call goes through
+     * your bank backend, so the app holds no Veyra secret. [assertionProvider] is the other
+     * production choice; the deprecated [clientSecretProvider] is for testing only.
      */
     fun provider(): VeyraProvider =
-        clientSecretProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.VEYRA_CLIENT_SECRET)
+        proxyProvider(BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
     //  assertionProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.BANK_CLIENT_ID, BuildConfig.BANK_CLIENT_SECRET, BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
-    //  proxyProvider(BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
+    //  clientSecretProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.VEYRA_CLIENT_SECRET)
 
     /**
      * Your Veyra client id (the only value the SDK receives), and your bank's own client at the

@@ -46,10 +46,10 @@ with per-outcome guidance — lives in this repository.
    # edit veyra.properties
    ```
 
-3. The sample ships using the deprecated `VeyraClientSecretProvider`, **for testing only**, so
-   it runs with just your `veyra.clientId` and `veyra.clientSecret`. To try the providers a real
-   app ships, change the one line in `AppProvider.provider()` (see
-   [Choose a provider](#choose-a-provider)).
+3. The sample ships using the proxy provider (`VeyraProxyProvider`): every SDK call goes through
+   your bank backend, so set `veyra.bankBackendBaseUrl`, `veyra.bankClientId`,
+   `veyra.bankClientSecret`, `veyra.username` and `veyra.password`. To use another provider,
+   change the one line in `AppProvider.provider()` (see [Choose a provider](#choose-a-provider)).
 4. Optionally update `app/src/main/res/values/sample_data.xml` with your test account
    details so the forms prefill usefully.
 5. Connect your device and run:
@@ -74,8 +74,8 @@ it — and switching is returning a different one:
 | `provider()` returns | Provider | What it needs (`veyra.properties`) | Your bank backend serves |
 |---|---|---|---|
 | `assertionProvider(…)` (recommended) | `VeyraAssertionProvider` | `veyra.clientId` (the only value the SDK receives), `veyra.bankBackendBaseUrl`, `veyra.bankClientId`, `veyra.bankClientSecret`, `veyra.username`, `veyra.password` | `POST /oauth2/token`: an RFC 8693 token exchange of the user's session for the assertion, authenticated with your bank's own client (`bankClientId`/`bankClientSecret`, HTTP Basic) → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
-| `proxyProvider(…)` | `VeyraProxyProvider` | `veyra.bankBackendBaseUrl`, `veyra.bankClientId`, `veyra.bankClientSecret`, `veyra.username`, `veyra.password` | `POST /issuertokengateway/v1/proxy` for every method — your API gateway removes the `/issuertokengateway/v1` context and forwards the SDK's envelope to your issuer token gateway's `/proxy`, which calls Veyra and answers with Veyra's body |
-| `clientSecretProvider(…)` (**deprecated**, what the sample ships with) | `VeyraClientSecretProvider` | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this provider is being retired |
+| `proxyProvider(…)` (what the sample ships with) | `VeyraProxyProvider` | `veyra.bankBackendBaseUrl`, `veyra.bankClientId`, `veyra.bankClientSecret`, `veyra.username`, `veyra.password` | `POST /issuertokengateway/v1/proxy` for every method — your API gateway removes the `/issuertokengateway/v1` context and forwards the SDK's envelope to your issuer token gateway's `/proxy`, which calls Veyra and answers with Veyra's body |
+| `clientSecretProvider(…)` (**deprecated**, testing only) | `VeyraClientSecretProvider` | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this provider is being retired |
 
 **The bank session.** Both providers that call your bank first log the user in:
 `POST {veyra.bankBackendBaseUrl}/oauth2/token` with your bank's client as HTTP Basic
