@@ -30,17 +30,27 @@ object AppConnection {
      * [assertionProvider] or [proxyProvider].
      */
     fun provider(): VeyraProvider =
-        clientSecretProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.VEYRA_CLIENT_SECRET)
-    //  assertionProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
+    //  clientSecretProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.VEYRA_CLIENT_SECRET)
+        assertionProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.BANK_CLIENT_ID, BuildConfig.BANK_CLIENT_SECRET, BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
     //  proxyProvider(BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
 
-    /** Your client id, and the bank backend that signs the assertion. */
+    /**
+     * Your Veyra client id (the only value the SDK receives), and your bank's own client at the
+     * authorization server that exchanges the session for the assertion.
+     */
     internal fun assertionProvider(
         clientId: String,
+        bankClientId: String,
+        bankClientSecret: String,
         bankBackendBaseUrl: String,
         bankSession: () -> String?,
         http: OkHttpClient,
-    ): VeyraProvider = BankBackendAssertionProvider(clientId, required(bankBackendBaseUrl), bankSession, http)
+    ): VeyraProvider = BankBackendAssertionProvider(
+        clientId,
+        bankClientId.ifBlank { error("veyra.bankClientId must be set in veyra.properties for this provider") },
+        bankClientSecret.ifBlank { error("veyra.bankClientSecret must be set in veyra.properties for this provider") },
+        required(bankBackendBaseUrl), bankSession, http,
+    )
 
     /** Only the bank backend that relays the SDK's calls — no client id, no secret. */
     internal fun proxyProvider(
