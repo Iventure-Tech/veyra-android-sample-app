@@ -48,7 +48,7 @@ with per-outcome guidance — lives in this repository.
 
 3. The sample ships using the deprecated `VeyraClientSecretProvider`, **for testing only**, so
    it runs with just your `veyra.clientId` and `veyra.clientSecret`. To try the providers a real
-   app ships, change the one line in `AppConnection.provider()` (see
+   app ships, change the one line in `AppProvider.provider()` (see
    [Choose a provider](#choose-a-provider)).
 4. Optionally update `app/src/main/res/values/sample_data.xml` with your test account
    details so the forms prefill usefully.
@@ -68,7 +68,7 @@ The SDK artifacts resolve from the Veyra Maven repository
 
 Both SDKs share one **provider** — how they reach Veyra. There is no mode to set: the SDK works
 out the method from the kind of provider it is given. The sample picks one in code —
-`AppConnection.provider()` in `app/src/main/java/co/veyra/bank/connection/AppConnection.kt` returns
+`AppProvider.provider()` in `app/src/main/java/co/veyra/bank/provider/AppProvider.kt` returns
 it — and switching is returning a different one:
 
 | `provider()` returns | Provider | What it needs (`veyra.properties`) | Your bank backend serves |
@@ -79,7 +79,7 @@ it — and switching is returning a different one:
 
 `veyra.bankSessionToken` is a **placeholder** for your app's own login session, sent to your bank
 backend as a bearer token. The two providers that call your backend are in
-`app/src/main/java/co/veyra/bank/connection/` — short, and meant to be copied. The proxy provider is called
+`app/src/main/java/co/veyra/bank/provider/` — short, and meant to be copied. The proxy provider is called
 from the SDK's background work too, not only from screens. The full contract — the assertion's
 claims, the request envelope, and how a proxy provider reports a failure — is in
 [Connecting to Veyra](DEVELOPER-GUIDE.md#connecting-to-veyra).
@@ -89,7 +89,7 @@ claims, the request envelope, and how a proxy provider reports a failure — is 
 | Path | What it shows |
 |---|---|
 | `app/src/main/java/co/veyra/bank/VeyraBank.kt` | SDK configuration & initialisation (both SDKs via the combined facade) |
-| `app/src/main/java/co/veyra/bank/connection/` | How the SDKs reach Veyra: the one provider the app passes (`AppConnection.provider()`), and the two providers (`VeyraAssertionProvider`, `VeyraProxyProvider`) that call your bank backend |
+| `app/src/main/java/co/veyra/bank/provider/` | How the SDKs reach Veyra: the one provider the app passes (`AppProvider.provider()`), and the two providers (`VeyraAssertionProvider`, `VeyraProxyProvider`) that call your bank backend |
 | `app/src/main/java/co/veyra/bank/HomeActivity.kt` | Home: entry to both flows, mode readout |
 | `app/src/main/java/co/veyra/bank/softpos/` | The merchant (Get paid) flow — all three acceptance rails |
 | `app/src/main/java/co/veyra/bank/wallet/` | The wallet (Pay) flow — add card, activation, payments, history |

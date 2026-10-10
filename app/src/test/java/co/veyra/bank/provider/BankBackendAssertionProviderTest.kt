@@ -1,4 +1,4 @@
-package co.veyra.bank.connection
+package co.veyra.bank.provider
 
 import kotlinx.coroutines.runBlocking
 import okhttp3.Credentials

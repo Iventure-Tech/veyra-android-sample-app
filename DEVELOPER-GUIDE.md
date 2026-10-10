@@ -339,8 +339,8 @@ VeyraSoftPOSSdk.initialize(activity, customerId, softposConfig, provider)
 VeyraWalletSdk.initialize(context, customerId, walletConfig, provider, activity)
 ```
 
-The sample has no mode setting either: `AppConnection.provider()` in
-`app/src/main/java/co/veyra/bank/connection/AppConnection.kt` returns one provider, and to switch
+The sample has no mode setting either: `AppProvider.provider()` in
+`app/src/main/java/co/veyra/bank/provider/AppProvider.kt` returns one provider, and to switch
 you return a different one — exactly what your own app does. Its two backend providers,
 `BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied; each reads
 only its own values from `veyra.properties` (the assertion provider: `veyra.clientId`,
