@@ -180,9 +180,9 @@ class GetPaidActivity : AppCompatActivity() {
 
     /**
      * A stand-in for the till's own order/basket/invoice id, which a real integration would take
-     * from its POS rather than generate. Required, and unique per merchant among approved and
-     * unresolved payments: the gateway refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`. A
-     * declined or failed sale's order id may be reused for its retry.
+     * from its POS rather than generate. Required, and unique per merchant across all its payments,
+     * whatever their outcome: the gateway refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`,
+     * so a retry needs a new order id.
      */
     private fun nextSampleOrderId(): String = "ORDER-${System.currentTimeMillis()}"
 
@@ -998,7 +998,7 @@ class GetPaidActivity : AppCompatActivity() {
                 )
             } catch (e: co.veyra.softpos.payment.sdk.VeyraSdkException) {
                 // A refusal the merchant can act on: the order id is already used by another
-                // approved or pending payment, or the device is offline. Nothing was created.
+                // payment, or the device is offline. Nothing was created.
                 placeholder.text = when (e.errorCodeString) {
                     "DUPLICATE_MERCHANT_ORDER_ID" ->
                         "This order id is already used by another payment — start a new sale"

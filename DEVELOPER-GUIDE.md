@@ -775,7 +775,7 @@ try {
 |-----------|----------|-------------|
 | `amount` | **Mandatory** | **Minor units** (`Long`), e.g. ₦325.00 → `32500L`. Must be > 0. |
 | `currency` | **Mandatory** | ISO 4217 numeric, 3–4 digits (padded to 4, e.g. `"0566"`). |
-| `merchantOrderId` | **Mandatory** | **Your** order / basket / invoice id for this sale (`String`, non-blank, at most 255 characters). A blank one throws `VeyraSdkException` with `INVALID_REQUEST` from the builder, before anything is sent. Stored and echoed by the gateway and shown on the transaction detail and receipt, on your side and on the paying wallet's. **Unique per merchant** among approved and still-pending payments: if another such payment already uses it, the gateway refuses the payment with `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` and nothing is sent. A declined or failed payment releases its order id, so its retry may reuse it. |
+| `merchantOrderId` | **Mandatory** | **Your** order / basket / invoice id for this sale (`String`, non-blank, at most 255 characters). A blank one throws `VeyraSdkException` with `INVALID_REQUEST` from the builder, before anything is sent. Stored and echoed by the gateway and shown on the transaction detail and receipt, on your side and on the paying wallet's. **Unique per merchant** across all its payments, whatever their outcome: if another payment already uses it — approved, pending, declined or failed — the gateway refuses the payment with `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` and nothing is sent. A retry needs a new order id. |
 | `txType` | Optional | `TxType.PURCHASE`, `REFUND`, `CASH_ADVANCE`, `RECURRING_PURCHASE`, `PRE_AUTH_COMPLETION`, `OTHER`. **Defaults to `PURCHASE`** when omitted — pass a value only for a non-purchase transaction. |
 | `.performed3ds(Boolean)` | Optional | Whether your app performed 3-D Secure. Default `false`. |
 
@@ -817,8 +817,8 @@ val created = client.createContextPayment(
     merchantOrderId = "ORDER-42",            // required: YOUR order id, unique per merchant
     onExpired = { blankQr(); showHint("This payment code has expired — start a new payment") },
 ) ?: run { showError("Could not create payment QR"); return }
-// Throws VeyraSdkException(DUPLICATE_MERCHANT_ORDER_ID) when another approved or pending payment
-// already uses the order id — create the QR with a different one.
+// Throws VeyraSdkException(DUPLICATE_MERCHANT_ORDER_ID) when a payment already uses the order id,
+// whatever its outcome — create the QR with a different one.
 
 renderQrPayload(created.mpmPayload)          // encode the string verbatim into a QR bitmap
 while (isActive) {
@@ -1723,7 +1723,7 @@ needs reconciling: fix what the code names and re-initiate.
 |---|---|---|
 | `MISSING_MANDATORY_CONFIG` | Initialise, payment, QR or token call without an environment, a usable provider, terminal id or merchant id | An integration bug, not a user-facing error. Fix `VeyraSoftPosSdkConfig` (or register the merchant, which supplies terminal/merchant ids). |
 | `INVALID_REQUEST` | Payment request failed validation — amount not greater than zero, a missing / non-4-digit ISO 4217 currency, or a blank (or over-255-character) `merchantOrderId`. `message` names the failed check | Fix the input and call again. Safe: nothing was sent. |
-| `DUPLICATE_MERCHANT_ORDER_ID` | `createContextPayment` only: another approved or still-pending payment of this merchant already uses the `merchantOrderId`, so no QR was created. (A tap or customer-QR charge refused for the same reason is a payment outcome instead: `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`.) | Create the QR with a different order id. Several QRs may share one order id; a declined or failed payment's order id may be reused. |
+| `DUPLICATE_MERCHANT_ORDER_ID` | `createContextPayment` only: another payment of this merchant already uses the `merchantOrderId`, whatever its outcome, so no QR was created. (A tap or customer-QR charge refused for the same reason is a payment outcome instead: `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`.) | Create the QR with a different order id. Several QRs may share one order id until one of them is paid. |
 | `PAYMENT_CANCELLED` | The merchant cancelled the pending payment before a card was tapped | Return to the amount screen. Not an error to report — `message` is `"Payment cancelled"`. |
 | `TRANSACTION_IN_PROGRESS` | `makeCardPayment` (or a rail call) while another payment is still running | Wait for the in-flight callback. Never queue a second payment; disable the pay button while one is live. |
 | `MERCHANT_NOT_ACTIVE` | The merchant account is not `ACTIVE` | Gate your get-paid entry on `isRegistered` + `isMerchantActive()`, and call `refreshStatus()` while awaiting activation. |
@@ -1853,7 +1853,7 @@ status:
 | `"96"` | `SYSTEM_MALFUNCTION` | `PENDING` | A service threw while processing; the outcome is ambiguous | Same as `68`. It may yet settle — never report it as a decline. |
 | `"91"` | `ISSUER_SWITCH_NOT_AVAILABLE` | `FAILED` | The connection never opened — provably nothing was sent | Safe to retry. The merchant's own connection is not the problem. |
 | `"25"` | `UNABLE_TO_LOCATE_RECORD` | `FAILED` | The gateway has no such transaction — it never arrived | Terminal and safe: the payment did not happen. Take it again. |
-| `"94"` | `DUPLICATE_MERCHANT_ORDER_ID` | `FAILED` | Another approved or still-pending payment of this merchant already uses the `merchantOrderId` | Nothing was sent. Take the payment with a different order id. |
+| `"94"` | `DUPLICATE_MERCHANT_ORDER_ID` | `FAILED` | Another payment of this merchant already uses the `merchantOrderId` — approved, pending, declined or failed | Nothing was sent. Take the payment with a different order id. |
 | `"07"` | `ACCOUNT_VALIDATION_FAILED` | `FAILED` | The destination (settlement) account was refused by the bank's own validation | Nothing was transferred. Fix the settlement account on the merchant profile. |
 | `"21"` | `NAME_ENQUIRY_FAILED` | `FAILED` | The pre-transfer name enquiry itself failed, so the transfer was never dispatched | Nothing was transferred — retry; if it persists, check the settlement account details. |
 
