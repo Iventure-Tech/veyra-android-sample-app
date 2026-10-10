@@ -638,7 +638,7 @@ val data = MerchantRegistrationData(
     countryCode = "0566",                  // ISO 3166-1 numeric, 4 digits
     accountNumber = "1234567890",          // settlement NUBAN account
     institutionCode = "000000",            // from getBanks
-    bvn = "12345678901",                   // required for personal; optional for business
+    bvn = "12345678901",                   // optional for both merchant types
     cacNumber = null,                      // business merchants only
     walletAccountId = null                 // optional
 )
@@ -664,7 +664,7 @@ sdk.merchantService.registerPersonalMerchant(data) { response ->
 | `countryCode` | **Mandatory** | ISO 3166-1 numeric, 4-digit zero-padded (`"0566"`). |
 | `accountNumber` | **Mandatory** | Settlement NUBAN account number. |
 | `institutionCode` | **Mandatory** | Settlement bank's institution code (from `getBanks`). |
-| `bvn` | Personal: mandatory; Business: optional | 11-digit BVN. A business's account holder has one too — send it when you have it. |
+| `bvn` | Optional (both types) | 11-digit BVN — send it when you have it, for a personal or a business merchant. |
 | `cacNumber` | Business only | CAC registration number. |
 | `walletAccountId` | Optional | The merchant's wallet account id; stored verbatim by the gateway and echoed on responses. |
 
