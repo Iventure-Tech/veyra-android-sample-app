@@ -180,9 +180,9 @@ class GetPaidActivity : AppCompatActivity() {
 
     /**
      * A stand-in for the till's own order/basket/invoice id, which a real integration would take
-     * from its POS rather than generate. It is optional, is never used as a lookup key, and may
-     * repeat across attempts of the same sale — which is exactly what ties a retry back to the
-     * original order, now that every attempt mints its own transaction reference.
+     * from its POS rather than generate. Required, and unique per merchant across all its payments,
+     * whatever their outcome: the gateway refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`,
+     * so a retry needs a new order id.
      */
     private fun nextSampleOrderId(): String = "ORDER-${System.currentTimeMillis()}"
 
@@ -983,18 +983,31 @@ class GetPaidActivity : AppCompatActivity() {
             // The SDK owns the expiry timer; blank the QR the moment it fires (an expired
             // QR must not stay scannable), instead of waiting for the server-polled
             // EXPIRED state up to one poll interval later.
-            val created = client.createContextPayment(
-                merchantId, currentAmountMinorUnits, currentPaymentCurrencyCode,
-                // The merchant-presented rail carries your order id too, so all three rails
-                // (tap, CPM charge, MPM) tie a sale back to the same POS order.
-                merchantOrderId = nextSampleOrderId(),
-                onExpired = {
-                    qrImage.visibility = View.GONE
-                    placeholder.visibility = View.VISIBLE
-                    placeholder.text = getString(R.string.qr_expired)
-                    scheduleAutoNavigate()
-                },
-            )
+            val created = try {
+                client.createContextPayment(
+                    merchantId, currentAmountMinorUnits, currentPaymentCurrencyCode,
+                    // The merchant-presented rail carries your order id too, so all three rails
+                    // (tap, CPM charge, MPM) tie a sale back to the same POS order.
+                    merchantOrderId = nextSampleOrderId(),
+                    onExpired = {
+                        qrImage.visibility = View.GONE
+                        placeholder.visibility = View.VISIBLE
+                        placeholder.text = getString(R.string.qr_expired)
+                        scheduleAutoNavigate()
+                    },
+                )
+            } catch (e: co.veyra.softpos.payment.sdk.VeyraSdkException) {
+                // A refusal the merchant can act on: the order id is already used by another
+                // payment, or the device is offline. Nothing was created.
+                placeholder.text = when (e.errorCodeString) {
+                    "DUPLICATE_MERCHANT_ORDER_ID" ->
+                        "This order id is already used by another payment — start a new sale"
+                    "NO_NETWORK_CONNECTION" -> "No internet connection — connect and try again"
+                    else -> getString(R.string.qr_create_failed)
+                }
+                scheduleAutoNavigate()
+                return@launch
+            }
             if (created == null) {
                 placeholder.text = getString(R.string.qr_create_failed)
                 scheduleAutoNavigate()
