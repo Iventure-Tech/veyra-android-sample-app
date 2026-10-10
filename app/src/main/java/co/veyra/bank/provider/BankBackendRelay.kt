@@ -18,10 +18,10 @@ import java.net.UnknownHostException
 /**
  * A [VeyraProxyProvider]: send every SDK call through **your bank**. The SDK's envelope —
  * `{version, service, method, path, query, headers, body}` — goes, unchanged, as the body of
- * `POST {base}/issuertokengateway/v1`, whichever of the five functions the SDK called: the
- * envelope already says which method and which Veyra service. Your API gateway checks the app's session and forwards it
- * to your proxy backend (your ITG), which calls Veyra and answers with Veyra's response body —
- * this returns it unchanged.
+ * `POST {base}/issuertokengateway/v1/proxy`: the envelope already says which method and which Veyra
+ * service, so there is one entry point. Your API gateway checks the app's
+ * session, removes the `/issuertokengateway/v1` context and forwards it to your ITG's `/proxy`,
+ * which calls Veyra and answers with Veyra's response body — this returns it unchanged.
  *
  * This is called from the SDK's background work too (status polling, key refresh), so it must
  * not depend on a screen being up.
@@ -33,15 +33,10 @@ class BankBackendRelay(
     private val http: OkHttpClient,
 ) : VeyraProxyProvider {
 
-    override suspend fun post(request: String) = forward(request)
-    override suspend fun get(request: String) = forward(request)
-    override suspend fun put(request: String) = forward(request)
-    override suspend fun delete(request: String) = forward(request)
-    override suspend fun patch(request: String) = forward(request)
-
-    private suspend fun forward(envelope: String): String = withContext(Dispatchers.IO) {
+    override suspend fun send(request: String): String = withContext(Dispatchers.IO) {
+        val envelope = request
         val call = Request.Builder()
-            .url("$baseUrl/issuertokengateway/v1")
+            .url("$baseUrl/issuertokengateway/v1/proxy")
             .apply { bankSession()?.takeIf { it.isNotBlank() }?.let { header("Authorization", "Bearer $it") } }
             .post(envelope.toRequestBody(JSON))
             .build()

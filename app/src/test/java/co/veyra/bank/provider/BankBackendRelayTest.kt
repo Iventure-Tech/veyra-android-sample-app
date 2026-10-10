@@ -43,22 +43,22 @@ class BankBackendRelayTest {
         val veyraBody = """{"response_code":"00","weird":"ü ✓"}"""
         server.enqueue(MockResponse().setBody(veyraBody))
         val envelope = """{"version":1,"service":"SOFTPOS","method":"PATCH","path":"/merchants/M1","headers":{},"body":"{}"}"""
-        assertEquals(veyraBody, relay().patch(envelope))
+        assertEquals(veyraBody, relay().send(envelope))
         val recorded = server.takeRequest()
-        assertEquals("/issuertokengateway/v1", recorded.path)
+        assertEquals("/issuertokengateway/v1/proxy", recorded.path)
         assertEquals("POST", recorded.method)
         assertEquals(envelope, recorded.body.readUtf8())
         assertEquals("Bearer bank-session", recorded.getHeader("Authorization"))
     }
 
-    /** The envelope names the method, so every function posts to the one endpoint. */
+    /** The envelope names the method, so every call — whatever its verb — posts to the one endpoint. */
     @Test
     fun everyMethodPostsToTheOneIssuerTokenGatewayEndpoint() = runBlocking {
         repeat(5) { server.enqueue(MockResponse().setBody("ok")) }
         val r = relay()
-        r.post("{}"); r.get("{}"); r.put("{}"); r.delete("{}"); r.patch("{}")
+        for (m in listOf("GET", "POST", "PUT", "PATCH", "DELETE")) r.send("""{"version":1,"method":"$m"}""")
         val sent = List(5) { server.takeRequest() }
-        assertEquals(List(5) { "/issuertokengateway/v1" }, sent.map { it.path })
+        assertEquals(List(5) { "/issuertokengateway/v1/proxy" }, sent.map { it.path })
         assertEquals(List(5) { "POST" }, sent.map { it.method })
     }
 
@@ -67,14 +67,14 @@ class BankBackendRelayTest {
     fun aProxyFailedBodyIsReturnedUnchangedForTheSdkToRead() = runBlocking {
         val proxyFailed = """{"response_status":"PROXY_FAILED","response_status_reason":"UPSTREAM_TIMEOUT","never_sent":false}"""
         server.enqueue(MockResponse().setBody(proxyFailed))
-        assertEquals(proxyFailed, relay().post("{}"))
+        assertEquals(proxyFailed, relay().send("{}"))
     }
 
     /** A non-2xx came back: the request was delivered — may have been processed. */
     @Test
     fun aNon2xxIsMayHaveBeenSentWithItsStatus() {
         server.enqueue(MockResponse().setResponseCode(503))
-        val e = failure { relay().post("{}") }
+        val e = failure { relay().send("{}") }
         assertFalse(e.neverSent)
         assertEquals(503, e.httpStatus)
     }
@@ -83,7 +83,7 @@ class BankBackendRelayTest {
     @Test
     fun aTimeoutIsMayHaveBeenSent() {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
-        val e = failure { relay().post("{}") }
+        val e = failure { relay().send("{}") }
         assertFalse(e.neverSent)
         assertEquals(NetworkFailureKind.TIMEOUT, e.kind)
     }
@@ -93,7 +93,7 @@ class BankBackendRelayTest {
     fun aRefusedConnectionIsNeverSent() {
         val url = server.url("/").toString().trimEnd('/')
         server.shutdown()
-        val e = failure { BankBackendRelay(url, { null }, http).get("{}") }
+        val e = failure { BankBackendRelay(url, { null }, http).send("{}") }
         assertTrue(e.neverSent)
         assertEquals(NetworkFailureKind.CONNECTION_REFUSED, e.kind)
     }

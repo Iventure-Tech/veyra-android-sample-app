@@ -18,7 +18,7 @@ veyra.tokenRequestorId=your-token-requestor-id
 # your onboarding pack — FOR TESTING ONLY. Each provider reads only its own values:
 #   assertion provider      clientId + bankBackendBaseUrl + bankClientId/bankClientSecret
 #                           (RFC 8693 token exchange at {bankBackendBaseUrl}/oauth2/token)
-#   proxy provider          bankBackendBaseUrl (your API gateway serves POST /issuertokengateway/v1)
+#   proxy provider          bankBackendBaseUrl (your API gateway serves POST /issuertokengateway/v1/proxy)
 #   client-secret provider  DEPRECATED — clientId + clientSecret held in the app
 
 # OAuth client issued by Veyra. clientId: the assertion and client-secret providers.
