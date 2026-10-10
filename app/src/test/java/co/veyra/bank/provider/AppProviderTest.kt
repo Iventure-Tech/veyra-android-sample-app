@@ -1,4 +1,4 @@
-package co.veyra.bank.connection
+package co.veyra.bank.provider
 
 import co.veyra.common.providers.VeyraAssertionProvider
 import co.veyra.common.providers.VeyraProviderType
@@ -9,19 +9,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Each provider is built from its own values only; the SDK infers the method from its type. */
-class AppConnectionTest {
+class AppProviderTest {
 
     private val http = OkHttpClient()
 
     @Test
     fun theSampleShipsTheTestingOnlyClientSecretProvider() {
         @Suppress("DEPRECATION")
-        assertTrue(AppConnection.provider() is co.veyra.common.providers.VeyraClientSecretProvider)
+        assertTrue(AppProvider.provider() is co.veyra.common.providers.VeyraClientSecretProvider)
     }
 
     @Test
     fun theAssertionProviderCarriesTheClientId() {
-        val provider = AppConnection.assertionProvider("id", "bank-id", "bank-secret", "https://bank.example", { "s" }, http)
+        val provider = AppProvider.assertionProvider("id", "bank-id", "bank-secret", "https://bank.example", { "s" }, http)
         assertTrue(provider is VeyraAssertionProvider && provider.clientId == "id")
         assertEquals(VeyraProviderType.AUTHENTICATION, provider.providerType)
     }
@@ -33,7 +33,7 @@ class AppConnectionTest {
             Triple("bank-id", " ", "bankClientSecret"),
         )) {
             val e = runCatching {
-                AppConnection.assertionProvider("id", bankClientId, bankClientSecret, "https://bank.example", { "s" }, http)
+                AppProvider.assertionProvider("id", bankClientId, bankClientSecret, "https://bank.example", { "s" }, http)
             }.exceptionOrNull()
             assertTrue(e is IllegalStateException && e.message!!.contains(missing))
         }
@@ -41,7 +41,7 @@ class AppConnectionTest {
 
     @Test
     fun theProxyProviderNeedsNoClientIdOrSecret() {
-        val provider = AppConnection.proxyProvider("https://bank.example", { "s" }, http)
+        val provider = AppProvider.proxyProvider("https://bank.example", { "s" }, http)
         assertTrue(provider is VeyraProxyProvider)
         assertEquals(VeyraProviderType.PROXY, provider.providerType)
     }
@@ -49,7 +49,7 @@ class AppConnectionTest {
     @Test
     fun theClientSecretProviderNeedsNoBankBackend() {
         @Suppress("DEPRECATION")
-        val provider = AppConnection.clientSecretProvider("id", "secret") as co.veyra.common.providers.VeyraClientSecretProvider
+        val provider = AppProvider.clientSecretProvider("id", "secret") as co.veyra.common.providers.VeyraClientSecretProvider
         assertEquals("id", provider.clientId)
         assertEquals("secret", provider.clientSecret)
     }
@@ -57,8 +57,8 @@ class AppConnectionTest {
     @Test
     fun theBackendProvidersNeedTheBackendUrl() {
         for (build in listOf(
-            { AppConnection.assertionProvider("id", "bank-id", "bank-secret", " ", { "s" }, http) },
-            { AppConnection.proxyProvider("", { "s" }, http) },
+            { AppProvider.assertionProvider("id", "bank-id", "bank-secret", " ", { "s" }, http) },
+            { AppProvider.proxyProvider("", { "s" }, http) },
         )) {
             val e = runCatching { build() }.exceptionOrNull()
             assertTrue(e is IllegalStateException && e.message!!.contains("bankBackendBaseUrl"))
