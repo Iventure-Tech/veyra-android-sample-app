@@ -30,8 +30,8 @@ object AppProvider {
      * [assertionProvider] or [proxyProvider].
      */
     fun provider(): VeyraProvider =
-    //  clientSecretProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.VEYRA_CLIENT_SECRET)
-        assertionProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.BANK_CLIENT_ID, BuildConfig.BANK_CLIENT_SECRET, BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
+        clientSecretProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.VEYRA_CLIENT_SECRET)
+    //  assertionProvider(BuildConfig.VEYRA_CLIENT_ID, BuildConfig.BANK_CLIENT_ID, BuildConfig.BANK_CLIENT_SECRET, BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
     //  proxyProvider(BuildConfig.BANK_BACKEND_BASE_URL, bankSession, http)
 
     /**
