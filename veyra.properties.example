@@ -30,12 +30,15 @@ veyra.clientSecret=your-client-secret
 veyra.bankBackendBaseUrl=
 
 # Your bank's own OAuth client at its authorization server — NOT the Veyra client above, and never
-# passed to the SDK. The assertion provider authenticates the token exchange with it (HTTP Basic).
+# passed to the SDK. It authenticates the login below and the assertion provider's token exchange
+# (HTTP Basic).
 veyra.bankClientId=your-bank-client-id
 veyra.bankClientSecret=your-bank-client-secret
 
-# PLACEHOLDER for your bank app's own logged-in session: the subject_token of the assertion
-# provider's token exchange, and "Authorization: Bearer <token>" on the proxy provider's relay
-# calls; blank means nobody is signed in. A real app uses its own
-# login session here. This is not a Veyra credential.
-veyra.bankSessionToken=sample-bank-session
+# The demo user's bank login. The app logs in with them (password grant at
+# {bankBackendBaseUrl}/oauth2/token, the bank client above as HTTP Basic) to get the bank session:
+# the subject_token of the assertion provider's token exchange, and "Authorization: Bearer <token>"
+# on the proxy provider's relay calls. Blank means nobody is signed in. A real app takes these from
+# its login screen and never stores the password. They are not Veyra credentials.
+veyra.username=
+veyra.password=

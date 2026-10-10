@@ -371,8 +371,9 @@ endpoint.
 ### Your bank backend — the two endpoints the sample calls
 
 `VeyraAssertionProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both
-carry your app's **own** session (the sample uses a placeholder token from `veyra.properties` —
-replace it with your login session); neither is a Veyra credential.
+carry your app's **own** session: the sample logs in with `veyra.username`/`veyra.password` from `veyra.properties` — a password
+grant at `{bankBackendBaseUrl}/oauth2/token` — and uses the returned access token; replace that with
+your own login. Neither is a Veyra credential.
 
 ```
 POST {your backend}/oauth2/token                           (VeyraAssertionProvider)

@@ -20,7 +20,21 @@ object AppProvider {
             .build()
     }
 
-    private val bankSession: () -> String? = { BuildConfig.BANK_SESSION_TOKEN.ifBlank { null } }
+    /**
+     * The signed-in user's bank session: logs in to your bank with the user's username and password
+     * (password grant at `{bankBackendBaseUrl}/oauth2/token`) and caches the token. This sample
+     * reads the credentials from veyra.properties; a real app takes them from its login screen.
+     */
+    private val bankSession: BankSession by lazy {
+        BankSession(
+            required(BuildConfig.BANK_BACKEND_BASE_URL),
+            BuildConfig.BANK_CLIENT_ID.ifBlank { error("veyra.bankClientId must be set in veyra.properties to log in") },
+            BuildConfig.BANK_CLIENT_SECRET.ifBlank { error("veyra.bankClientSecret must be set in veyra.properties to log in") },
+            username = { BuildConfig.BANK_USERNAME },
+            password = { BuildConfig.BANK_PASSWORD },
+            http = http,
+        )
+    }
 
     /**
      * The provider for both SDKs. Built per call; the SDK re-binds it on every initialise.

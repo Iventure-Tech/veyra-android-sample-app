@@ -28,16 +28,22 @@ import java.net.UnknownHostException
  */
 class BankBackendRelay(
     private val baseUrl: String,
-    /** Your bank app's session. This demo uses a placeholder token from local config. */
+    /** The signed-in user's bank session ([BankSession]); null when nobody is signed in. */
     private val bankSession: () -> String?,
     private val http: OkHttpClient,
 ) : VeyraProxyProvider {
 
     override suspend fun send(request: String): String = withContext(Dispatchers.IO) {
         val envelope = request
+        // No bank session — signed out, or the login itself failed — means the call never left.
+        val session = try {
+            bankSession()?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            throw VeyraRelayException(NetworkFailureKind.OTHER, neverSent = true, message = "Bank login failed", cause = e)
+        } ?: throw VeyraRelayException(NetworkFailureKind.OTHER, neverSent = true, message = "Not signed in to the bank")
         val call = Request.Builder()
             .url("$baseUrl/issuertokengateway/v1/proxy")
-            .apply { bankSession()?.takeIf { it.isNotBlank() }?.let { header("Authorization", "Bearer $it") } }
+            .header("Authorization", "Bearer $session")
             .post(envelope.toRequestBody(JSON))
             .build()
         try {

@@ -93,9 +93,25 @@ class BankBackendRelayTest {
     fun aRefusedConnectionIsNeverSent() {
         val url = server.url("/").toString().trimEnd('/')
         server.shutdown()
-        val e = failure { BankBackendRelay(url, { null }, http).send("{}") }
+        val e = failure { BankBackendRelay(url, { "bank-session" }, http).send("{}") }
         assertTrue(e.neverSent)
         assertEquals(NetworkFailureKind.CONNECTION_REFUSED, e.kind)
+    }
+
+    /** Signed out: there is no session to send, so the call never leaves the device. */
+    @Test
+    fun noBankSessionIsNeverSent() {
+        val e = failure { relay(session = null).send("{}") }
+        assertTrue(e.neverSent)
+        assertEquals(0, server.requestCount)
+    }
+
+    /** The login itself failed: the proxied call was never sent either. */
+    @Test
+    fun aFailedBankLoginIsNeverSent() {
+        val e = failure { BankBackendRelay(server.url("/").toString().trimEnd('/'), { error("bank login answered HTTP 503") }, http).send("{}") }
+        assertTrue(e.neverSent)
+        assertEquals(0, server.requestCount)
     }
 
     @Test
