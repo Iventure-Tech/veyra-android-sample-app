@@ -343,22 +343,31 @@ The sample has no mode setting either: `AppConnection.provider()` in
 `app/src/main/java/co/veyra/bank/connection/AppConnection.kt` returns one provider, and to switch
 you return a different one — exactly what your own app does. Its two backend providers,
 `BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied; each reads
-only its own values from `veyra.properties` (the assertion provider: `veyra.clientId` and
-`veyra.bankBackendBaseUrl`; the proxy provider: `veyra.bankBackendBaseUrl`). The sample ships
+only its own values from `veyra.properties` (the assertion provider: `veyra.clientId`,
+`veyra.bankBackendBaseUrl`, `veyra.bankClientId` and `veyra.bankClientSecret`; the proxy provider:
+`veyra.bankBackendBaseUrl`). `veyra.bankClientId`/`veyra.bankClientSecret` are your bank's **own**
+OAuth client at its authorization server, not the Veyra client, and never reach the SDK: the
+assertion provider's only Veyra credential is `veyra.clientId`. The sample ships
 returning `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs
 just `veyra.clientId` and `veyra.clientSecret` — so it runs before your backend has either
 endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
-`VeyraAssertionProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both are
-authenticated with your app's **own** session (the sample sends a placeholder bearer token from
-`veyra.properties` — replace it with your login session); neither is a Veyra credential.
+`VeyraAssertionProvider` and `VeyraProxyProvider` each need one endpoint on **your** backend. Both
+carry your app's **own** session (the sample uses a placeholder token from `veyra.properties` —
+replace it with your login session); neither is a Veyra credential.
 
 ```
-POST {your backend}/sdk-assertion                          (VeyraAssertionProvider)
-     {"audience": "<audience>", "jkt": "<jkt>"}
-  →  200 {"assertion": "<compact JWT>"}     401 when no user is signed in (the provider returns null)
+POST {your backend}/oauth2/token                           (VeyraAssertionProvider)
+     RFC 8693 token exchange, form-encoded, your bank's client in HTTP Basic
+     (veyra.bankClientId:veyra.bankClientSecret):
+       grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+       subject_token=<your session>
+       subject_token_type=urn:ietf:params:oauth:token-type:access_token
+       requested_token_type=urn:ietf:params:oauth:token-type:jwt
+       audience=<audience>
+  →  200 {"access_token": "<compact JWT>", …}   401 when the session is refused (the provider returns null)
 
 POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
      body: the SDK's envelope, unchanged
@@ -367,7 +376,7 @@ POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
      answers with Veyra's status and body unchanged
 ```
 
-**`/sdk-assertion` signs** a compact JWT, with the signing key held in an HSM or KMS:
+**Your authorization server signs** the assertion as a compact JWT, with the signing key held in an HSM or KMS:
 
 **Required by Veyra — the minimum.** How you produce the assertion is up to you: your own
 endpoint, your authorization server's token exchange (RFC 8693), or any identity provider. Veyra

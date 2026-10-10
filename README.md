@@ -73,7 +73,7 @@ it — and switching is returning a different one:
 
 | `provider()` returns | Provider | What it needs (`veyra.properties`) | Your bank backend serves |
 |---|---|---|---|
-| `assertionProvider(…)` (recommended) | `VeyraAssertionProvider` | `veyra.clientId`, `veyra.bankBackendBaseUrl` | `POST /sdk-assertion` `{"audience": …, "jkt": …}` → `{"assertion": "<JWT>"}` (401 when nobody is signed in) |
+| `assertionProvider(…)` (recommended) | `VeyraAssertionProvider` | `veyra.clientId` (the only value the SDK receives), `veyra.bankBackendBaseUrl`, `veyra.bankClientId`, `veyra.bankClientSecret` | `POST /oauth2/token`: an RFC 8693 token exchange of the user's session for the assertion, authenticated with your bank's own client (`bankClientId`/`bankClientSecret`, HTTP Basic) → `{"access_token": "<JWT>"}` (401 when nobody is signed in) |
 | `proxyProvider(…)` | `VeyraProxyProvider` | `veyra.bankBackendBaseUrl` | `POST /veyra-relay/{post\|get\|put\|delete\|patch}` — forwards the SDK's envelope to Veyra unmodified and answers with Veyra's body |
 | `clientSecretProvider(…)` (**deprecated**, what the sample ships with) | `VeyraClientSecretProvider` | `veyra.clientId`, `veyra.clientSecret` | nothing — the secret sits in the app, which is why this provider is being retired |
 

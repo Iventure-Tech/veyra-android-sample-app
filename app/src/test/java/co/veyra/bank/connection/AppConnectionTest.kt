@@ -21,9 +21,22 @@ class AppConnectionTest {
 
     @Test
     fun theAssertionProviderCarriesTheClientId() {
-        val provider = AppConnection.assertionProvider("id", "https://bank.example", { "s" }, http)
+        val provider = AppConnection.assertionProvider("id", "bank-id", "bank-secret", "https://bank.example", { "s" }, http)
         assertTrue(provider is VeyraAssertionProvider && provider.clientId == "id")
         assertEquals(VeyraProviderType.AUTHENTICATION, provider.providerType)
+    }
+
+    @Test
+    fun theAssertionProviderNeedsTheBankClient() {
+        for ((bankClientId, bankClientSecret, missing) in listOf(
+            Triple("", "bank-secret", "bankClientId"),
+            Triple("bank-id", " ", "bankClientSecret"),
+        )) {
+            val e = runCatching {
+                AppConnection.assertionProvider("id", bankClientId, bankClientSecret, "https://bank.example", { "s" }, http)
+            }.exceptionOrNull()
+            assertTrue(e is IllegalStateException && e.message!!.contains(missing))
+        }
     }
 
     @Test
@@ -44,7 +57,7 @@ class AppConnectionTest {
     @Test
     fun theBackendProvidersNeedTheBackendUrl() {
         for (build in listOf(
-            { AppConnection.assertionProvider("id", " ", { "s" }, http) },
+            { AppConnection.assertionProvider("id", "bank-id", "bank-secret", " ", { "s" }, http) },
             { AppConnection.proxyProvider("", { "s" }, http) },
         )) {
             val e = runCatching { build() }.exceptionOrNull()
