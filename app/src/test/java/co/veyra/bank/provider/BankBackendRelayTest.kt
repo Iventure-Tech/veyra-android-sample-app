@@ -45,7 +45,7 @@ class BankBackendRelayTest {
         val envelope = """{"version":1,"service":"SOFTPOS","method":"PATCH","path":"/merchants/M1","headers":{},"body":"{}"}"""
         assertEquals(veyraBody, relay().patch(envelope))
         val recorded = server.takeRequest()
-        assertEquals("/issuertokengateway/v1", recorded.path)
+        assertEquals("/issuertokengateway/v1/proxy", recorded.path)
         assertEquals("POST", recorded.method)
         assertEquals(envelope, recorded.body.readUtf8())
         assertEquals("Bearer bank-session", recorded.getHeader("Authorization"))
@@ -58,7 +58,7 @@ class BankBackendRelayTest {
         val r = relay()
         r.post("{}"); r.get("{}"); r.put("{}"); r.delete("{}"); r.patch("{}")
         val sent = List(5) { server.takeRequest() }
-        assertEquals(List(5) { "/issuertokengateway/v1" }, sent.map { it.path })
+        assertEquals(List(5) { "/issuertokengateway/v1/proxy" }, sent.map { it.path })
         assertEquals(List(5) { "POST" }, sent.map { it.method })
     }
 
