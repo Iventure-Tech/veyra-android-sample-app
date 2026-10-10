@@ -1,4 +1,4 @@
-package co.veyra.bank.connection
+package co.veyra.bank.provider
 
 import co.veyra.common.providers.VeyraRelayException
 import co.veyra.common.net.NetworkFailureKind

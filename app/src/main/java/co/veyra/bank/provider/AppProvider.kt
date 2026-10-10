@@ -1,4 +1,4 @@
-package co.veyra.bank.connection
+package co.veyra.bank.provider
 
 import co.veyra.bank.BuildConfig
 import co.veyra.common.providers.VeyraProvider
@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
  * switching is choosing which provider [provider] returns. The values each one needs come from
  * the untracked `veyra.properties` (see `veyra.properties.example`).
  */
-object AppConnection {
+object AppProvider {
 
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
