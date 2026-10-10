@@ -1507,9 +1507,7 @@ class GetPaidActivity : AppCompatActivity() {
             countryCode = countryCode,
         ) ?: return
 
-        if (merchantTypeIsPersonal && bvn.isBlank()) {
-            toast("BVN is required for personal merchants"); return
-        }
+        // The BVN is optional for every merchant type; only a business needs its CAC number.
         if (!merchantTypeIsPersonal && cacNumber.isBlank()) {
             toast("CAC number is required for business merchants"); return
         }
