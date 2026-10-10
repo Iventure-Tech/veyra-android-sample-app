@@ -14,12 +14,13 @@ veyra.tokenRequestorId=your-token-requestor-id
 # ── The values for the provider both SDKs use ──────────────────────────────────
 # There is no mode to set: the SDK works out how to reach Veyra from the provider the app passes.
 # Which one the sample builds is chosen in code, in AppProvider.provider(). It ships with the
-# deprecated client-secret provider so the sample runs with just the client id and secret from
-# your onboarding pack — FOR TESTING ONLY. Each provider reads only its own values:
+# proxy provider: every SDK call goes through your bank backend, so the app holds no Veyra secret.
+# Each provider reads only its own values (the two bank ones also need username/password below):
+#   proxy provider          bankBackendBaseUrl + bankClientId/bankClientSecret
+#                           (your API gateway serves POST /issuertokengateway/v1/proxy)
 #   assertion provider      clientId + bankBackendBaseUrl + bankClientId/bankClientSecret
 #                           (RFC 8693 token exchange at {bankBackendBaseUrl}/oauth2/token)
-#   proxy provider          bankBackendBaseUrl (your API gateway serves POST /issuertokengateway/v1/proxy)
-#   client-secret provider  DEPRECATED — clientId + clientSecret held in the app
+#   client-secret provider  DEPRECATED, testing only — clientId + clientSecret held in the app
 
 # OAuth client issued by Veyra. clientId: the assertion and client-secret providers.
 # clientSecret: the client-secret provider only.

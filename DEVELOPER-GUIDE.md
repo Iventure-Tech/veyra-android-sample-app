@@ -361,12 +361,14 @@ you return a different one — exactly what your own app does. Its two backend p
 `BankBackendAssertionProvider` and `BankBackendRelay`, are short and meant to be copied; each reads
 only its own values from `veyra.properties` (the assertion provider: `veyra.clientId`,
 `veyra.bankBackendBaseUrl`, `veyra.bankClientId` and `veyra.bankClientSecret`; the proxy provider:
-`veyra.bankBackendBaseUrl`). `veyra.bankClientId`/`veyra.bankClientSecret` are your bank's **own**
+`veyra.bankBackendBaseUrl`, `veyra.bankClientId` and `veyra.bankClientSecret`; both also log the
+user in with `veyra.username`/`veyra.password`). `veyra.bankClientId`/`veyra.bankClientSecret` are your bank's **own**
 OAuth client at its authorization server, not the Veyra client, and never reach the SDK: the
 assertion provider's only Veyra credential is `veyra.clientId`. The sample ships
-returning `ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs
-just `veyra.clientId` and `veyra.clientSecret` — so it runs before your backend has either
-endpoint.
+returning the proxy provider (`BankBackendRelay`), so the app holds no Veyra secret. The deprecated
+`ClientSecretCredentials` — a `VeyraClientSecretProvider` **for testing only** that needs just
+`veyra.clientId` and `veyra.clientSecret` — is still there for testing before your backend has
+either endpoint.
 
 ### Your bank backend — the two endpoints the sample calls
 
