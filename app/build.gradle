@@ -49,11 +49,15 @@ android {
         buildConfigField 'String', 'VEYRA_CLIENT_ID', connectionValue('veyra.clientId')
         buildConfigField 'String', 'VEYRA_CLIENT_SECRET', connectionValue('veyra.clientSecret')
         buildConfigField 'String', 'BANK_BACKEND_BASE_URL', connectionValue('veyra.bankBackendBaseUrl')
-        // Your bank's own OAuth client at its authorization server (the assertion provider's token
-        // exchange). Never passed to the SDK.
+        // Your bank's own OAuth client at its authorization server (HTTP Basic on the login and the
+        // assertion provider's token exchange). Never passed to the SDK.
         buildConfigField 'String', 'BANK_CLIENT_ID', connectionValue('veyra.bankClientId')
         buildConfigField 'String', 'BANK_CLIENT_SECRET', connectionValue('veyra.bankClientSecret')
-        buildConfigField 'String', 'BANK_SESSION_TOKEN', connectionValue('veyra.bankSessionToken')
+        // The demo user's bank login (password grant at {bankBackendBaseUrl}/oauth2/token): the
+        // session both the assertion and the proxy provider use. A real app takes them from its
+        // login screen.
+        buildConfigField 'String', 'BANK_USERNAME', connectionValue('veyra.username')
+        buildConfigField 'String', 'BANK_PASSWORD', connectionValue('veyra.password')
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
