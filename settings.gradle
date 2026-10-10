@@ -16,6 +16,7 @@ if (veyraPropsFile.exists()) {
 
 dependencyResolutionManagement {
     repositories {
+        mavenLocal() // VEYRA-LOCAL-LINK
         google()
         mavenCentral()
         // Veyra SDK artifacts (authenticated)
