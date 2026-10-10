@@ -313,15 +313,15 @@ backend call:
 
 ```kotlin
 class MyProxyProvider(private val bank: MyBankApi) : VeyraProxyProvider {
-    override suspend fun post(request: String) = bank.veyraProxy("post", request)
-    override suspend fun get(request: String) = bank.veyraProxy("get", request)
-    override suspend fun put(request: String) = bank.veyraProxy("put", request)
-    override suspend fun delete(request: String) = bank.veyraProxy("delete", request)
-    override suspend fun patch(request: String) = bank.veyraProxy("patch", request)
+    override suspend fun post(request: String) = bank.veyraProxy(request)
+    override suspend fun get(request: String) = bank.veyraProxy(request)
+    override suspend fun put(request: String) = bank.veyraProxy(request)
+    override suspend fun delete(request: String) = bank.veyraProxy(request)
+    override suspend fun patch(request: String) = bank.veyraProxy(request)
 }
 ```
 
-`bank.veyraProxy` sends the envelope to `POST {your backend}/veyra-relay/{method}` and returns
+`bank.veyraProxy` sends the envelope to `POST {your API gateway}/issuertokengateway/v1` and returns
 Veyra's body unchanged. On failure it throws `VeyraRelayException`, saying whether the request was
 sent — see [the failure contract](#the-proxy-providers-failure-contract).
 
@@ -369,11 +369,12 @@ POST {your backend}/oauth2/token                           (VeyraAssertionProvid
        audience=<audience>
   →  200 {"access_token": "<compact JWT>", …}   401 when the session is refused (the provider returns null)
 
-POST {your backend}/veyra-relay/{post|get|put|delete|patch} (VeyraProxyProvider)
-     body: the SDK's envelope, unchanged
-  →  your backend authenticates to Veyra with its own OAuth client-credentials token (held
-     server-side; an API key is not accepted), sends path + query + headers + body to the Veyra API unmodified, and
-     answers with Veyra's status and body unchanged
+POST {your API gateway}/issuertokengateway/v1 (VeyraProxyProvider)
+     body: the SDK's envelope, unchanged, for every method
+  →  your gateway checks the app's session and forwards the envelope to your issuer token
+     gateway (ITG). The ITG authenticates to Veyra with its own OAuth client-credentials token
+     (held server-side; an API key is not accepted), calls `service` + `path` with `method`,
+     `query`, `headers` and `body`, and answers with Veyra's status and body unchanged
 ```
 
 **Your authorization server signs** the assertion as a compact JWT, with the signing key held in an HSM or KMS:
@@ -425,13 +426,14 @@ and cannot be exported (Android Keystore). Returning `null` or throwing fails th
 sign:** copy it into `aud` only when it is a Veyra base URL you expect for that environment, and
 refuse anything else, so an assertion your backend signs can never be redeemed anywhere but Veyra.
 
-**`/veyra-relay/{method}` forwards the envelope (version 1, public API).** Each `request` your
-proxy provider receives is one JSON string; the function called is the HTTP method your backend
-uses towards Veyra:
+**`/issuertokengateway/v1` receives the envelope (version 1, public API).** Each `request` your
+proxy provider receives is one JSON string that says everything about the call:
 
 ```json
-{ "v": 1,
-  "path": "/paymentgateway/v1/payment",
+{ "version": 1,
+  "service": "SOFTPOS",
+  "method": "POST",
+  "path": "/payment",
   "query": { "merchant_id": "…" },
   "headers": { "Content-Type": "application/json",
                "X-Veyra-Sdk-Version": "3.0.0",
@@ -439,9 +441,16 @@ uses towards Veyra:
   "body": "<the request JSON, as a string>" }
 ```
 
-- `path` is relative to the Veyra API base — never a full URL. Your backend owns where it forwards.
-- `query` is omitted when there is none. `body` is absent on `get` and `delete`.
-- New fields may be added under the same `v`; a breaking change bumps `v`.
+- `service` is the Veyra API the call is for: `WALLET` or `SOFTPOS`. It names the API, not your
+  SDK — a wallet call to the payment API is `SOFTPOS`. Your proxy backend routes on it.
+- `method` is the HTTP method to use towards Veyra. Every function receives the complete envelope,
+  so all five post to the one endpoint.
+- `path` is relative to that service — never a full URL, and without any API prefix.
+- `query` is omitted when there is none (values are decoded). `body` is absent on `GET` and `DELETE`.
+- New fields may be added under the same `version`; a breaking change bumps `version`.
+- When your proxy backend itself cannot complete a call it answers `200` with
+  `{"response_status": "PROXY_FAILED", "response_status_reason": "…", "never_sent": true|false}`.
+  Return that body unchanged like any other: the SDK recognises it.
 - **Return Veyra's response body exactly as Veyra returned it.** If Veyra answered with a non-200
   status, throw `VeyraRelayException(kind = OTHER, neverSent = false, httpStatus = <status>)` rather
   than inventing a body — the SDK treats it exactly as that status on a direct connection.
