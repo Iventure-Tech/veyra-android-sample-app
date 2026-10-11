@@ -41,7 +41,11 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeReason
+import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.softpos.payment.sdk.TransactionResponse
+import co.veyra.softpos.payment.sdk.payment.ResponseStatus
 import co.veyra.softpos.payment.sdk.merchant.NubanBank
 import co.veyra.softpos.payment.sdk.VeyraSoftPOSSdk
 import co.veyra.common.Environment
@@ -95,6 +99,7 @@ class GetPaidActivity : AppCompatActivity() {
     private lateinit var additionalDetails: TextView
     private lateinit var doneButton: MaterialButton
     private lateinit var viewReceiptButton: MaterialButton
+    private lateinit var retryButton: MaterialButton
     private lateinit var pageReceipt: View
     private lateinit var receiptPageQrImage: ImageView
     private var receiptTransactionRef: String = ""
@@ -179,12 +184,26 @@ class GetPaidActivity : AppCompatActivity() {
     private var lastSuccessfulResponse: TransactionResponse? = null
 
     /**
-     * A stand-in for the till's own order/basket/invoice id, which a real integration would take
-     * from its POS rather than generate. Required, and unique per merchant across all its payments,
-     * whatever their outcome: the gateway refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`,
-     * so a retry needs a new order id.
+     * The order id of the sale on screen — a stand-in for the till's own order/basket/invoice id,
+     * which a real integration would take from its POS rather than generate. Required, and unique
+     * per merchant across all its payments, whatever their outcome.
+     *
+     * An attempt that ended `NOT_SENT` never reached the gateway, so its order id is
+     * unused and the retry carries the **same** one. Any other outcome used it up (the gateway
+     * refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`), so the next attempt gets a new one.
+     * A new sale (new amount, new customer QR) always starts a new one.
      */
-    private fun nextSampleOrderId(): String = "ORDER-${System.currentTimeMillis()}"
+    private var saleOrderId: String? = null
+
+    private fun orderIdForAttempt(): String =
+        saleOrderId ?: "ORDER-${System.currentTimeMillis()}".also { saleOrderId = it }
+
+    private fun attemptEnded(responseStatus: String?) {
+        if (responseStatus != OutcomeStatus.NOT_SENT) saleOrderId = null
+    }
+
+    /** What "Try again" on the result page does — set only for a NOT_SENT or FAILED outcome. */
+    private var retryAction: (() -> Unit)? = null
 
     // The sale the result page is waiting on beneficiary credit confirmation for.
     // Set when an APPROVED response says the merchant's bank supports confirmation; cleared when
@@ -204,12 +223,15 @@ class GetPaidActivity : AppCompatActivity() {
         com.journeyapps.barcodescanner.ScanContract(),
     ) { result ->
         val text = result.contents ?: return@registerForActivityResult // scan cancelled
-        val scanned = try {
-            sdk.cpmCustomerQrService.inspect(text)
-        } catch (e: IllegalArgumentException) {
+        // Checked on the phone: APPROVED with the QR, or NOT_SENT / INVALID_REQUEST when it is not a
+        // payment QR — a hint, and the merchant simply scans again.
+        val inspection = sdk.cpmCustomerQrService.inspect(text)
+        val scanned = inspection.qr
+        if (inspection.responseStatus != OutcomeStatus.APPROVED || scanned == null) {
             Toast.makeText(this, "Not a payment code — try again", Toast.LENGTH_SHORT).show()
             return@registerForActivityResult
         }
+        saleOrderId = null // a new customer QR is a new sale
         pendingCpmScan = scanned
         showPage(PAGE_CPM_CONFIRM)
     }
@@ -233,44 +255,66 @@ class GetPaidActivity : AppCompatActivity() {
         // Your own order id — optional, never a key, and safe to reuse across attempts of the
         // same sale. The transaction *reference* is minted by the SDK and comes back on the
         // response; the app no longer invents one.
-        val orderId = nextSampleOrderId()
+        val orderId = orderIdForAttempt()
         // The whole round trip happens behind this page: swap the buttons for a visible
         // processing state so the merchant sees the charge is in flight (iOS parity).
         setCpmConfirmCharging(true)
         lifecycleScope.launch {
-            try {
-                val response = sdk.cpmCustomerQrService.charge(scanned, merchantOrderId = orderId)
-                // Key the receipt and the credit watch off the reference the SDK returns.
-                lastOriginalTransactionReference = response.merchantTransactionReference.orEmpty()
-                showPage(PAGE_PAYMENT_RESULT)
-                // A delivered outcome (approved or declined) is recorded — receipt available.
-                viewReceiptButton.visibility = View.VISIBLE
-                showPaymentResult(
-                    isSuccess = response.responseCode == "00",
-                    title = getString(if (response.responseCode == "00") R.string.payment_successful else R.string.declined),
+            // Always an outcome — never thrown.
+            val response = sdk.cpmCustomerQrService.charge(scanned, merchantOrderId = orderId)
+            val status = response.responseStatus
+            attemptEnded(status?.name)
+            // Key the receipt and the credit watch off the reference the SDK returns.
+            lastOriginalTransactionReference = response.merchantTransactionReference.orEmpty()
+            showPage(PAGE_PAYMENT_RESULT)
+            val reason = outcomeText(response.responseStatusReason, response.message, "")
+            when (status) {
+                ResponseStatus.APPROVED -> showPaymentResult(
+                    isSuccess = true,
+                    title = getString(R.string.payment_successful),
                     message = "Customer QR payment · ${response.responseCode ?: "-"}",
                     amountMinorUnits = scanned.amountMinorUnits,
                     details = response.transactionId?.let { "Transaction: $it" } ?: "",
                 )
-                scheduleAutoNavigate()
-                // An approved CPM sale can wait on beneficiary credit confirmation just like tap
-                // and MPM — the same stored-row watch, which cancels the hold above if the
-                // merchant's bank turns out to support it.
-                if (response.responseCode == "00") {
-                    watchCreditConfirmationForQr(lastOriginalTransactionReference)
-                }
-            } catch (e: Exception) {
-                showPage(PAGE_PAYMENT_RESULT)
-                // Transport failure — nothing recorded, so no receipt.
-                viewReceiptButton.visibility = View.GONE
-                showPaymentResult(
+                ResponseStatus.DECLINED, ResponseStatus.FAILED -> showPaymentResult(
+                    // A customer QR that reached the gateway is spent: a new attempt is a new scan.
                     isSuccess = false,
                     title = getString(R.string.declined),
-                    message = e.message ?: "Payment failed",
+                    message = "Customer QR payment · ${response.responseCode ?: "-"}",
                     amountMinorUnits = scanned.amountMinorUnits,
-                    details = "",
+                    details = reason,
                 )
-                scheduleAutoNavigate()
+                ResponseStatus.NOT_SENT -> showPaymentResult(
+                    // Nothing reached the gateway: fix the reason, charge the same QR again.
+                    isSuccess = false,
+                    title = getString(R.string.payment_not_sent),
+                    message = reason,
+                    amountMinorUnits = scanned.amountMinorUnits,
+                    details = getString(R.string.payment_not_sent_message),
+                    retry = {
+                        pendingCpmScan = scanned
+                        showPage(PAGE_CPM_CONFIRM)
+                    },
+                )
+                // PENDING (or a status this build does not know): recorded and polled by the SDK.
+                else -> showPaymentResult(
+                    isSuccess = null,
+                    title = getString(R.string.payment_pending),
+                    message = reason.ifEmpty { getString(R.string.payment_pending_message) },
+                    amountMinorUnits = scanned.amountMinorUnits,
+                    details = getString(R.string.payment_pending_message),
+                )
+            }
+            // A delivered final outcome is recorded — receipt available. NOT_SENT recorded nothing;
+            // PENDING has no receipt until it resolves.
+            viewReceiptButton.visibility =
+                if (status == ResponseStatus.APPROVED || status == ResponseStatus.DECLINED || status == ResponseStatus.FAILED) View.VISIBLE else View.GONE
+            scheduleAutoNavigate()
+            // An approved CPM sale can wait on beneficiary credit confirmation just like tap and
+            // MPM — the same stored-row watch, which cancels the hold above if the merchant's bank
+            // turns out to support it.
+            if (status == ResponseStatus.APPROVED) {
+                watchCreditConfirmationForQr(lastOriginalTransactionReference)
             }
         }
     }
@@ -369,23 +413,24 @@ class GetPaidActivity : AppCompatActivity() {
             finish()
             return
         }
-        val onResult: (Any?) -> Unit = { response ->
+        val onResult: (co.veyra.softpos.payment.sdk.merchant.MerchantStatusResponse) -> Unit = { response ->
             runOnUiThread {
-                val ok = response != null
-                val msg = when {
-                    action == ACTION_ACTIVATE && ok -> "Merchant activated"
-                    action == ACTION_ACTIVATE -> "Failed to activate merchant"
-                    ok -> "Merchant deactivated"
-                    else -> "Failed to deactivate merchant"
+                val verb = if (action == ACTION_ACTIVATE) "activate" else "deactivate"
+                val msg = when (response.responseStatus) {
+                    OutcomeStatus.APPROVED -> "Merchant ${verb}d"
+                    // The change may have gone through — don't send it again.
+                    OutcomeStatus.PENDING -> getString(R.string.outcome_processing)
+                    else -> "Failed to $verb merchant: " +
+                        outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred))
                 }
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 finish()
             }
         }
         if (action == ACTION_ACTIVATE) {
-            sdk.merchantService.activate { onResult(it) }
+            sdk.merchantService.activate(onResult)
         } else {
-            sdk.merchantService.deactivate { onResult(it) }
+            sdk.merchantService.deactivate(onResult)
         }
     }
 
@@ -438,6 +483,7 @@ class GetPaidActivity : AppCompatActivity() {
         additionalDetails = pagePaymentResult.findViewById(R.id.additionalDetails)
         doneButton = pagePaymentResult.findViewById(R.id.doneButton)
         viewReceiptButton = pagePaymentResult.findViewById(R.id.viewReceiptButton)
+        retryButton = pagePaymentResult.findViewById(R.id.retryButton)
         pageReceipt = inflater.inflate(R.layout.page_receipt, container, false)
         receiptPageQrImage = pageReceipt.findViewById(R.id.receiptQrImage)
         
@@ -691,28 +737,31 @@ class GetPaidActivity : AppCompatActivity() {
             note.text = getString(R.string.status_check_in_flight)
             note.visibility = View.VISIBLE
             lifecycleScope.launch {
-                runCatching {
-                    sdk.transactionService.refreshTransactionStatus(tx.merchantTransactionReference)
-                }.onSuccess { fresh ->
-                    if (fresh != null && fresh.transactionStatus != TransactionStatus.PENDING) {
+                val refresh = sdk.transactionService.refreshTransactionStatus(tx.merchantTransactionReference)
+                val failureReason = refresh.failureReason
+                val fresh = refresh.transaction
+                when {
+                    // An offline device gets the one piece of advice that helps. The row is
+                    // untouched either way — a failed check is never an outcome.
+                    failureReason != null -> {
+                        note.text = if (failureReason == OutcomeReason.NO_NETWORK_CONNECTION) {
+                            getString(R.string.status_check_offline)
+                        } else {
+                            getString(R.string.status_check_failed, outcomeText(failureReason, refresh.message, failureReason))
+                        }
+                        button.isEnabled = true
+                    }
+                    fresh != null && fresh.transactionStatus != TransactionStatus.PENDING -> {
                         // Re-render the detail and the list so the status, this button and the
                         // receipt affordance all agree.
                         loadTransactionDetail(tx.merchantTransactionReference)
                         loadTransactionsList()
-                    } else {
+                    }
+                    else -> {
                         // Still unsettled — the honest answer, not a failure.
                         note.text = getString(R.string.status_check_still_pending)
                         button.isEnabled = true
                     }
-                }.onFailure { e ->
-                    // An offline device gets the one piece of advice that helps. The row is
-                    // untouched either way — a failed check is never an outcome.
-                    note.text = if (e.message?.contains("NO_NETWORK_CONNECTION") == true) {
-                        getString(R.string.status_check_offline)
-                    } else {
-                        getString(R.string.status_check_failed, e.message ?: "unknown error")
-                    }
-                    button.isEnabled = true
                 }
             }
         }
@@ -754,26 +803,27 @@ class GetPaidActivity : AppCompatActivity() {
             note.text = getString(R.string.credit_check_in_flight)
             note.visibility = View.VISIBLE
             lifecycleScope.launch {
-                runCatching {
-                    sdk.transactionService.refreshCreditConfirmation(tx.merchantTransactionReference)
-                }.onSuccess { fresh ->
-                    if (fresh?.creditConfirmationStatus == "RECEIVED") {
-                        // Re-render the detail so the credit line and this button agree.
+                val refresh = sdk.transactionService.refreshCreditConfirmation(tx.merchantTransactionReference)
+                val failureReason = refresh.failureReason
+                when {
+                    // An offline device gets the one piece of advice that helps. The row is
+                    // untouched either way — a failed check is never a settlement answer.
+                    failureReason != null -> {
+                        note.text = if (failureReason == OutcomeReason.NO_NETWORK_CONNECTION) {
+                            getString(R.string.credit_check_offline)
+                        } else {
+                            getString(R.string.credit_check_failed, outcomeText(failureReason, refresh.message, failureReason))
+                        }
+                        button.isEnabled = true
+                    }
+                    // Re-render the detail so the credit line and this button agree.
+                    refresh.transaction?.creditConfirmationStatus == "RECEIVED" ->
                         loadTransactionDetail(tx.merchantTransactionReference)
-                    } else {
+                    else -> {
                         // Not confirmed **yet** — the honest answer, never "not received".
                         note.text = getString(R.string.credit_check_still_unconfirmed)
                         button.isEnabled = true
                     }
-                }.onFailure { e ->
-                    // An offline device gets the one piece of advice that helps. The row is
-                    // untouched either way — a failed check is never a settlement answer.
-                    note.text = if (e.message?.contains("NO_NETWORK_CONNECTION") == true) {
-                        getString(R.string.credit_check_offline)
-                    } else {
-                        getString(R.string.credit_check_failed, e.message ?: "unknown error")
-                    }
-                    button.isEnabled = true
                 }
             }
         }
@@ -848,6 +898,7 @@ class GetPaidActivity : AppCompatActivity() {
             // method/waiting screens for the rest of the flow (bad UX).
             hideKeyboard()
             currentAmountMinorUnits = minorUnits
+            saleOrderId = null // a new amount is a new sale
             val storedMerchant = sdk.merchantService.getStoredMerchantData()
             currentPaymentCurrencyCode = storedMerchant?.currencyCode
                 ?: storedMerchant?.countryCode?.trim()?.padStart(4, '0')?.takeIf { it.length == 4 }
@@ -916,6 +967,9 @@ class GetPaidActivity : AppCompatActivity() {
             returnToHome()
         }
         
+        // Try again — the same sale (same order id after NOT_SENT, a new one after FAILED).
+        retryButton.setOnClickListener { retryAction?.invoke() }
+
         // View Receipt - navigate to receipt page
         viewReceiptButton.setOnClickListener {
             receiptTransactionRef = lastOriginalTransactionReference
@@ -983,43 +1037,34 @@ class GetPaidActivity : AppCompatActivity() {
             // The SDK owns the expiry timer; blank the QR the moment it fires (an expired
             // QR must not stay scannable), instead of waiting for the server-polled
             // EXPIRED state up to one poll interval later.
-            val created = try {
-                client.createContextPayment(
-                    merchantId, currentAmountMinorUnits, currentPaymentCurrencyCode,
-                    // The merchant-presented rail carries your order id too, so all three rails
-                    // (tap, CPM charge, MPM) tie a sale back to the same POS order.
-                    merchantOrderId = nextSampleOrderId(),
-                    onExpired = {
-                        qrImage.visibility = View.GONE
-                        placeholder.visibility = View.VISIBLE
-                        placeholder.text = getString(R.string.qr_expired)
-                        scheduleAutoNavigate()
-                    },
-                )
-            } catch (e: co.veyra.softpos.payment.sdk.VeyraSdkException) {
-                // A refusal the merchant can act on: the order id is already used by another
-                // payment, or the device is offline. Nothing was created.
-                placeholder.text = when (e.errorCodeString) {
-                    "DUPLICATE_MERCHANT_ORDER_ID" ->
-                        "This order id is already used by another payment — start a new sale"
-                    "NO_NETWORK_CONNECTION" -> "No internet connection — connect and try again"
-                    else -> getString(R.string.qr_create_failed)
-                }
-                scheduleAutoNavigate()
+            // Always an outcome: APPROVED with the QR, the gateway's refusal
+            // (DUPLICATE_MERCHANT_ORDER_ID…), or one the SDK originated (NOT_SENT / PENDING).
+            val created = client.createContextPayment(
+                merchantId, currentAmountMinorUnits, currentPaymentCurrencyCode,
+                // The merchant-presented rail carries your order id too, so all three rails
+                // (tap, CPM charge, MPM) tie a sale back to the same POS order.
+                merchantOrderId = orderIdForAttempt(),
+                onExpired = {
+                    qrImage.visibility = View.GONE
+                    placeholder.visibility = View.VISIBLE
+                    placeholder.text = getString(R.string.qr_expired)
+                    scheduleAutoNavigate()
+                },
+            )
+            attemptEnded(created.responseStatus)
+            val txRef = created.txRef
+            val payload = created.mpmPayload
+            if (created.responseStatus != OutcomeStatus.APPROVED || txRef == null || payload == null) {
+                showQrNotCreated(created.responseStatus, outcomeText(created.responseStatusReason, created.message, getString(R.string.qr_create_failed)))
                 return@launch
             }
-            if (created == null) {
-                placeholder.text = getString(R.string.qr_create_failed)
-                scheduleAutoNavigate()
-                return@launch
-            }
-            lastOriginalTransactionReference = created.txRef
-            renderQrPayload(created.mpmPayload)
+            lastOriginalTransactionReference = txRef
+            renderQrPayload(payload)
 
             // Poll the context lifecycle until the push settles (or the QR expires).
             while (isActive) {
                 delay(QR_POLL_INTERVAL_MS)
-                val status = client.contextStatus(created.txRef) ?: continue
+                val status = client.contextStatus(txRef) ?: continue
                 when {
                     status.isSettled -> {
                         showPage(PAGE_PAYMENT_RESULT)
@@ -1030,7 +1075,7 @@ class GetPaidActivity : AppCompatActivity() {
                             ),
                             message = getString(R.string.qr_paid_by_customer),
                             amountMinorUnits = currentAmountMinorUnits,
-                            details = "Ref: ${created.txRef}\nResponse: ${status.responseCode ?: "-"}",
+                            details = "Ref: $txRef\nResponse: ${status.responseCode ?: "-"}",
                         )
                         // showPage cleared any pending auto-return; re-arm the 60s hold for this
                         // outcome — approved or not.
@@ -1040,7 +1085,7 @@ class GetPaidActivity : AppCompatActivity() {
                         // The settle itself can't say whether the bank supports confirmation, so
                         // the hold above runs meanwhile; the watch cancels it the moment the
                         // stored row says the bank does support it.
-                        if (status.isApproved) watchCreditConfirmationForQr(created.txRef)
+                        if (status.isApproved) watchCreditConfirmationForQr(txRef)
                         break
                     }
                     status.state == "EXPIRED" -> {
@@ -1053,6 +1098,34 @@ class GetPaidActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * No QR was created. `PENDING`: the create may have gone through — never repeat it; this sale
+     * ends and the merchant starts again. `NOT_SENT` (fix the reason, same order id) and `FAILED`
+     * (e.g. `DUPLICATE_MERCHANT_ORDER_ID` — a new order id) offer Try again.
+     */
+    private fun showQrNotCreated(responseStatus: String?, reason: String) {
+        val placeholder = pageQrWaiting.findViewById<TextView>(R.id.qrPlaceholder)
+        if (responseStatus == OutcomeStatus.PENDING) {
+            placeholder.text = getString(R.string.outcome_processing)
+            scheduleAutoNavigate()
+            return
+        }
+        val notSent = responseStatus == OutcomeStatus.NOT_SENT
+        showPage(PAGE_PAYMENT_RESULT)
+        viewReceiptButton.visibility = View.GONE
+        showPaymentResult(
+            isSuccess = false,
+            title = getString(if (notSent) R.string.payment_not_sent else R.string.payment_failed),
+            message = reason,
+            amountMinorUnits = currentAmountMinorUnits,
+            details = if (notSent) getString(R.string.payment_not_sent_message) else "",
+            retry = if (notSent || responseStatus == OutcomeStatus.FAILED) {
+                { showPage(PAGE_QR_WAITING) }
+            } else null,
+        )
+        scheduleAutoNavigate()
     }
 
     /**
@@ -1191,12 +1264,12 @@ class GetPaidActivity : AppCompatActivity() {
         val request = TransactionRequest.Builder(
             amount = currentAmountMinorUnits,
             currency = currentPaymentCurrencyCode,
-            merchantOrderId = nextSampleOrderId(),
+            merchantOrderId = orderIdForAttempt(),
         ).build()
         
-        // Initiate payment using SDK. makeCardPayment claims SOFTPOS at the point of use;
-        // in this combined app the claim is refused only while a wallet payment is
-        // genuinely mid-flight — surface that as "finish the other payment first".
+        // Initiate payment using SDK. makeCardPayment claims SOFTPOS at the point of use; in this
+        // combined app the claim is refused only while a wallet payment is genuinely mid-flight,
+        // which arrives on the callback as NOT_SENT / MODE_REFUSED like any other refusal.
         try {
             sdk.cardPaymentService.makeCardPayment(
                 request = request,
@@ -1234,9 +1307,9 @@ class GetPaidActivity : AppCompatActivity() {
                     runOnUiThread { showCreditConfirmation(confirmation) }
                 }
             )
-        } catch (e: co.veyra.core.SdkModeException) {
-            // Should not happen: entering the contactless-waiting page already switched
-            // the app into SOFTPOS mode. Defensive fallback only.
+        } catch (e: co.veyra.common.VeyraSetupException) {
+            // A mistake in this app's integration (not signed in, both SDKs used without the
+            // VeyraSdk facade…) — found in development, never a payment outcome.
             Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
             navigateToAmountEntry()
         }
@@ -1293,8 +1366,10 @@ class GetPaidActivity : AppCompatActivity() {
     }
 
     private fun handlePaymentResponse(response: TransactionResponse) {
+        val status = response.responseStatus
+        attemptEnded(status?.name)
         // A cancelled pending payment (Cancel button / mode switch) is not a result.
-        if (response.message == "Payment cancelled") {
+        if (response.responseStatusReason == OutcomeReason.CANCELLED) {
             return
         }
 
@@ -1306,20 +1381,11 @@ class GetPaidActivity : AppCompatActivity() {
         // Hide View Receipt when showing new result
         viewReceiptButton.visibility = View.GONE
         
-        // Branch on the outcome the SDK was TOLD, not on a code we recognise. The old
-        // `when (response.transactionCode)` had to know "99" meant pending — a code the SDK invented
-        // because it had nowhere to put a status — and read anything unfamiliar as a failure, so a
-        // still-settling `09`/`68`/`96` looked like a refusal to the cashier.
-        val outcome = response.responseStatus?.name ?: when (response.transactionCode) {
-            // Rows/responses from an older SDK build, which carried no status, keep working.
-            "00" -> "APPROVED"
-            "06", "09", "68", "96", "99" -> "PENDING"
-            "91", "25" -> "FAILED"
-            "" -> "FAILED" // no code at all: the payment never started (see response.sdkErrorCode)
-            else -> "DECLINED"
-        }
-        when (outcome) {
-            "APPROVED" -> {
+        // Branch on the status the SDK was told (or, for NOT_SENT, originated) — never on a
+        // response code, and never on a message.
+        val reason = outcomeText(response.responseStatusReason, response.message, "")
+        when (status) {
+            ResponseStatus.APPROVED -> {
                 lastSuccessfulResponse = response
                 showPaymentResult(
                     isSuccess = true,
@@ -1349,41 +1415,57 @@ class GetPaidActivity : AppCompatActivity() {
                 }
                 showViewReceiptButton()
             }
-            "PENDING" -> {
+            ResponseStatus.DECLINED -> {
                 lastSuccessfulResponse = null
-                // Pending - no response from issuer (timeout/network), status unknown - no receipt yet
-                showPaymentResult(
-                    isSuccess = null,
-                    title = getString(R.string.payment_pending),
-                    message = response.message ?: getString(R.string.payment_pending_message),
-                    amountMinorUnits = currentAmountMinorUnits,
-                    details = getString(R.string.payment_pending_message)
-                )
-                // Do NOT show View Receipt - transaction not final, status may change after polling
-            }
-            "DECLINED", "FAILED" -> {
-                lastSuccessfulResponse = null
-                // Transaction declined or failed (explicit server response)
+                // An authority refused: done. A new attempt is a new sale (new order id).
                 showPaymentResult(
                     isSuccess = false,
                     title = getString(R.string.payment_failed),
-                    message = response.message ?: "Transaction failed",
+                    message = reason.ifEmpty { "Transaction declined" },
                     amountMinorUnits = currentAmountMinorUnits,
                     details = ""
                 )
                 showViewReceiptButton()
             }
-            else -> {
+            ResponseStatus.FAILED -> {
                 lastSuccessfulResponse = null
-                // Other response codes
+                // Our service received it and could not perform it: fix the reason, and the retry
+                // carries a NEW order id (attemptEnded has already dropped this one).
                 showPaymentResult(
                     isSuccess = false,
-                    title = "Transaction Status",
-                    message = response.message ?: "Transaction completed with code: ${response.transactionCode}",
+                    title = getString(R.string.payment_failed),
+                    message = reason.ifEmpty { "Transaction failed" },
                     amountMinorUnits = currentAmountMinorUnits,
-                    details = ""
+                    details = "",
+                    retry = ::navigateToContactlessAndStartPayment,
                 )
                 showViewReceiptButton()
+            }
+            ResponseStatus.NOT_SENT -> {
+                lastSuccessfulResponse = null
+                // Never reached the gateway (CARD_READ_FAILED, NO_NETWORK_CONNECTION, MODE_REFUSED…):
+                // nothing was charged or recorded, so no receipt. Fix the reason; the retry carries
+                // the SAME order id.
+                showPaymentResult(
+                    isSuccess = false,
+                    title = getString(R.string.payment_not_sent),
+                    message = reason,
+                    amountMinorUnits = currentAmountMinorUnits,
+                    details = getString(R.string.payment_not_sent_message),
+                    retry = ::navigateToContactlessAndStartPayment,
+                )
+            }
+            // PENDING, or a status this build does not know (null / Unknown — unresolved, never a
+            // refusal): the SDK has recorded it and resolves it. Never retry; no receipt yet.
+            ResponseStatus.PENDING, ResponseStatus.Unknown, null -> {
+                lastSuccessfulResponse = null
+                showPaymentResult(
+                    isSuccess = null,
+                    title = getString(R.string.payment_pending),
+                    message = reason.ifEmpty { getString(R.string.payment_pending_message) },
+                    amountMinorUnits = currentAmountMinorUnits,
+                    details = getString(R.string.payment_pending_message)
+                )
             }
         }
 
@@ -1400,8 +1482,12 @@ class GetPaidActivity : AppCompatActivity() {
         title: String,
         message: String,
         amountMinorUnits: Long,
-        details: String
+        details: String,
+        /** "Try again" — only for a NOT_SENT or FAILED outcome; never for PENDING. */
+        retry: (() -> Unit)? = null,
     ) {
+        retryAction = retry
+        retryButton.visibility = if (retry != null) View.VISIBLE else View.GONE
         // A new result supersedes any credit-confirmation wait from the previous sale —
         // the approved branch re-shows the line when this sale supports it,
         // and the MPM watch is re-armed per settle.
@@ -1554,11 +1640,20 @@ class GetPaidActivity : AppCompatActivity() {
             runOnUiThread {
                 registerButton.isEnabled = true
                 registerProgressBar.visibility = View.GONE
-                if (response.success) {
-                    Toast.makeText(this, getString(R.string.registration_successful), Toast.LENGTH_LONG).show()
-                    showPage(PAGE_AMOUNT_ENTRY)
-                } else {
-                    Toast.makeText(this, response.message ?: getString(R.string.registration_failed), Toast.LENGTH_LONG).show()
+                when (response.responseStatus) {
+                    OutcomeStatus.APPROVED -> {
+                        Toast.makeText(this, getString(R.string.registration_successful), Toast.LENGTH_LONG).show()
+                        showPage(PAGE_AMOUNT_ENTRY)
+                    }
+                    // The registration may have gone through — don't send it again.
+                    OutcomeStatus.PENDING ->
+                        Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
+                    // NOT_SENT / FAILED / DECLINED: say why; the form stays filled in to fix and resend.
+                    else -> Toast.makeText(
+                        this,
+                        outcomeText(response.responseStatusReason, response.message, getString(R.string.registration_failed)),
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
             }
         }
@@ -1623,11 +1718,20 @@ class GetPaidActivity : AppCompatActivity() {
             institutionCode = institutionCode
         ) { response ->
             saveChangesButton.isEnabled = true
-            if (response != null) {
-                Toast.makeText(this, "Merchant profile updated", Toast.LENGTH_SHORT).show()
-                showPage(PAGE_AMOUNT_ENTRY)
-            } else {
-                Toast.makeText(this, "Failed to update merchant — please try again", Toast.LENGTH_SHORT).show()
+            when (response.responseStatus) {
+                OutcomeStatus.APPROVED -> {
+                    Toast.makeText(this, "Merchant profile updated", Toast.LENGTH_SHORT).show()
+                    showPage(PAGE_AMOUNT_ENTRY)
+                }
+                // The update may have gone through — don't send it again.
+                OutcomeStatus.PENDING ->
+                    Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
+                else -> Toast.makeText(
+                    this,
+                    "Failed to update merchant: " +
+                        outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)),
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }
@@ -1651,11 +1755,17 @@ class GetPaidActivity : AppCompatActivity() {
         sdk.merchantService.getBanks { result ->
             bankLoadingProgress.visibility = View.GONE
             bankDropdown.isEnabled = true
-            if (result != null) {
-                cachedBanks = result
-                setupBankDropdown(bankDropdown, result, sampleBankCode) { code -> selectedRegistrationBankCode = code }
+            if (result.responseStatus == OutcomeStatus.APPROVED) {
+                cachedBanks = result.banks
+                setupBankDropdown(bankDropdown, result.banks, sampleBankCode) { code -> selectedRegistrationBankCode = code }
             } else {
-                Toast.makeText(this, "Failed to load bank list. Please go back and try again.", Toast.LENGTH_LONG).show()
+                // A read, so never PENDING — NOT_SENT (e.g. offline) or FAILED: say why.
+                Toast.makeText(
+                    this,
+                    "Failed to load bank list: " +
+                        outcomeText(result.responseStatusReason, result.message, getString(R.string.error_occurred)),
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }
@@ -1674,11 +1784,17 @@ class GetPaidActivity : AppCompatActivity() {
         sdk.merchantService.getBanks { result ->
             editBankLoadingProgress.visibility = View.GONE
             editBankDropdown.isEnabled = true
-            if (result != null) {
-                cachedBanks = result
-                setupBankDropdown(editBankDropdown, result, merchantCode) { code -> editSelectedBankCode = code }
+            if (result.responseStatus == OutcomeStatus.APPROVED) {
+                cachedBanks = result.banks
+                setupBankDropdown(editBankDropdown, result.banks, merchantCode) { code -> editSelectedBankCode = code }
             } else {
-                Toast.makeText(this, "Failed to load bank list. Please go back and try again.", Toast.LENGTH_LONG).show()
+                // A read, so never PENDING — NOT_SENT (e.g. offline) or FAILED: say why.
+                Toast.makeText(
+                    this,
+                    "Failed to load bank list: " +
+                        outcomeText(result.responseStatusReason, result.message, getString(R.string.error_occurred)),
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }

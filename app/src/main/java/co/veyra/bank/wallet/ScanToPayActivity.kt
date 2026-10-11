@@ -10,11 +10,12 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import co.veyra.bank.HomeActivity
 import co.veyra.bank.R
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.softpos.payment.sdk.CurrencyUtils
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.api.mpm.MpmScanResult
 import co.veyra.wallet.sdk.api.mpm.VerifiedPaymentContext
-import co.veyra.wallet.sdk.exception.WalletRefusalException
 import com.google.android.material.button.MaterialButton
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -89,8 +90,8 @@ class ScanToPayActivity : AppCompatActivity() {
     private fun pay() {
         val context = verified ?: return
         // No authentication call here. payScannedContext raises the OS biometric sheet itself —
-        // bound to the merchant and amount — and a cancelled or failed gesture comes back as an
-        // AUTH_* failure on the same callback, leaving the customer on this confirm screen.
+        // bound to the merchant and amount — and a cancelled or failed gesture comes back as a
+        // NOT_SENT / AUTH_* outcome on the same callback, leaving the customer on this confirm screen.
         pushPayment(context)
     }
 
@@ -99,43 +100,58 @@ class ScanToPayActivity : AppCompatActivity() {
         payButton.isEnabled = false
         payButton.text = getString(R.string.scan_paying)
         sdk.tokenisationService.payScannedContext(context) { result ->
-            result.fold(
-                onSuccess = { outcome ->
-                    // The push answers with a status, not just a code, and PENDING is a real
-                    // answer — the payer must not be told they were refused when the SDK has
-                    // stored the payment as unresolved and is still polling for it.
-                    val state = paymentState(outcome.responseStatus)
-                    showResult(
-                        state = state,
-                        title = getString(
-                            when (state) {
-                                ResultState.APPROVED -> R.string.payment_successful
-                                ResultState.PENDING -> R.string.payment_pending
-                                ResultState.REFUSED -> R.string.declined
-                            },
-                        ),
-                        message = "Ref: ${context.txRef}\nResponse: ${outcome.responseCode ?: "-"}" +
-                            (outcome.message?.let { "\n$it" } ?: "") +
-                            (if (state == ResultState.PENDING) "\n${getString(R.string.payment_pending_message)}" else ""),
-                    )
-                },
-                onFailure = { error ->
-                    payButton.isEnabled = true
-                    payButton.text = getString(R.string.scan_pay_confirm)
-                    showResult(
-                        // A pre-dispatch refusal or a transport failure: the SDK recorded nothing,
-                        // so there is no unresolved payment to report as pending.
-                        state = ResultState.REFUSED,
-                        title = getString(R.string.declined),
-                        message = if (error is WalletRefusalException.DeviceNotBound) {
-                            // Card added on another device: retrying can never succeed here.
-                            getString(R.string.device_not_bound_refusal)
-                        } else {
-                            error.message ?: "Payment failed"
-                        },
-                    )
-                },
+            // The Result fails only on a setup mistake (VeyraSetupException) — a bug in this app's
+            // integration, found in development. Every refusal is an outcome.
+            val outcome = result.getOrElse { setupError ->
+                payButton.isEnabled = true
+                payButton.text = getString(R.string.scan_pay_confirm)
+                showReason(setupError.message ?: getString(R.string.error_occurred))
+                return@payScannedContext
+            }
+            if (outcome.responseStatus == OutcomeStatus.NOT_SENT) {
+                // Nothing reached the gateway, so nothing was charged: stay on the confirm screen
+                // and say what to fix (AUTH_CANCELLED, ONLINE_REQUIRED, NO_NETWORK_CONNECTION…).
+                // Paying again pays this same QR.
+                payButton.isEnabled = true
+                payButton.text = getString(R.string.scan_pay_confirm)
+                showReason(
+                    if (outcome.responseStatusReason == "DEVICE_NOT_BOUND") {
+                        // Card added on another device: retrying can never succeed here.
+                        getString(R.string.device_not_bound_refusal)
+                    } else {
+                        outcomeText(outcome.responseStatusReason, outcome.message, getString(R.string.error_occurred))
+                    },
+                )
+                return@payScannedContext
+            }
+            // The push answers with a status, not just a code, and PENDING is a real answer — the
+            // payer must not be told they were refused when the SDK has stored the payment as
+            // unresolved and is still polling for it.
+            val state = paymentState(outcome.responseStatus)
+            showResult(
+                state = state,
+                title = getString(
+                    when (state) {
+                        ResultState.APPROVED -> R.string.payment_successful
+                        ResultState.PENDING -> R.string.payment_pending
+                        ResultState.REFUSED -> R.string.declined
+                    },
+                ),
+                message = listOf(
+                    "Ref: ${context.txRef}",
+                    "Response: ${outcome.responseCode ?: "-"}",
+                    outcomeText(outcome.responseStatusReason, outcome.message, ""),
+                    if (state == ResultState.PENDING) getString(R.string.payment_pending_message) else "",
+                ).filter { it.isNotBlank() }.joinToString("\n"),
             )
+        }
+    }
+
+    /** A refusal before anything was sent: shown above the still-visible confirm screen. */
+    private fun showReason(text: String) {
+        findViewById<TextView>(R.id.scanStatusText).apply {
+            this.text = text
+            visibility = View.VISIBLE
         }
     }
 
@@ -149,8 +165,8 @@ class ScanToPayActivity : AppCompatActivity() {
 
     private fun paymentState(responseStatus: String?): ResultState =
         when (responseStatus?.trim()?.uppercase()) {
-            "APPROVED" -> ResultState.APPROVED
-            "DECLINED", "FAILED" -> ResultState.REFUSED
+            OutcomeStatus.APPROVED -> ResultState.APPROVED
+            OutcomeStatus.DECLINED, OutcomeStatus.FAILED -> ResultState.REFUSED
             else -> ResultState.PENDING
         }
 

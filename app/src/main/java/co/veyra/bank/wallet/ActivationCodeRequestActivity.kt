@@ -7,6 +7,8 @@ import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityActivationCodeRequestBinding
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.wallet.sdk.ActivationCodeReason
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.VeyraWalletSdk
@@ -65,21 +67,17 @@ class ActivationCodeRequestActivity : AppCompatActivity() {
             selectedActivationMethod = method,
             preferredActivationChannel = method,
             reasonCode = ActivationCodeReason.ADD_CARD
-        ) { result ->
-            result.fold(
-                onSuccess = { response ->
-                    if (response.status?.uppercase() == "FAILURE") {
-                        setLoading(false)
-                        showError(response.message ?: getString(R.string.error_occurred))
-                    } else {
-                        navigateToOtp(expirationDateTime = response.expirationDateTime)
-                    }
-                },
-                onFailure = { error ->
+        ) { response ->
+            when (response.responseStatus) {
+                OutcomeStatus.APPROVED -> navigateToOtp(expirationDateTime = response.expirationDateTime)
+                // The code may already be on its way: go to code entry rather than asking again.
+                OutcomeStatus.PENDING -> navigateToOtp(expirationDateTime = null)
+                // NOT_SENT (fix the reason, then send again) or FAILED: say why and stay here.
+                else -> {
                     setLoading(false)
-                    showError(error.message ?: getString(R.string.error_occurred))
+                    showError(outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)))
                 }
-            )
+            }
         }
     }
 
