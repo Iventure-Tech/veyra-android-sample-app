@@ -263,5 +263,7 @@
     <string name="scan_paying">Paying…</string>
     <string name="scan_pay_auth_title">Confirm payment</string>
     <string name="scan_pay_auth_subtitle">Pay %1$s to %2$s</string>
+    <string name="lookup_order">Look up an order</string>
+    <string name="lookup_order_hint">Your order id</string>
 </resources>
 
