@@ -479,7 +479,8 @@ proxy provider receives is one JSON string that says everything about the call:
 - New fields may be added under the same `version`; a breaking change bumps `version`.
 - When your proxy backend itself cannot complete a call it answers `200` with
   `{"response_status": "PROXY_FAILED", "response_status_reason": "…", "never_sent": true|false}`.
-  Return that body unchanged like any other: the SDK recognises it.
+  Return that body unchanged like any other: the SDK recognises it. `never_sent: true` ends the
+  call as a refused connection does (below); `false` or absent, as a timeout does.
 - **Return Veyra's response body exactly as Veyra returned it.** If Veyra answered with a non-200
   status, throw `VeyraRelayException(kind = OTHER, neverSent = false, httpStatus = <status>)` rather
   than inventing a body — the SDK treats it exactly as that status on a direct connection.
@@ -490,8 +491,9 @@ A proxy provider signals failure by throwing `VeyraRelayException(kind, neverSen
 **must say whether the request was sent**:
 
 - `neverSent = true` **only** when the request provably never left the device — no network, or the
-  connection was refused before anything was written. A payment then ends `FAILED` (`91`), or with
-  `NO_NETWORK_CONNECTION` when the kind is `NO_NETWORK`.
+  connection was refused before anything was written. A payment or a digitisation then ends
+  `NOT_SENT` / `SDK_UNABLE_TO_CONNECT` (retry with the same order ID); any other call ends `FAILED` /
+  `SDK_UNABLE_TO_CONNECT`. When the kind is `NO_NETWORK` the reason is `NO_NETWORK_CONNECTION` instead.
 - `neverSent = false` when it may have been delivered — a timeout, a dropped connection, a non-2xx
   answer, or whenever you cannot tell. The payment stays `PENDING` and the SDK reconciles it. **When
   in doubt, `false`**: it is the safe direction.
