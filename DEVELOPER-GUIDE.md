@@ -771,7 +771,7 @@ sdk.cardPaymentService.makeCardPayment(
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `request` | **Mandatory** | `TransactionRequest` — see below. |
-| `callback` | **Mandatory** | `(TransactionResponse) -> Unit`. Fires **once**, with the terminal outcome only — branch on `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING` / `NOT_SENT`). Never fires for unsupported cards or lost contact. Nothing about a payment throws; only a [setup error](#1-setup-errors-thrown) does. |
+| `callback` | **Mandatory** | `(TransactionResponse) -> Unit`. Fires **once**, with the terminal outcome only — branch on `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING` / `RETRY` / `NOT_SENT`). Never fires for unsupported cards or lost contact. Nothing about a payment throws; only a [setup error](#1-setup-errors-thrown) does. |
 | `onCardDetected` | Optional | Card entered the field, processing started — hide the Cancel button, show "processing". |
 | `onCardContactLost` | Optional | Contact lost before completion — reader **stays armed**; show "hold steady" and wait for a re-tap. |
 | `onUnsupportedCard` | Optional | Non-payment target / unreadable card — reader **stays armed**; show "card not supported, try another". |
@@ -786,7 +786,7 @@ sdk.cardPaymentService.makeCardPayment(
 |-----------|----------|-------------|
 | `amount` | **Mandatory** | **Minor units** (`Long`), e.g. ₦325.00 → `32500L`. Must be > 0. |
 | `currency` | **Mandatory** | ISO 4217 numeric, 3–4 digits (padded to 4, e.g. `"0566"`). |
-| `merchantOrderId` | **Mandatory** | **Your** order / basket / invoice id for this sale (`String`, non-blank, at most 255 characters). A blank one ends `NOT_SENT` / `INVALID_REQUEST`, before anything is sent. Stored and echoed by the gateway and shown on the transaction detail and receipt, on your side and on the paying wallet's. **Unique per merchant** across all its payments, whatever their outcome: if another payment already uses it — approved, pending, declined or failed — the gateway refuses the payment with `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` and nothing is sent. A retry needs a new order id. |
+| `merchantOrderId` | **Mandatory** | **Your** order / basket / invoice id for this sale (`String`, non-blank, at most 255 characters). A blank one ends `NOT_SENT` / `INVALID_REQUEST`, before anything is sent. Stored and echoed by the gateway and shown on the transaction detail and receipt, on your side and on the paying wallet's. **One order id per sale, kept across all its attempts:** an order can have several attempts, and the same order id can be used again until the order is paid or possibly paid. The gateway refuses a new attempt — `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, with the attempt holding the order in `originalPayment` — only while the order is `APPROVED` or `PENDING`. After `DECLINED`, `FAILED`, `RETRY` or `NOT_SENT`, retry under the **same** order id. See [The merchant order ID](#the-merchant-order-id). |
 | `txType` | Optional | `TxType.PURCHASE`, `REFUND`, `CASH_ADVANCE`, `RECURRING_PURCHASE`, `PRE_AUTH_COMPLETION`, `OTHER`. **Defaults to `PURCHASE`** when omitted — pass a value only for a non-purchase transaction. |
 | `.performed3ds(Boolean)` | Optional | Whether your app performed 3-D Secure. Default `false`. |
 
@@ -813,15 +813,15 @@ The merchant keys the amount, the SDK creates a **gateway-signed payment context
 | `merchantId` | **Mandatory** | Your registered merchant ID. |
 | `amountMinorUnits` | **Mandatory** | Sale amount in minor units. |
 | `currency` | **Mandatory** | ISO 4217 numeric (e.g. `"566"`; leading zeros accepted). |
-| `merchantOrderId` | **Mandatory** | Your order id for the sale — the same rules as on a tap (non-blank, unique per merchant). Several QRs may carry the same order id until one of them is paid. |
+| `merchantOrderId` | **Mandatory** | Your order id for the sale — the same rules as on a tap (non-blank; reusable until the order is paid or possibly paid). Several QRs may carry the same order id until one of them is paid. |
 | `onExpired` | Optional | Fired **once, on the main thread**, when the QR reaches its expiry — blank or replace the code so it can't be scanned once lapsed (a dimmed QR is still machine-readable). A new create supersedes the watch; `cancelQrExpiry()` stops it. |
 
 Always returns a `CreatedPaymentContext` — never `null`, never a throw for anything that happens to the request. Check `created` (or `responseStatus == "APPROVED"`) first: then `txRef` (poll key), `mpmPayload` (**render this string verbatim as the QR**), `expiry` (ISO-8601) and `kid` are set. Otherwise `txRef` and `mpmPayload` are `null` and `responseStatus` / `responseStatusReason` say why:
 
 | `responseStatus` | Typical reasons | What to do |
 |---|---|---|
-| `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID`, `MERCHANT_NOT_FOUND`, `AMOUNT_REQUIRED`, `INVALID_REQUEST` | The gateway refused it. For a duplicate, the order id is already held by another payment — don't take another payment for it |
-| `PENDING` | `NO_RESPONSE_RECEIVED`, `UPSTREAM_ERROR` | Sent, no usable answer, so there is no QR to show. Create a new QR |
+| `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID`, `MERCHANT_NOT_FOUND`, `AMOUNT_REQUIRED`, `INVALID_REQUEST` | The gateway refused it. Fix the reason and create it again with the same order id. For a duplicate, the order is already paid or a payment for it is still being confirmed (`originalPayment` says which) — don't take another payment for it |
+| `PENDING` | `NO_RESPONSE_RECEIVED`, `UPSTREAM_ERROR` | Sent, no usable answer, so there is no QR to show. Create a new QR (the same order id is fine — no payment was taken) |
 | `NOT_SENT` | `NO_NETWORK_CONNECTION`, `INVALID_REQUEST` (blank order id), `NOT_AUTHENTICATED` | Nothing was sent. Fix the reason and create it again with the **same** order id |
 
 #### `contextStatus`
@@ -832,11 +832,12 @@ Poll `contextStatus(txRef)` on a short interval (the sample uses 2.5 s). It answ
 val client = ContextPaymentClient(context, Environment.TEST)   // uses the SoftPOS SDK's provider
 val created = client.createContextPayment(
     merchantId, amountMinorUnits, "566",
-    merchantOrderId = "ORDER-42",            // required: YOUR order id, unique per merchant
+    merchantOrderId = "ORDER-42",            // required: YOUR order id for this sale
     onExpired = { blankQr(); showHint("This payment code has expired — start a new payment") },
 )
 if (!created.created) {
-    // FAILED / PENDING / NOT_SENT — see the table above. Only NOT_SENT keeps the order id.
+    // FAILED / PENDING / NOT_SENT — see the table above. Keep the order id for the next try,
+    // unless the reason is DUPLICATE_MERCHANT_ORDER_ID (the order is paid or being confirmed).
     showError(created.message ?: created.responseStatusReason ?: "Could not create payment QR")
     return
 }
@@ -890,17 +891,19 @@ lifecycleScope.launch {
     // the response for the receipt lookup.
     when (response.responseStatus) {
         ResponseStatus.APPROVED -> showApproved(response.merchantTransactionReference)
-        // The QR reached the gateway and is spent: a new attempt is a new scan and a new order id.
+        // The QR was used: a new attempt is a new scan — under the same order id, unless the
+        // reason is DUPLICATE_MERCHANT_ORDER_ID (the order is already paid or still being confirmed).
         ResponseStatus.DECLINED, ResponseStatus.FAILED ->
             showDeclined(response.message, response.responseStatusReason)
-        // Nothing was sent: fix the reason, charge the SAME scanned QR with the SAME order id.
-        ResponseStatus.NOT_SENT -> offerRetry(response.responseStatusReason)
+        // Nothing was charged — NOT_SENT never reached Veyra, RETRY reached it but was not sent to
+        // the bank: fix the reason, charge the SAME scanned QR with the SAME order id.
+        ResponseStatus.NOT_SENT, ResponseStatus.RETRY -> offerRetry(response.responseStatusReason)
         else -> showProcessing(response.merchantTransactionReference)  // PENDING — never re-charge
     }
 }
 ```
 
-`charge(scanned, merchantOrderId = …)` returns `PaymentResponse`: the response triple — `responseCode` (the wire literal: display it, never branch on it), `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING` / `NOT_SENT` — **branch on this**; `PENDING` means the outcome is unknown, so never re-charge) and `responseStatusReason` — plus `message`, `transactionId`, `merchantStatus`, `merchantTransactionReference` (**the SDK-minted reference — fetch the receipt with `generateTransactionReceipt(it)`**) and `merchantOrderId` echoed back. It always returns: a device that is offline ends `NOT_SENT` / `NO_NETWORK_CONNECTION` and records nothing; a charge that left but got no usable answer ends `PENDING` (`68` / `06`) and is recorded and resolved by the SDK.
+`charge(scanned, merchantOrderId = …)` returns `PaymentResponse`: the response triple — `responseCode` (the wire literal: display it, never branch on it), `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING` / `RETRY` / `NOT_SENT` — **branch on this**; `PENDING` means the outcome is unknown, so never re-charge) and `responseStatusReason` — plus `message`, `transactionId`, `merchantStatus`, `merchantTransactionReference` (**the SDK-minted reference — fetch the receipt with `generateTransactionReceipt(it)`**) and `merchantOrderId` echoed back. It always returns: a device that is offline ends `NOT_SENT` / `NO_NETWORK_CONNECTION` and records nothing; a charge that left but got no usable answer ends `PENDING` (`68` / `06`) and is recorded and resolved by the SDK.
 
 > **The order id is required on every merchant payment** — tap (`TransactionRequest.Builder`),
 > customer QR (`charge(scanned, merchantOrderId)`) and merchant QR
@@ -921,7 +924,7 @@ The SDK records every payment it takes — tap, get-paid QR and customer-QR char
 val transactions = sdk.transactionService.getLastTransactions(50)   // most recent first, all rails
 val tx = sdk.transactionService.getTransaction(reference)           // or null
 // TransactionInfo: merchantTransactionReference, amount (minor units), transactionStatus
-// (APPROVED / DECLINED / PENDING / FAILED), responseCode, responseStatusReason (the stated
+// (APPROVED / DECLINED / PENDING / FAILED / RETRY), responseCode, responseStatusReason (the stated
 // cause, e.g. "INSUFFICIENT_FUNDS" — display, never parse), transactionTime, currencyCode,
 // transactionId, merchantOrderId (your own order/basket id as supplied on the charge — your
 // reconciliation key back to your POS/till, null on sales that carried none; receipts and
@@ -942,7 +945,9 @@ so the same rail reads identically on Android, iOS and React Native, and an unre
 passes through unchanged rather than being shown as some other rail. Branch on `rail`, not on the
 label.
 
-`PENDING` means the outcome is not yet known (the SDK keeps polling and updates the stored row); `FAILED` means the gateway received the payment and could not perform it. A payment that ended `NOT_SENT` never reached the gateway and is **not recorded** — there is no history row for it. Hide receipt affordances while a row is `PENDING`.
+`PENDING` means the outcome is not yet known (the SDK keeps polling and updates the stored row); `FAILED` means the gateway received the payment and could not perform it; `RETRY` means the gateway received it but did not send it to the bank, so nothing was charged. A `RETRY` attempt **is recorded** — it is a real attempt, with the gateway's code and reason — and is final, never polled. A payment that ended `NOT_SENT` never reached the gateway and is **not recorded** — there is no history row for it. Hide receipt affordances while a row is `PENDING`.
+
+**Each attempt is its own row.** A sale retried after `RETRY` (or another card after a decline) leaves one row per attempt, each with its own `merchantTransactionReference` and the **same** `merchantOrderId`. To show a sale's history, group the rows by `merchantOrderId`; to say what happened to the order, apply [the order's status rule](#an-orders-status-comes-from-all-its-attempts) to the group.
 
 **How the SDK waits for a `PENDING` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own, with **exponential backoff**: the first re-checks come within seconds (most payments settle at once) and the interval doubles to a steady state of roughly **once an hour**. It keeps that up for **30 days** from the transaction date, and then stops asking.
 
@@ -1488,7 +1493,7 @@ VeyraWalletSdkConfig.builder(/* … */)
 Pay the verified context with the wallet's **active card**. The SDK raises the authentication sheet
 itself first (above). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
 
-**Branch on `responseStatus`, not on `approved` or the response code.** The callback's `Result` fails only on a [setup error](#1-setup-errors-thrown); every refusal, including those made on the phone before sending (`AUTH_CANCELLED`, `ONLINE_REQUIRED`, `DEVICE_NOT_BOUND`, `NO_NETWORK_CONNECTION`, …), is a `NOT_SENT` outcome — nothing was pushed, so the customer can pay the **same** QR again once the reason is fixed. The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one.
+**Branch on `responseStatus`, not on `approved` or the response code.** The callback's `Result` fails only on a [setup error](#1-setup-errors-thrown); every refusal, including those made on the phone before sending (`AUTH_CANCELLED`, `ONLINE_REQUIRED`, `DEVICE_NOT_BOUND`, `NO_NETWORK_CONNECTION`, …), is a `NOT_SENT` outcome — nothing was pushed, so the customer can pay the **same** QR again once the reason is fixed. `RETRY` is handled the same way: the gateway received the push but did not send it to the bank (for example the merchant's account check failed), nothing was charged, and the merchant's QR is live again until it expires, so the customer can pay it again. The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one.
 
 ```kotlin
 sdk.tokenisationService.payScannedContext(ctx) { result ->
@@ -1496,8 +1501,10 @@ sdk.tokenisationService.payScannedContext(ctx) { result ->
     when (outcome.responseStatus) {
         OutcomeStatus.APPROVED -> showApproved(outcome.message)
         OutcomeStatus.DECLINED, OutcomeStatus.FAILED -> showDeclined(outcome.message, outcome.responseStatusReason)
-        // Nothing was sent: stay on the confirm screen, say what to fix, let them pay this QR again.
-        OutcomeStatus.NOT_SENT -> showReasonOnConfirm(outcome.responseStatusReason, outcome.message)
+        // Nothing was charged (NOT_SENT: never reached Veyra; RETRY: not sent to the bank):
+        // stay on the confirm screen, say what to fix, let them pay this QR again.
+        OutcomeStatus.NOT_SENT, OutcomeStatus.RETRY ->
+            showReasonOnConfirm(outcome.responseStatusReason, outcome.message)
         // PENDING, absent or anything else: not yet known. Say so, and point at history —
         // never show a refusal for a payment that may still settle, and never pay again.
         else -> showPending(outcome.responseCode)
@@ -1563,7 +1570,7 @@ The card's full local history across every rail (tap, scanned QR, shown QR), mos
 val transactions = sdk.tokenisationService.getTransactions(tokenUniqueReference, 50)
 ```
 
-`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED`; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderId` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, tap and generated-QR rows learn it from the status poll, so `null` on a still-open row means "not learned yet", not "no order id"; for display and reconciliation — receipts and status refreshes key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
+`TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED` / `RETRY` — `RETRY`: the payment reached Veyra but was not sent to the bank, nothing was charged; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderId` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, tap and generated-QR rows learn it from the status poll, so `null` on a still-open row means "not learned yet", not "no order id"; for display and reconciliation — receipts and status refreshes key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
 ##### `onTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
 
@@ -1722,7 +1729,7 @@ Every SDK call ends in one of two ways:
    integration, found during development. You fix the code; you never show them to a user. See
    [Setup errors (thrown)](#1-setup-errors-thrown).
 2. **It returns an outcome** — for everything that happens while processing a request: approved,
-   declined, failed, still pending, or never sent. The outcome is always the same fields:
+   declined, failed, still pending, not sent to the bank (retry), or never sent. The outcome is always the same fields:
    `responseStatus` and `responseStatusReason`, plus `responseCode` on payments and add card. See
    [Processing outcomes](#2-processing-outcomes-the-response-triple).
 
@@ -1774,7 +1781,7 @@ answer to the cancel, not an error and not an outcome of the payment you tried t
 ### 2. Processing outcomes (the response triple)
 
 **What they mean.** The SDK ran the call. The outcome tells you what happened and, through the
-status, whether it is safe to retry.
+status, whether to retry and with which order ID.
 
 **How to use them.**
 
@@ -1815,8 +1822,9 @@ The three fields have the same meaning everywhere. A few result types name them 
 | `deactivateToken(...)` | `TokenStatusUpdateResponse` | — | `responseStatus` | `responseStatusReason` |
 
 Status values are plain strings on every type except the two SoftPOS payment types, which use the
-`ResponseStatus` enum (it gained `NOT_SENT`). Compare strings with the constants in
-`co.veyra.common.outcome.OutcomeStatus` (`APPROVED`, `DECLINED`, `FAILED`, `PENDING`, `NOT_SENT`); the
+`ResponseStatus` enum (it gained `NOT_SENT` and `RETRY`; `isFinal` is true for every status except
+`PENDING` and `Unknown`). Compare strings with the constants in
+`co.veyra.common.outcome.OutcomeStatus` (`APPROVED`, `DECLINED`, `FAILED`, `PENDING`, `RETRY`, `NOT_SENT`); the
 reasons the SDK itself originates are constants in `OutcomeReason`.
 
 On `TokenisationResponse` and `VerifyAccountResponse`, `responseCode` is **not** an ISO payment code:
@@ -1832,48 +1840,99 @@ outcome arrives later on the history row and through `onTransactionResolved` (se
 cannot be made — the status there is the payment's — so they return the unchanged row with a
 `failureReason` instead.
 
-#### The five statuses
+#### The six statuses
 
-| `responseStatus` | What it means | Did the request reach Veyra? | Merchant order ID used up? (payments) | What your app does |
+| `responseStatus` | What it means | Did the request reach Veyra? | Merchant order ID reusable? (payments) | What your app does |
 |---|---|---|---|---|
-| `APPROVED` | It was done | Yes | Yes | Complete the sale / show the card |
-| `DECLINED` | It was done, and someone with authority refused (issuer, bank, risk rules) | Yes | Yes | Show the reason. Don't retry automatically; a new attempt needs a **new** order ID |
-| `FAILED` | Veyra received it but could not perform it | Yes | Yes | Fix what the reason names; retry with a **new** order ID |
-| `PENDING` | It may have been done; the outcome is not known yet | Maybe | Yes | **Never retry.** The SDK keeps checking and tells you when it's final (`onTransactionResolved`); you can also ask with `refreshTransactionStatus(merchantTransactionReference)` |
-| `NOT_SENT` | It never reached Veyra. Nothing was done | No | **No** | Fix what the reason names (connect, authenticate, …) and retry with the **same** order ID |
+| `APPROVED` | It was done | Yes | **No** — the order is paid | Complete the sale / show the card |
+| `DECLINED` | It was done, and someone with authority refused (issuer, bank, risk rules). No money moved | Yes | Yes | Show the reason. Don't retry automatically; the customer may try another card or method under the **same** order ID |
+| `FAILED` | Veyra received it and didn't perform it, and retrying with the same reference won't help. For payments that is mainly `94`: the order is already paid or possibly paid | Yes | Yes, except after `94` | Fix what the reason names. After `94`, don't take another payment for the order |
+| `PENDING` | It may have been done; the outcome is not known yet | Maybe | **No** — it might be paid | **Never retry.** The SDK keeps checking and tells you when it's final (`onTransactionResolved`); you can also ask with `refreshTransactionStatus(merchantTransactionReference)` |
+| `RETRY` | It reached Veyra, but the payment was never sent to the bank. Nothing was charged | Yes | Yes | Fix what the reason names, then retry with the **same** order ID |
+| `NOT_SENT` | It never reached Veyra (the phone stopped it). Nothing was done | No | Yes | Fix what the reason names (connect, authenticate, …), then retry with the **same** order ID |
 
-Four rules follow from this table:
+**`NOT_SENT` and `RETRY` are handled the same way.** In both, nothing was charged and the retry
+carries the same order ID. The only difference is where the attempt stopped, and the reason tells
+you: `NOT_SENT` stopped on the phone (`NO_NETWORK_CONNECTION`, `CARD_READ_FAILED`, …); `RETRY`
+stopped inside Veyra, before the bank was asked (`NAME_ENQUIRY_FAILED`,
+`ISSUER_SWITCH_NOT_AVAILABLE`, …). A `RETRY` attempt carries the gateway's `responseCode` and is
+recorded in history; a `NOT_SENT` one has no code and no history row.
+
+Five rules follow from this table:
 
 - **`NOT_SENT` never has a `responseCode`.** A code only ever means something on the network
   answered, or failed to.
-- **`PENDING` is never a failure.** Never show it as failed and never charge again. Show "We're
-  checking this payment" and wait for the SDK's update. See
-  [Holding a `PENDING` payment](#holding-a-pending-payment-and-being-told-when-it-settles).
+- **`PENDING` is never a failure, and it is now the only status where the outcome is unknown.** Never
+  show it as failed and never charge again. Show "We're checking this payment" and wait for the SDK's
+  update. See [Holding a `PENDING` payment](#holding-a-pending-payment-and-being-told-when-it-settles).
+- **`RETRY` is final.** The SDK never polls a `RETRY` attempt — there is nothing to wait for.
 - **Add a card (digitisation) is different.** There is no reference and no lookup. A digitisation
   that gets no answer ends `FAILED`, never `PENDING`, because the card's keys can never be delivered
   later. Start a new digitisation.
 - **Reads are never `PENDING`.** Bank lists, account eligibility, token status and QR inspection
   change nothing, so any no-answer — sent or not — is `NOT_SENT` (`NO_RESPONSE_RECEIVED`,
   `UPSTREAM_ERROR`, `NO_NETWORK_CONNECTION`, …), and retrying as is is always safe.
-- **The merchant order ID.** A payment that reached Veyra uses its order ID up, whatever the
-  outcome. A retry with the same ID is refused as `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`: the
-  order is already held by another payment, so **don't take another payment for it** — find the
-  original in history (`getLastTransactions`) and read its outcome.
+
+`RETRY` applies to payments only. Calls that are not payments (merchant registration, add card,
+activation, bank lookups, QR creation) have no order to retry, so a refusal there stays `FAILED`.
 
 #### The retry rule
 
 | Outcome | Retry? | With which merchant order ID? |
 |---|---|---|
-| `NOT_SENT` | Yes, once the reason is fixed (connect, authenticate, tap again…) | The **same** one — it was never used |
-| `FAILED` | Only after fixing what the reason names | A **new** one — the failed attempt used it up |
-| `DECLINED` | Not automatically; a new attempt is the customer's choice | A **new** one |
+| `NOT_SENT` | Yes, once the reason is fixed (connect, authenticate, tap again…) | The **same** one |
+| `RETRY` | Yes, once the reason is fixed (or shortly, for `ISSUER_SWITCH_NOT_AVAILABLE`) | The **same** one |
+| `FAILED` | Only after fixing what the reason names. Never after `94` | The **same** one (after `94` the order is already paid or still being confirmed) |
+| `DECLINED` | Not automatically; another card or method is the customer's choice | The **same** one |
 | `PENDING` | **Never** — wait for the SDK to resolve it | — |
-| `APPROVED` | — | A new sale gets a new one |
+| `APPROVED` | — | The order is paid; a new sale gets a new one |
 
 Add card has no order ID: a `FAILED` or `NOT_SENT` digitisation is simply started again. The sample
-does exactly this in `GetPaidActivity` — it keeps the sale's order ID while an attempt ends
-`NOT_SENT`, drops it after any other outcome, offers **Try again** only for `NOT_SENT` and `FAILED`,
-and never for `PENDING`.
+shows the pattern in `GetPaidActivity`: it keeps the sale's order ID while an attempt ends `NOT_SENT`
+or `RETRY` and offers **Try again** on the same order, and never offers a retry for `PENDING`. (After
+`DECLINED` or `FAILED` the sample starts a new order ID; reusing the same one is equally allowed.)
+
+#### The merchant order ID
+
+`merchantOrderId` is **your** id for the sale: the order, basket or invoice in your POS. The SDK mints
+a new `merchantTransactionReference` for every attempt; the order ID is what ties the attempts of one
+sale together.
+
+- **An order can have several attempts.** A tap that ends `RETRY`, then a second tap that is
+  approved, are two attempts of one order.
+- **The same order ID can be used again until the order is paid or possibly paid.** The gateway
+  refuses a new attempt — `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID` — only when the order is
+  `APPROVED` or `PENDING` (including an attempt still in flight). That refusal is what stops a double
+  charge.
+- **After `DECLINED`, `FAILED`, `RETRY` or `NOT_SENT`, try again under the same order ID** — another
+  card after a decline; fix the reason after `FAILED`, `RETRY` or `NOT_SENT`.
+- **On a `94`, read `originalPayment`.** It is the attempt that holds the order:
+  `originalPayment.responseStatus` `APPROVED` means the order is already paid; `PENDING` means a
+  payment for it is still being confirmed. Either way, don't take another payment for it. The SDK's
+  `message` says which.
+
+##### An order's status comes from all its attempts
+
+When an order has several attempts, Veyra decides the order's status with a fixed precedence, never
+"the latest attempt wins" — a later attempt must never hide a payment that went through or might
+have:
+
+| Rank | Rule | The order is… |
+|---|---|---|
+| 1 | any attempt `APPROVED` | `APPROVED` — paid |
+| 2 | otherwise, any attempt `PENDING` (including one still in flight) | `PENDING` — might be paid |
+| 3 | otherwise, the **latest** attempt | that attempt's status: `DECLINED`, `FAILED` or `RETRY` |
+| 4 | no attempts | not found: `25` / `RETRY` / `UNABLE_TO_LOCATE_RECORD` — nothing was charged, the order can be paid |
+
+The attempt that sets the order's status is the **deciding attempt**: the approved one, else the
+pending one, else the latest. It is the attempt the gateway returns as `originalPayment` on a `94`,
+and the rule is exactly when a new attempt is refused: ranks 1 and 2 refuse it, ranks 3 and 4 allow
+it. A `RETRY` order means "nothing was debited; this order can be paid again".
+
+Your own history shows the attempts: every attempt that reached Veyra is a row in
+`getLastTransactions()` — `RETRY` ones included — carrying the order ID in `merchantOrderId`. Group
+the rows by `merchantOrderId` to show a sale with all its tries, and apply the table above to the
+group to label the sale.
 
 #### Handling an outcome in code
 
@@ -1884,35 +1943,39 @@ words and for the few reasons that need their own UI:
 import co.veyra.common.outcome.OutcomeReason
 import co.veyra.softpos.payment.sdk.payment.ResponseStatus
 
-private var saleOrderId: String? = null   // your POS order id for the sale on screen
+// Your POS order id for the sale on screen: one per sale, kept across every attempt.
+// The gateway refuses a reused one only while the order is APPROVED or PENDING, so reusing it is
+// always safe — the worst case is a 94 that tells you the order is already paid.
+private var saleOrderId: String? = null
 
-private fun orderIdForAttempt(): String =
-    saleOrderId ?: newOrderIdFromYourPos().also { saleOrderId = it }
+fun startNewSale() { saleOrderId = newOrderIdFromYourPos() }
 
 fun charge(amountMinor: Long) {
-    val request = TransactionRequest.Builder(amountMinor, "0566", orderIdForAttempt()).build()
+    val request = TransactionRequest.Builder(amountMinor, "0566", saleOrderId!!).build()
     sdk.cardPaymentService.makeCardPayment(request, callback = { r -> runOnUiThread { onOutcome(r) } })
 }
 
 fun onOutcome(response: TransactionResponse) {
-    // NOT_SENT never reached the gateway, so the order id is still unused; anything else used it up.
-    if (response.responseStatus != ResponseStatus.NOT_SENT) saleOrderId = null
-
     when (response.responseStatus) {
-        ResponseStatus.APPROVED -> showApproved(response.merchantTransactionReference)
-        ResponseStatus.DECLINED -> showDeclined(response.message)            // new order id next time
+        ResponseStatus.APPROVED -> showApproved(response.merchantTransactionReference)   // order paid
+        ResponseStatus.DECLINED -> showDeclined(response.message)       // another card, same order id
         ResponseStatus.FAILED -> when (response.responseStatusReason) {
-            "DUPLICATE_MERCHANT_ORDER_ID" ->                                  // don't take another payment
+            "DUPLICATE_MERCHANT_ORDER_ID" ->                              // don't take another payment
                 if (response.originalPayment?.responseStatus == "PENDING") showStillConfirming()
                 else showAlreadyPaid()
-            else -> showFailed(response.message, retry = true)                // retry gets a new order id
+            else -> showFailed(response.message, retry = true)            // fix the reason; same order id
         }
-        ResponseStatus.NOT_SENT -> when (response.responseStatusReason) {
-            OutcomeReason.CANCELLED -> return                                 // your own cancel — not a result
-            OutcomeReason.NO_NETWORK_CONNECTION -> showNotSent("Connect to the internet", retry = true)
-            OutcomeReason.CARD_READ_FAILED -> showNotSent("Ask the customer to tap again", retry = true)
-            "MODE_REFUSED" -> showNotSent("Finish the other payment first", retry = true)
-            else -> showNotSent(response.message, retry = true)               // same order id
+        // Nothing was charged. NOT_SENT stopped on the phone, RETRY inside Veyra before the bank.
+        // Same handling: say what to fix, retry with the SAME order id.
+        ResponseStatus.NOT_SENT, ResponseStatus.RETRY -> when (response.responseStatusReason) {
+            OutcomeReason.CANCELLED -> return                             // your own cancel — not a result
+            OutcomeReason.NO_NETWORK_CONNECTION -> showNotCharged("Connect to the internet", retry = true)
+            OutcomeReason.CARD_READ_FAILED -> showNotCharged("Ask the customer to tap again", retry = true)
+            "MODE_REFUSED" -> showNotCharged("Finish the other payment first", retry = true)
+            "NAME_ENQUIRY_FAILED", "ACCOUNT_VALIDATION_FAILED" ->
+                showNotCharged("Check the merchant's account details, then try again", retry = true)
+            "ISSUER_SWITCH_NOT_AVAILABLE" -> showNotCharged("The bank can't be reached — try again shortly", retry = true)
+            else -> showNotCharged(response.message, retry = true)
         }
         // PENDING, Unknown (a status newer than this build) or null (an old backend): unresolved.
         // Never retry; the SDK resolves it and onTransactionResolved tells you.
@@ -1921,8 +1984,27 @@ fun onOutcome(response: TransactionResponse) {
 }
 ```
 
-Every other call follows the same pattern with its own result type (see the table above); the
+`response.message` already carries the right sentence for each status — for `RETRY` it is
+"Payment not sent to the bank - retry with the same order ID", followed by the reason.
+
+Every other call follows the same pattern with its own result type (see [Where the triple lives](#where-the-triple-lives-on-android)); the
 non-payment results carry the status as a `String`, so compare with `OutcomeStatus.*`.
+
+#### Worked example: `RETRY`, then approved under the same order ID
+
+1. The merchant keys ₦325.00 for order `ORDER-42` and the customer taps. Veyra checks the
+   merchant's account before asking the bank for the debit, and that check fails. The callback
+   gets `responseStatus = RETRY`, `responseStatusReason = "NAME_ENQUIRY_FAILED"`,
+   `transactionCode = "21"` and the reference `T1-…001`. Nothing was charged.
+2. Your app shows "Payment not sent to the bank — try again", keeps `saleOrderId = "ORDER-42"`, and
+   offers **Try again**. The attempt is in `getLastTransactions()` as a `RETRY` row for `ORDER-42`.
+   No status check is needed: `RETRY` is final.
+3. The merchant taps **Try again**; the app builds a new `TransactionRequest` with the **same**
+   `merchantOrderId = "ORDER-42"`. The SDK mints a new reference, `T1-…002`. The order's status was
+   `RETRY` (rank 3), so the gateway accepts the new attempt.
+4. The second attempt is approved: `APPROVED` / `00`. History now has two rows for `ORDER-42` —
+   `RETRY` (`T1-…001`) and `APPROVED` (`T1-…002`) — and the order is `APPROVED` (rank 1). Any further
+   attempt under `ORDER-42` would be refused `94`, with `T1-…002` as `originalPayment`.
 
 #### Table A — Outcomes the SDK itself produces
 
@@ -1961,7 +2043,7 @@ non-payment results carry the status as a `String`, so compare with `OutcomeStat
 
 The triple is not payment-only. Every Veyra service the SDK talks to — the Veyra payment gateway, the
 Veyra token service, and through them the switch and the issuer's gateway — answers with the same
-fields: `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING`) and `responseStatusReason`,
+fields: `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING`, and `RETRY` on payments) and `responseStatusReason`,
 plus a human `message`. **Payments** also carry `responseCode`, an ISO 8583-style code. **Add card**
 carries its own decision in `responseCode`: `APPROVED`, `APPROVE_REQUIRE_AUTH` or `DECLINED` (not an
 ISO number). Other non-payment calls carry no `responseCode`. The SDK passes all of these to your app
@@ -1975,9 +2057,9 @@ One code always means one reason.
 |---|---|---|---|---|
 | `00` | `APPROVED` | `APPROVED` | Approved | Complete |
 | `05` | `DECLINED` | `DO_NOT_HONOR` | The bank refused without a specific reason | Show it; another payment method |
-| `07` | `FAILED` | `ACCOUNT_VALIDATION_FAILED` | The beneficiary account failed validation before any transfer was made; nothing was dispatched | Check the merchant's account details; retry with a new order ID |
+| `07` | `RETRY` | `ACCOUNT_VALIDATION_FAILED` | The merchant's (beneficiary) account failed validation before the debit was requested; nothing was charged | Check the merchant's account details, then retry with the same order ID |
 | `14` | `DECLINED` | `INVALID_TOKEN` | The card token is not valid | The customer should re-add the card |
-| `21` | `FAILED` | `NAME_ENQUIRY_FAILED` | The beneficiary account lookup could not be completed; nothing was dispatched | Retry with a new order ID |
+| `21` | `RETRY` | `NAME_ENQUIRY_FAILED` | The merchant's (beneficiary) account lookup could not be completed; the debit was never requested | Check the merchant's account details, then retry with the same order ID |
 | `51` | `DECLINED` | `INSUFFICIENT_FUNDS` | Not enough funds | Another payment method |
 | `54` | `DECLINED` | `EXPIRED_CARD_OR_TOKEN` | The card or token has expired | Re-add the card |
 | `58` | `DECLINED` | `DOMAIN_RESTRICTION_FAILED` | The card can't be used this way (wrong channel / domain) | Another payment method |
@@ -1989,15 +2071,27 @@ One code always means one reason.
 | `68` | `PENDING` | `NO_RESPONSE_RECEIVED` | A hop timed out | Wait |
 | `06` | `PENDING` | `UPSTREAM_ERROR` | A hop answered with an error | Wait |
 | `96` | `PENDING` | `SYSTEM_MALFUNCTION` | The Veyra payment gateway hit an internal error while processing | Wait; the SDK resolves it |
-| `12` | `FAILED` | `QR_EXPIRED` | QR payments: the payment code expired | Ask for a fresh code |
-| `13` | `FAILED` | `AMOUNT_MISMATCH` | QR payments: amount or currency doesn't match the code | Ask for a fresh code |
-| `25` | `FAILED` | `UNABLE_TO_LOCATE_RECORD` | A status lookup found no such payment | It never arrived; safe to pay again |
-| `30` | `FAILED` | `INVALID_REQUEST` | The gateway refused the request before sending it on | Fix the request; new order ID |
-| `91` | `FAILED` | `ISSUER_SWITCH_NOT_AVAILABLE` | Veyra could not reach the bank | Try again later with a new order ID |
-| `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | This merchant order ID is already used; `originalPayment` carries the payment holding it | Do not take another payment for the order. `originalPayment.responseStatus` `PENDING`: still being confirmed; otherwise already paid. The SDK's `message` says which |
+| `12` | `RETRY` | `QR_EXPIRED` | QR payments: the payment code expired before the debit was requested | Show a new QR for the same order ID |
+| `13` | `RETRY` | `AMOUNT_MISMATCH` | QR payments: amount or currency doesn't match the code | Show a new QR for the same order ID |
+| `25` | `RETRY` | `UNABLE_TO_LOCATE_RECORD` | A status lookup found no such payment | Nothing was charged; the order can be paid (same order ID) |
+| `30` | `RETRY` | `INVALID_REQUEST` | The gateway refused the request before sending it on (validation, caller or device checks) | Fix the request, then retry with the same order ID |
+| `91` | `RETRY` | `ISSUER_SWITCH_NOT_AVAILABLE` | Veyra could not reach the bank, so the debit was never requested | Try again shortly with the same order ID |
+| `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | The order is already paid or possibly paid: an attempt for this order ID is `APPROVED` or `PENDING`. `originalPayment` carries that attempt | Do not take another payment for the order. `originalPayment.responseStatus` `PENDING`: still being confirmed; otherwise already paid. The SDK's `message` says which |
+
+`RETRY` keeps the code and reason the stopping point gave; only the status says "nothing was sent to
+the bank". A QR payment whose code expired or doesn't match may arrive as `30` / `RETRY` with reason
+`QR_EXPIRED` / `AMOUNT_MISMATCH` instead of `12` / `13`, depending on where it was caught — branch on
+the status and reason, never the code. After a `RETRY` on a merchant QR, the QR goes back to unpaid
+(`PENDING`) and stays payable until it expires.
+
+**What `FAILED` means for payments now:** Veyra received the request and didn't perform it, and
+retrying with the same reference won't help. For payments that is mainly `94`. A `FAILED` payment
+doesn't use up the order ID; after `94`, the order is already paid or still being confirmed, so there
+is nothing to retry.
 
 Payment status lookup (`refreshTransactionStatus` in either SDK, or the stored row by reference)
-returns the stored payment's triple from this table, or `25` / `FAILED` / `UNABLE_TO_LOCATE_RECORD`.
+returns the stored payment's triple from this table, or `25` / `RETRY` / `UNABLE_TO_LOCATE_RECORD`
+(no such payment: nothing was charged, and the order can be paid).
 If the lookup itself fails, the result carries a `failureReason` beside the unchanged row and the SDK
 keeps asking in the background — a failed lookup is never the payment's outcome.
 
@@ -2041,7 +2135,7 @@ before trying again. A merchant call with no stored merchant ends `NOT_SENT` / `
 |---|---|---|
 | Merchant registration (`registerPersonalMerchant` / `registerBusinessMerchant`) | `MERCHANT_TYPE_REQUIRED`, `MERCHANT_NAME_REQUIRED`, `EMAIL_ADDRESS_REQUIRED`, `PHONE_NUMBER_REQUIRED`, `ACCOUNT_NUMBER_REQUIRED`, `ADDRESS_LINE_1_REQUIRED`, `CITY_REQUIRED`, `BANK_INSTITUTION_CODE_REQUIRED`, `PAYMENT_APP_PROVIDER_ID_REQUIRED`, `CAC_NUMBER_REQUIRED` | Ask for the missing field |
 | Merchant update / status / activate / deactivate (`updateMerchant`, `refreshStatus`, `activate`, `deactivate`) | `MERCHANT_ID_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST` (the change is not allowed from the current state) | Fix the request / check the merchant's state |
-| QR payment code creation (`createContextPayment`) | `AMOUNT_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST`, `DUPLICATE_MERCHANT_ORDER_ID` (includes the original payment) | Fix the request; a new order ID for a duplicate |
+| QR payment code creation (`createContextPayment`) | `AMOUNT_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST`, `DUPLICATE_MERCHANT_ORDER_ID` (includes the original payment) | Fix the request and create it again with the same order ID. A duplicate means the order is already paid or still being confirmed — don't take another payment for it |
 | Bank lookup (merchant `getBanks`) | `INVALID_ACCOUNT_NUMBER` | Check the account number |
 
 #### Generic fallbacks (any Veyra service, any call)
@@ -2068,7 +2162,7 @@ a decline** — the payment may well have completed, so the one thing you must n
 3. **Finish when it settles** — from `onTransactionResolved` (below), or by reading the row with
    `getTransaction(reference)` / `getLastTransactions()`.
 
-A pending row always converges: it becomes `APPROVED`, `DECLINED` or `FAILED` when the backend
+A pending row always converges: it becomes `APPROVED`, `DECLINED`, `FAILED` or `RETRY` when the backend
 settles it, or it stays `PENDING`. It never turns into an outcome the SDK made up, and there is no
 attempt cap that gives up on it.
 
@@ -2082,7 +2176,7 @@ It will still resolve; it just will not resolve in seconds.
 ```kotlin
 TransactionResolvedObserver.onTransactionResolved { resolution ->
     // resolution.reference    — which payment (you may have more than one pending)
-    // resolution.status       — APPROVED / DECLINED / FAILED (never PENDING)
+    // resolution.status       — APPROVED / DECLINED / FAILED / RETRY (never PENDING)
     // resolution.reason       — e.g. INSUFFICIENT_FUNDS
     // resolution.responseCode — the code, for receipts and support
 }
@@ -2197,9 +2291,9 @@ Registering the same card again replaces its handlers; other cards are unaffecte
 - **`ONLINE_REQUIRED`** (`NOT_SENT`) — the *card* has run out of payment keys. The phone is usually
   online already; the SDK refreshes the card itself, typically within seconds. Don't grey a card out
   on a `NO_NETWORK_CONNECTION` — the card is fine.
-- **`91` / `FAILED` / `ISSUER_SWITCH_NOT_AVAILABLE`** — the request reached Veyra, and Veyra could not
-  reach the bank. The user's connection is not the problem; telling them to check it wastes their
-  time. Try again later with a new order ID.
+- **`91` / `RETRY` / `ISSUER_SWITCH_NOT_AVAILABLE`** — the request reached Veyra, and Veyra could not
+  reach the bank, so nothing was charged. The user's connection is not the problem; telling them to
+  check it wastes their time. Try again shortly with the same order ID.
 
 ### Migrating from 2.x
 
@@ -2217,7 +2311,10 @@ checklist for code written against 2.x:
 | `TokenisationResponse.error` (`TOKENIZATION_ERROR`, `CONFIG_ERROR`, `UNEXPECTED_ERROR`) | Deprecated; those codes are retired. Use `responseStatus` / `responseStatusReason` |
 | Matching `message` text (`"Payment cancelled"`, `"NO_NETWORK_CONNECTION"` inside an exception message, `ONLINE_REQUIRED:` prefixes) | Compare `responseStatusReason` with the reason name (`OutcomeReason.*` for the SDK's own) |
 | `SdkModeException`, `NoActiveCustomerException`, `IllegalArgumentException` / `IllegalStateException` / `VeyraSdkException(MISSING_MANDATORY_CONFIG)` from `initialize` | One type: `VeyraSetupException` with `code` `NOT_CONFIGURED` / `NOT_SIGNED_IN` / `INVALID_CONFIGURATION` / `SESSION_REQUIRED` / `UNSUPPORTED_ON_PLATFORM`. A mode clash during a payment is now `NOT_SENT` / `MODE_REFUSED` |
-| `ResponseStatus` had four values (+ `Unknown`) | It gains `NOT_SENT`. Add the branch: an exhaustive `when` without it no longer compiles |
+| `ResponseStatus` had four values (+ `Unknown`) | It gains `NOT_SENT` and `RETRY`. Add the branches (handle them alike: nothing charged, same order ID): an exhaustive `when` without them no longer compiles |
+| The merchant order ID was single-use: any attempt that reached Veyra used it up, and a retry needed a new one | An order can have several attempts. The same order ID is refused (`94`) only while the order is `APPROVED` or `PENDING`; after `DECLINED`, `FAILED`, `RETRY` or `NOT_SENT`, retry with the **same** order ID. See [The merchant order ID](#the-merchant-order-id) |
+| Payments stopped before the bank was asked ended `FAILED`: `30` `INVALID_REQUEST`, `12` `QR_EXPIRED`, `13` `AMOUNT_MISMATCH`, `07` `ACCOUNT_VALIDATION_FAILED`, `21` `NAME_ENQUIRY_FAILED`, `91` `ISSUER_SWITCH_NOT_AVAILABLE`; a status lookup with no record was `25` / `FAILED` | The same codes and reasons now come with status `RETRY` (nothing was charged, same order ID); `25` on a lookup is `RETRY`. `FAILED` on a payment is now mainly `94` |
+| History rows were `APPROVED` / `DECLINED` / `FAILED` / `PENDING` | `RETRY` rows appear too, one per attempt; group a sale's attempts by `merchantOrderId` |
 
 Unchanged: the wallet tap callback `onTransactionCompleted` (`APPROVED` / `DECLINED` / `ERROR`) and the
 observers. Fields that only make sense on success (`CreatedPaymentContext.txRef` / `mpmPayload`, the
@@ -2587,7 +2684,7 @@ data class VerifiedPaymentContext(
 )
 data class MpmPushOutcome(
     val responseCode: String?,              // "00", "51", "68"… — always populated, quote it verbatim
-    val responseStatus: String?,            // APPROVED · DECLINED · FAILED · PENDING · NOT_SENT — what the payment IS
+    val responseStatus: String?,            // APPROVED · DECLINED · FAILED · PENDING · RETRY · NOT_SENT — what the payment IS
     val message: String?,
     val merchantName: String?,              // registered name from the gateway (beats the QR copy)
     val merchantLocation: String?,          // "city, state" from the gateway; null if not supplied
@@ -2659,7 +2756,7 @@ data class TransactionResponse(             // tap terminal outcome (makeCardPay
     val merchantTransactionReference: String?,  // SDK-MINTED reference — receipt/status lookup key
     val transactionType: String?, val maskedTokenLast4: String?,
     val merchantStatus: String?, val transactionId: String?, val aid: String?,
-    val responseStatus: ResponseStatus?,        // APPROVED / DECLINED / FAILED / PENDING / NOT_SENT / Unknown — branch on this
+    val responseStatus: ResponseStatus?,        // APPROVED / DECLINED / FAILED / PENDING / RETRY / NOT_SENT / Unknown — branch on this
     val responseStatusReason: String?,          // why (e.g. INSUFFICIENT_FUNDS, NO_NETWORK_CONNECTION) — branch on this second
     val creditTransactionId: String?,           // merchant-bank credit id (approved + supported only)
     val isCreditConfirmationSupported: Boolean?, // true ⇒ the SDK will poll and fire onCreditConfirmation
@@ -2667,7 +2764,7 @@ data class TransactionResponse(             // tap terminal outcome (makeCardPay
     @Deprecated val sdkErrorCode: SdkErrorCode? // alias only — branch on responseStatus / responseStatusReason
 )
 
-data class OriginalPayment(                 // the payment already holding a reused order id
+data class OriginalPayment(                 // the attempt that decides the order (see "The merchant order ID")
     val responseCode: String?,
     val responseStatus: String?,            // "APPROVED" (already paid) / "PENDING" (still being confirmed)
     val responseStatusReason: String?,
@@ -2678,12 +2775,12 @@ data class OriginalPayment(                 // the payment already holding a reu
 data class TransactionInfo(                 // history row
     val merchantTransactionReference: String,
     val amount: Long,                       // minor units
-    val transactionStatus: TransactionStatus,   // APPROVED / DECLINED / PENDING / FAILED
+    val transactionStatus: TransactionStatus,   // APPROVED / DECLINED / PENDING / FAILED / RETRY
     val responseCode: String?,
     val responseStatusReason: String?,      // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse
     val transactionTime: String?,           // "yyyy-MM-dd HH:mm:ss"
     val currencyCode: String?, val transactionId: String?,
-    val merchantOrderId: String?,           // your own order id as supplied on the charge; display only
+    val merchantOrderId: String?,           // your own order id as supplied on the charge; groups a sale's attempts
     val cardholderName: String?,            // EMV 5F20, e.g. "AFRIGO ****1234"; null on QR-MPM
     val rail: String,                       // "TAP" / "QR_MPM" / "QR_CPM" — use for logic
     val railLabel: String,                  // "Tap" / "QR" / "Scan" — use for display
@@ -2695,7 +2792,7 @@ data class TransactionInfo(                 // history row
 data class TransactionResolution(           // onTransactionResolved payload (a pending sale settled)
     val reference: String,                  // the sale's merchantTransactionReference — match on this
     val responseCode: String?,              // the wire literal, for receipts and support
-    val status: String,                     // "APPROVED" / "DECLINED" / "FAILED" — never "PENDING"
+    val status: String,                     // "APPROVED" / "DECLINED" / "FAILED" / "RETRY" — never "PENDING"
     val reason: String?                     // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse
 )
 
@@ -2856,6 +2953,7 @@ Camera scan ──► inspectScannedQr
                                         ├─ DECLINED / FAILED ──► refused screen; history row says why
                                         ├─ PENDING ──► "still processing" — never pay again; the SDK resolves it
                                         └─ NOT_SENT (AUTH_CANCELLED, ONLINE_REQUIRED, NO_NETWORK_CONNECTION…)
+                                           or RETRY (reached Veyra, not sent to the bank)
                                                  ──► show the reason, stay on confirm; paying again pays this QR
 ```
 
