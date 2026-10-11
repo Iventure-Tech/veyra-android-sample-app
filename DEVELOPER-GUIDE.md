@@ -171,16 +171,16 @@ val softpos = sdk.softpos   // VeyraSoftPOSSdk
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, customerId, config, provider)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSdkConfig(softpos, wallet)`; `provider` — your `VeyraAssertionProvider` or `VeyraProxyProvider`, shared by both SDKs (see [Connecting to Veyra](#connecting-to-veyra)) | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `IllegalArgumentException` when `customerId` is blank or the provider is unusable (naming the problem). |
+| `initialize(activity, customerId, config, provider)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSdkConfig(softpos, wallet)`; `provider` — your `VeyraAssertionProvider` or `VeyraProxyProvider`, shared by both SDKs (see [Connecting to Veyra](#connecting-to-veyra)) | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `VeyraSetupException` (`INVALID_CONFIGURATION`) when `customerId` is blank or the provider is unusable (naming the problem). |
 | `signOut()` (static) | — | The customer has logged out: stops everything both SDKs run for them and drops every observer registration. Their cards, keys, merchant and history stay on the device for when they sign in again. |
 | `getInstance()` | — | The current instance, or `null` if not yet initialised. |
-| `softpos` | — | The `VeyraSoftPOSSdk`. Throws `IllegalStateException` if that SDK has not been initialised yet (each of your screens initialises its own SDK — see the samples). |
+| `softpos` | — | The `VeyraSoftPOSSdk`. Throws `VeyraSetupException` (`NOT_CONFIGURED`) if that SDK has not been initialised yet (each of your screens initialises its own SDK — see the samples). |
 | `wallet` | — | The `VeyraWalletSdk`. Same behaviour. |
 | `currentMode()` | — | The current exclusive mode (`NfcMode.NONE` / `SOFTPOS` / `WALLET`). Read-only observation for UI state. |
 
 `VeyraSdkConfig` is a simple pair of the two SDK configs: `VeyraSdkConfig(softpos: VeyraSoftPosSdkConfig, wallet: VeyraWalletSdkConfig)`.
 
-**The bypass rule:** with both SDKs on the classpath, initialising them *without* `VeyraSdk.initialize` leaves the app fail-closed — every NFC operation throws `SdkModeException`. This is by design: a combined app that skipped the facade must fail loudly rather than risk receiving and paying at once. Standalone single-SDK apps are unaffected and never see `SdkModeException`.
+**The bypass rule:** with both SDKs on the classpath, initialising them *without* `VeyraSdk.initialize` leaves the app fail-closed — every NFC operation throws `VeyraSetupException` (`INVALID_CONFIGURATION`). This is by design: a combined app that skipped the facade must fail loudly rather than risk receiving and paying at once. Standalone single-SDK apps are unaffected.
 
 ### `VeyraSoftPOSSdk` (merchant features)
 
@@ -194,7 +194,7 @@ val sdk = VeyraSoftPOSSdk.initialize(this, customerId, softposConfig, provider)
 
 | Member | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, customerId, config, provider)` | `activity` — `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSoftPosSdkConfig`; `provider` — the same provider as the wallet's | Initialises (or re-binds) the singleton and signs `customerId` in. Idempotent; re-binds NFC reader + lifecycle to the new activity on every call. The same customer again changes nothing; a different customer stops the previous customer's work and opens the new customer's merchant and transactions. Throws `VeyraSdkException` (`MISSING_MANDATORY_CONFIG`) when the provider is unusable (naming the problem), `IllegalStateException` when a different kind of provider is already in use in this process, and `IllegalArgumentException` when `customerId` is blank. |
+| `initialize(activity, customerId, config, provider)` | `activity` — `AppCompatActivity`; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraSoftPosSdkConfig`; `provider` — the same provider as the wallet's | Initialises (or re-binds) the singleton and signs `customerId` in. Idempotent; re-binds NFC reader + lifecycle to the new activity on every call. The same customer again changes nothing; a different customer stops the previous customer's work and opens the new customer's merchant and transactions. Throws `VeyraSetupException` (`INVALID_CONFIGURATION`) when the provider is unusable, a different kind of provider is already in use in this process, or `customerId` is blank; the message names the problem. |
 | `signOut()` (static) | — | The customer has logged out: stops every poll and watch the SDK runs for them and drops every observer registration. Their merchant and transactions stay on the device. Until the next `initialize` there is no merchant. |
 | `storedMerchant(context, customerId)` (static) | `context`; `customerId` | Init-free read of that customer's stored merchant — see [Merchant status](#merchant-status--isregistered--ismerchantactive--refreshstatus--activate--deactivate). |
 | `isMerchantRegistered(context, customerId)` (static) | `context`; `customerId` | Init-free registration check for that customer. |
@@ -218,7 +218,7 @@ val sdk = VeyraWalletSdk.initialize(context, customerId, walletConfig, provider,
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(context, customerId, config, provider, activity?)` | `context` — app context; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraWalletSdkConfig`; `provider` — the same provider as SoftPOS's; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton and signs `customerId` in. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. The same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. Throws `IllegalArgumentException` when `customerId` is blank or the provider is unusable (naming the problem), and `IllegalStateException` when a different kind of provider is already in use in this process. |
+| `initialize(context, customerId, config, provider, activity?)` | `context` — app context; `customerId` — the customer your app has authenticated (never leaves the device); `config` — `VeyraWalletSdkConfig`; `provider` — the same provider as SoftPOS's; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton and signs `customerId` in. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. The same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. Throws `VeyraSetupException` (`INVALID_CONFIGURATION`) when `customerId` is blank, the provider is unusable, or a different kind of provider is already in use in this process; the message names the problem. |
 | `signOut()` (static) | — | The customer has logged out: stops every loop, poll, worker and observer the SDK runs for them. Their cards, keys, history and receipts stay on the device. Until the next `initialize` there are no cards and a tap is answered "application not found". |
 | `getInstance()` | — | Current instance or `null`. |
 | `tokenisationService` | — | The wallet service — every wallet operation hangs off it. |
@@ -239,7 +239,7 @@ Who is signed in is **your app's** to remember, not the SDK's. The SDK holds it 
 - **A different customer — the SDK switches.** The previous customer's work (key refreshes, status polls, pending-payment checks, background workers) is stopped, and the new customer's cards and merchant are opened from the device.
 - **Sign out with `signOut()`** (`VeyraWalletSdk.signOut()`, `VeyraSoftPOSSdk.signOut()`, or `VeyraSdk.signOut()` in a combined app). It stops every loop, poll, worker and observer for the customer. Their cards, keys, history, merchant and transactions **stay on the device**: when they sign in again nothing is downloaded for a card that still has its keys, and a card without keys gets them in the background after sign-in.
 - **Register observers again after `initialize`.** A sign-out and a switch to another customer both drop every observer registration (`onTransactionResolved`, `onTokenStatusChanged`, `onKeyStateChanged`, `onMerchantStatusChanged`, credit confirmations, refusal handlers). Register them right after each `initialize` call that signs a customer in.
-- **Nobody signed in means no data.** After `signOut()`, and in a fresh process where your app has not called `initialize` yet (the app was killed, the phone restarted), there are no cards and no merchant, and an NFC tap from a terminal is answered "application not found" — no payment is made. A wallet or SoftPOS call that needs the customer's data — cards, payments, the stored merchant, transactions — throws `co.veyra.common.customer.NoActiveCustomerException` (an `IllegalStateException`); catch it to send the user to your sign-in. A request already on its way when the customer signs out still completes for that customer: its answer is kept with their data, and you hear about it when they sign in again. Initialise with the customer as soon as your app knows who they are.
+- **Nobody signed in means no data.** After `signOut()`, and in a fresh process where your app has not called `initialize` yet (the app was killed, the phone restarted), there are no cards and no merchant, and an NFC tap from a terminal is answered "application not found" — no payment is made. A wallet or SoftPOS call that needs the customer's data — cards, payments, the stored merchant, transactions — throws `VeyraSetupException` with `code = NOT_SIGNED_IN`; catch it to send the user to your sign-in. A request already on its way when the customer signs out still completes for that customer: its answer is kept with their data, and you hear about it when they sign in again. Initialise with the customer as soon as your app knows who they are.
 - **The init-free reads take the customer.** `VeyraSoftPOSSdk.storedMerchant(context, customerId)` and `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` read that customer's merchant without signing anyone in.
 - **Re-registering a merchant needs no clear.** A successful registration overwrites the customer's stored merchant.
 
@@ -278,12 +278,12 @@ Rules that hold for every provider:
   own `initialize`. Each SDK still keeps its own token cache and device key.
 - **Exactly one kind.** `initialize` refuses, naming the problem: no provider; a provider that
   implements both interfaces; a `providerType` that contradicts the interface it implements; and a
-  blank `clientId`. SoftPOS throws `VeyraSdkException` with `MISSING_MANDATORY_CONFIG`; the wallet
-  and `VeyraSdk` throw `IllegalArgumentException`. (Kotlin also refuses to compile a class that
+  blank `clientId`. Both SDKs and `VeyraSdk` throw `VeyraSetupException` with
+  `code = INVALID_CONFIGURATION`. (Kotlin also refuses to compile a class that
   implements both, until it overrides `providerType` itself.)
 - **One kind per process, with no fallback.** A `VeyraAssertionProvider` whose `assertion` returns
   nothing fails with `NOT_AUTHENTICATED`; the SDK never tries another method. Initialising again
-  with the other kind throws `IllegalStateException`.
+  with the other kind throws `VeyraSetupException` (`INVALID_CONFIGURATION`).
 - **Initialise re-binds the provider.** The provider you pass on each `initialize` is the one the
   SDK uses from then on — background work included.
 - **A call is never sent without credentials.** When the SDK cannot obtain a token the call fails
@@ -611,7 +611,7 @@ A combined app is always in exactly one mode: **none**, **receiving** (SoftPOS) 
 - **Atomic.** The outgoing capability is fully torn down before the incoming one arms. A merely-armed (untapped) tap payment is cancelled automatically on a switch; a genuinely mid-flight payment refuses the switch instead.
 - **NFC-inert outside paying.** The wallet HCE component is enabled only while paying; otherwise a terminal cannot select a card from the device at all, and taps route to the user's system-default wallet — never Veyra. The wallet HCE vibrates once on a successful tap and twice on decline/error, from the SDK itself.
 
-**Cross-mode refusals.** Payments claim their mode at the point of use, so the only way a claim is refused is while the *other* mode's payment is genuinely mid-flight — the SDK then throws `SdkModeException` (e.g. from `makeCardPayment` during a wallet payment). Treat it as "finish or cancel the current payment first" and prompt the user. **This never occurs in a standalone single-product app.**
+**Cross-mode refusals.** Payments claim their mode at the point of use, so the only way a claim is refused is while the *other* mode's payment is genuinely mid-flight — the payment then ends `NOT_SENT` / `MODE_REFUSED` (e.g. `makeCardPayment` during a wallet payment). Treat it as "finish or cancel the current payment first" and prompt the user. **This never occurs in a standalone single-product app.**
 
 ---
 
@@ -743,17 +743,14 @@ val request = TransactionRequest.Builder(
 // The transaction reference is minted by the SDK — read it back off the response
 // (`response.merchantTransactionReference`) and key your receipts and lookups off that.
 
-try {
-    sdk.cardPaymentService.makeCardPayment(
-        request = request,
-        callback = { response -> runOnUiThread { handleResult(response) } },   // terminal outcomes only
-        onCardDetected = { runOnUiThread { showHint("Card detected — hold steady") } },
-        onUnsupportedCard = { runOnUiThread { showHint("Card not supported — try another card") } },  // stays armed
-        onCardContactLost = { runOnUiThread { showHint("Hold the card steady") } }                    // stays armed
-    )
-} catch (e: SdkModeException) {
-    // Combined apps only: wrong mode — prompt to finish/cancel the other flow first
-}
+sdk.cardPaymentService.makeCardPayment(
+    request = request,
+    // Terminal outcomes only. Combined apps: a wallet payment in flight ends NOT_SENT / MODE_REFUSED.
+    callback = { response -> runOnUiThread { handleResult(response) } },
+    onCardDetected = { runOnUiThread { showHint("Card detected — hold steady") } },
+    onUnsupportedCard = { runOnUiThread { showHint("Card not supported — try another card") } },  // stays armed
+    onCardContactLost = { runOnUiThread { showHint("Hold the card steady") } }                    // stays armed
+)
 ```
 
 **Parameters:**
@@ -1681,13 +1678,37 @@ was sent. Retrying will never help until the code changes.
 **How to use them.** Let them surface in development: crash, log, assert. Fix the integration. Do not
 build user-facing screens for them, and do not offer the user a retry.
 
-| Error | When it happens | Fix |
+Android throws one type for all of them: `co.veyra.common.VeyraSetupException`, an
+`IllegalStateException` whose `code` (`VeyraSetupCode`) is one of five values. The same five names are
+used on iOS and React Native.
+
+| `code` | When it happens | Fix |
 |---|---|---|
-| **Not initialised** — `VeyraSdk.softpos` / `VeyraSdk.wallet` throw `IllegalStateException`; `VeyraSoftPOSSdk.getInstance()` / `VeyraWalletSdk.getInstance()` return `null` | A call is made before `initialize` | Initialise the SDK first, at app start, and use the instance `initialize` returns. |
-| **Not signed in** — `co.veyra.common.customer.NoActiveCustomerException` (an `IllegalStateException`) | A call that needs the customer's data (cards, payments, the stored merchant, transactions) is made after `signOut()`, or in a fresh process before `initialize` | Call `initialize` with the customer before using the SDK. See [Customers](#customers-signing-in-signing-out-switching). |
-| **Invalid configuration** — wallet: `IllegalArgumentException`; SoftPOS: `VeyraSdkException` with `errorCode = MISSING_MANDATORY_CONFIG`; both: `IllegalArgumentException` for a blank `customerId` | `initialize` was given a provider it can't use: none, one that implements both kinds, a `providerType` that doesn't match the interface, or a blank `clientId` | Pass a valid provider. The message names the problem. |
-| **Provider kind changed** — `IllegalStateException` | `initialize` was given a provider of a different kind from an earlier `initialize` in the same process (an assertion provider, then a proxy provider) | Use one kind of provider for the life of the process. See [Choosing a provider](#choosing-a-provider). |
-| **Combined app set up without the facade** — `SdkModeException` | Both SDKs are in the app but were initialised directly rather than through `VeyraSdk`, so the SDK cannot arbitrate NFC between them | Initialise through `VeyraSdk` and let it own the mode. See [Exclusive mode](#exclusive-mode-combined-apps). **Never occurs in a single-SDK app.** |
+| `NOT_CONFIGURED` | Any call before `initialize` — including `VeyraSdk.softpos` / `VeyraSdk.wallet` before that member SDK's `initialize`, and a cold process the app has not initialised yet | Initialise the SDK first, at app start, and use the instance `initialize` returns. |
+| `NOT_SIGNED_IN` | No customer is signed in: a call that needs the customer's data (cards, payments, the stored merchant, transactions) after `signOut()`, or before `initialize` named a customer | Call `initialize` with the customer before using the SDK. See [Customers](#customers-signing-in-signing-out-switching). |
+| `INVALID_CONFIGURATION` | An unusable provider (none, one that implements both kinds, a `providerType` that doesn't match the interface, a blank `clientId`); a provider of a different kind from an earlier `initialize`; a blank `customerId`; missing required config (environment, payment app provider ID, token requestor ID, recommendation standard version); both SDKs initialised without the `VeyraSdk` facade | Fix the configuration. The message names the exact problem. See [Choosing a provider](#choosing-a-provider) and [Exclusive mode](#exclusive-mode-combined-apps). |
+| `SESSION_REQUIRED` | A payment call made without its screen session | Declared on Android for parity; in practice only React Native raises it. The native SDK follows the screen lifecycle itself. |
+| `UNSUPPORTED_ON_PLATFORM` | A method this platform can't perform | Declared on Android for parity; it is raised only for a method a platform cannot perform (for example wallet tap-to-pay on iOS). |
+
+```kotlin
+try {
+    val sdk = VeyraWalletSdk.initialize(context, customerId, config, provider, activity)
+    // ... use sdk
+} catch (e: VeyraSetupException) {
+    when (e.code) {
+        VeyraSetupCode.NOT_SIGNED_IN -> goToSignIn()                 // e.g. after signOut()
+        else -> {
+            Log.e("Veyra", "SDK setup error ${e.code}: ${e.message}")  // a bug to fix, not a user error
+            throw e                                                    // let it fail loudly in development
+        }
+    }
+}
+```
+
+Two conditions that used to throw are now outcomes, because they can happen in a correctly built app:
+the other mode's payment being in flight (combined apps) ends `NOT_SENT` / `MODE_REFUSED`, and a
+payment for a merchant that is not registered ends `NOT_SENT` / `MISSING_MANDATORY_CONFIG` (see
+[Table A](#table-a--outcomes-the-sdk-itself-produces)).
 
 **Cancelling is not an error.** When you cancel an armed payment with
 `cardPaymentService.cancelPendingPayment()`, the reply to the cancel — including "too late"
@@ -1772,8 +1793,8 @@ Four rules follow from this table:
 | `NOT_SENT` | — | `DEVICE_NOT_BOUND` | The card was added on another device | Remove the card and add it again on this phone |
 | `NOT_SENT` | — | `MERCHANT_NOT_ACTIVE` | The merchant account is not active | Contact support |
 | `NOT_SENT` | — | `MERCHANT_PROFILE_INCOMPLETE` | The merchant's account details are missing | Finish merchant setup |
-| `NOT_SENT` | — | `MISSING_MANDATORY_CONFIG` | Terminal / merchant config is missing | Register the merchant / pass the config |
-| `NOT_SENT` | — | `MODE_REFUSED` | Combined apps: the other mode's payment is in progress | Wait for it to finish |
+| `NOT_SENT` | — | `MISSING_MANDATORY_CONFIG` | The merchant is not registered, or terminal / merchant config is missing | Register the merchant / pass the config |
+| `NOT_SENT` | — | `MODE_REFUSED` | Combined apps: the other mode's payment is in flight (e.g. `makeCardPayment` during a wallet payment) | Wait for it to finish, or prompt the user to finish or cancel it |
 | `NOT_SENT` | — | `CARD_READ_FAILED` | Card tap: the card could not be read, so the payment ended before anything was sent | Ask the customer to tap again |
 | `NOT_SENT` | — | `NO_ACTIVE_CARD` | Wallet: no card is set as active (e.g. show QR to pay) | Ask the user to choose a card |
 | `NOT_SENT` | — | `CARD_CANNOT_SHOW_QR` | Wallet: the active card can't produce a QR | Use another card, or tap |
