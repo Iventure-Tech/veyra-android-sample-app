@@ -2367,9 +2367,8 @@ One code always means one reason.
 | `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | The order is already paid or possibly paid: an attempt for this order ID is `APPROVED` or `PENDING`. `originalPayment` carries that attempt | Do not take another payment for the order. `originalPayment.responseStatus` `PENDING`: still being confirmed; otherwise already paid. The SDK's `message` says which |
 
 `RETRY` keeps the code and reason the stopping point gave; only the status says "nothing was sent to
-the bank". A QR payment whose code expired or doesn't match may arrive as `30` / `RETRY` with reason
-`QR_EXPIRED` / `AMOUNT_MISMATCH` instead of `12` / `13`, depending on where it was caught — branch on
-the status and reason, never the code. After a `RETRY` on a merchant QR, the QR goes back to unpaid
+the bank". A QR payment whose code expired or doesn't match is always `12` / `QR_EXPIRED` or
+`13` / `AMOUNT_MISMATCH`, wherever it was caught; branch on the status and reason. After a `RETRY` on a merchant QR, the QR goes back to unpaid
 (`PENDING`) and stays payable until it expires.
 
 **What `FAILED` means for payments now:** Veyra received the request and didn't perform it, and
