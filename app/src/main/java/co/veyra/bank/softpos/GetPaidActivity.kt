@@ -190,8 +190,9 @@ class GetPaidActivity : AppCompatActivity() {
      * which a real integration would take from its POS rather than generate. Required, and unique
      * per merchant across all its payments, whatever their outcome.
      *
-     * An attempt that ended `NOT_SENT` never reached the gateway, so its order id is
-     * unused and the retry carries the **same** one. Any other outcome used it up (the gateway
+     * An attempt that ended `NOT_SENT` never reached the gateway, and one that ended `RETRY`
+     * reached it but was not sent to the bank, so its order id is still usable and the retry
+     * carries the **same** one. Any other outcome used it up (the gateway
      * refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`), so the next attempt gets a new one.
      * A new sale (new amount, new customer QR) always starts a new one.
      */
@@ -201,7 +202,9 @@ class GetPaidActivity : AppCompatActivity() {
         saleOrderId ?: "ORDER-${System.currentTimeMillis()}".also { saleOrderId = it }
 
     private fun attemptEnded(responseStatus: String?) {
-        if (responseStatus != OutcomeStatus.NOT_SENT) saleOrderId = null
+        // NOT_SENT (never reached the gateway) and RETRY (the gateway did not send it on) both leave
+        // the order id usable: the retry carries the same one.
+        if (responseStatus != OutcomeStatus.NOT_SENT && responseStatus != OutcomeStatus.RETRY) saleOrderId = null
     }
 
     /** What "Try again" on the result page does — set only for a NOT_SENT or FAILED outcome. */
@@ -287,8 +290,9 @@ class GetPaidActivity : AppCompatActivity() {
                     details = if (response.responseStatusReason == DUPLICATE_MERCHANT_ORDER_ID)
                         duplicateOrderText(response.originalPayment) else reason,
                 )
-                ResponseStatus.NOT_SENT -> showPaymentResult(
-                    // Nothing reached the gateway: fix the reason, charge the same QR again.
+                ResponseStatus.NOT_SENT, ResponseStatus.RETRY -> showPaymentResult(
+                    // Nothing was charged (never reached the gateway, or the gateway did not send it
+                    // on): fix the reason, charge the same QR again.
                     isSuccess = false,
                     title = getString(R.string.payment_not_sent),
                     message = reason,
@@ -1122,7 +1126,7 @@ class GetPaidActivity : AppCompatActivity() {
             scheduleAutoNavigate()
             return
         }
-        val notSent = responseStatus == OutcomeStatus.NOT_SENT
+        val notSent = responseStatus == OutcomeStatus.NOT_SENT || responseStatus == OutcomeStatus.RETRY
         showPage(PAGE_PAYMENT_RESULT)
         viewReceiptButton.visibility = View.GONE
         showPaymentResult(
@@ -1454,8 +1458,10 @@ class GetPaidActivity : AppCompatActivity() {
                 )
                 showViewReceiptButton()
             }
-            ResponseStatus.NOT_SENT -> {
+            ResponseStatus.NOT_SENT, ResponseStatus.RETRY -> {
                 lastSuccessfulResponse = null
+                // RETRY: the gateway received it and did not send it to the bank — the
+                // same advice as NOT_SENT: nothing was charged, retry with the same order id.
                 // Never reached the gateway (CARD_READ_FAILED, NO_NETWORK_CONNECTION, MODE_REFUSED…):
                 // nothing was charged or recorded, so no receipt. Fix the reason; the retry carries
                 // the SAME order id.
