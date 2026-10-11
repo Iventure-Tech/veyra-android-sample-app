@@ -357,6 +357,7 @@ class PayActivity : AppCompatActivity() {
         while (isActive) {
             kotlinx.coroutines.delay(3000)
             val done = kotlinx.coroutines.CompletableDeferred<Unit>()
+            // A reconcile that could not run carries a failureReason; this loop just asks again.
             sdk.tokenisationService.reconcilePendingTransactions { done.complete(Unit) }
             done.await()
             val row = withContext(Dispatchers.IO) {
@@ -544,7 +545,7 @@ class PayActivity : AppCompatActivity() {
 
     private fun activateNFCForToken(token: Token) {
         try {
-            sdk.tokenisationService.setActiveToken(
+            val selection = sdk.tokenisationService.setActiveToken(
                 tokenId = token.tokenId,
                 activity = this,
                 onTransactionStarted = { tokenId ->
@@ -599,6 +600,14 @@ class PayActivity : AppCompatActivity() {
                     }
                 }
             )
+            // The selection answers synchronously. CARD_DATA_MISSING is already shown by
+            // onActivationFailed above; anything else (CARD_NOT_FOUND) is said here.
+            if (!selection.selected &&
+                selection.responseStatusReason != co.veyra.wallet.sdk.CardSelection.CARD_DATA_MISSING
+            ) {
+                Toast.makeText(this, selection.message ?: "This card can't be selected", Toast.LENGTH_LONG).show()
+                loadCards()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error activating NFC for card", e)
         }

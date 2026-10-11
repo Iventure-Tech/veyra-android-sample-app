@@ -400,18 +400,21 @@ class TransactionDetailActivity : AppCompatActivity() {
         // belonging to any other transaction instead of silently linking it elsewhere.
         sdk.tokenisationService.processReceipt(base64Payload, expectedTransactionHash = summary?.transactionHash) { result ->
             binding.btnScanReceipt.isEnabled = true
-            result.fold(
-                onSuccess = { receipt ->
-                    Toast.makeText(this, "Receipt saved", Toast.LENGTH_SHORT).show()
-                    // Show the receipt immediately
-                    startActivity(ReceiptDetailActivity.intent(this, receipt))
-                    // Refresh button state
-                    summary?.let { bindReceiptButtons(it) }
-                },
-                onFailure = { error ->
-                    Toast.makeText(this, "Could not process receipt: ${error.message}", Toast.LENGTH_LONG).show()
-                }
-            )
+            // An answer, never a throw: APPROVED with the stored receipt, or FAILED with the reason.
+            val receipt = result.receipt
+            if (result.stored && receipt != null) {
+                Toast.makeText(this, "Receipt saved", Toast.LENGTH_SHORT).show()
+                // Show the receipt immediately
+                startActivity(ReceiptDetailActivity.intent(this, receipt))
+                // Refresh button state
+                summary?.let { bindReceiptButtons(it) }
+            } else {
+                Toast.makeText(
+                    this,
+                    co.veyra.bank.outcomeText(result.responseStatusReason, result.message, "Could not process receipt"),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
