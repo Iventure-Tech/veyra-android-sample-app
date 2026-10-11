@@ -826,7 +826,7 @@ Always returns a `CreatedPaymentContext` — never `null`, never a throw for any
 
 #### `contextStatus`
 
-Poll `contextStatus(txRef)` on a short interval (the sample uses 2.5 s). States: `PENDING` (QR live) → `IN_FLIGHT` (wallet push settling) → `APPROVED` / `DECLINED` (settled — `responseCode` carries the rail outcome) or `EXPIRED`. Convenience: `isSettled` (`APPROVED || DECLINED`), `isApproved`. On settlement the payment is also recorded in the merchant's local history under the same `txRef`, so receipts work like any other rail.
+Poll `contextStatus(txRef)` on a short interval (the sample uses 2.5 s). It answers a `PaymentContextStatusResult`: the QR's `status`, or a `failureReason` (`NO_NETWORK_CONNECTION`, `UPSTREAM_ERROR`…) when the poll could not be made — keep the QR on screen and poll again; a failed poll never changes the QR's state and never throws. States: `PENDING` (QR live) → `IN_FLIGHT` (wallet push settling) → `APPROVED` / `DECLINED` (settled — `responseCode` carries the rail outcome) or `EXPIRED`. Convenience: `isSettled` (`APPROVED || DECLINED`), `isApproved`. On settlement the payment is also recorded in the merchant's local history under the same `txRef`, so receipts work like any other rail.
 
 ```kotlin
 val client = ContextPaymentClient(context, Environment.TEST)   // uses the SoftPOS SDK's provider
@@ -845,7 +845,7 @@ renderQrPayload(created.mpmPayload!!)        // encode the string verbatim into 
 val txRef = created.txRef!!
 while (isActive) {
     delay(2500)
-    val status = client.contextStatus(txRef) ?: continue
+    val status = client.contextStatus(txRef).status ?: continue   // poll not made: ask again
     when {
         status.isSettled -> {
             client.cancelQrExpiry()
@@ -1795,7 +1795,7 @@ The three fields have the same meaning everywhere. A few result types name them 
 | `cpmCustomerQrService.charge(...)` (customer QR) | `PaymentResponse` | `responseCode` | `responseStatus` (`ResponseStatus`) | `responseStatusReason` |
 | `cpmCustomerQrService.inspect(...)` | `CpmInspection` | — | `responseStatus` | `responseStatusReason` |
 | `ContextPaymentClient.createContextPayment(...)` (merchant QR) | `CreatedPaymentContext` | — | `responseStatus` | `responseStatusReason` |
-| `contextStatus(txRef)` (merchant QR) | `PaymentContextStatus` | `responseCode` | `responseStatus` | `responseStatusReason` |
+| `contextStatus(txRef)` (merchant QR) | `PaymentContextStatusResult` → `status` (`PaymentContextStatus`) | `responseCode` | `responseStatus` | `responseStatusReason` |
 | `merchantService.registerPersonalMerchant` / `registerBusinessMerchant` | `MerchantRegistrationResponse` | — | `responseStatus` | `responseStatusReason` |
 | `merchantService.activate` / `deactivate` | `MerchantStatusResponse` | — | `responseStatus` | `responseStatusReason` |
 | `merchantService.updateMerchant` | `MerchantUpdateResponse` | — | `responseStatus` | `responseStatusReason` |
@@ -1902,7 +1902,9 @@ fun onOutcome(response: TransactionResponse) {
         ResponseStatus.APPROVED -> showApproved(response.merchantTransactionReference)
         ResponseStatus.DECLINED -> showDeclined(response.message)            // new order id next time
         ResponseStatus.FAILED -> when (response.responseStatusReason) {
-            "DUPLICATE_MERCHANT_ORDER_ID" -> showAlreadyPaid()                // don't take another payment
+            "DUPLICATE_MERCHANT_ORDER_ID" ->                                  // don't take another payment
+                if (response.originalPayment?.responseStatus == "PENDING") showStillConfirming()
+                else showAlreadyPaid()
             else -> showFailed(response.message, retry = true)                // retry gets a new order id
         }
         ResponseStatus.NOT_SENT -> when (response.responseStatusReason) {
@@ -1992,7 +1994,7 @@ One code always means one reason.
 | `25` | `FAILED` | `UNABLE_TO_LOCATE_RECORD` | A status lookup found no such payment | It never arrived; safe to pay again |
 | `30` | `FAILED` | `INVALID_REQUEST` | The gateway refused the request before sending it on | Fix the request; new order ID |
 | `91` | `FAILED` | `ISSUER_SWITCH_NOT_AVAILABLE` | Veyra could not reach the bank | Try again later with a new order ID |
-| `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | This merchant order ID is already used; the response includes the original payment | Read the original's outcome; use a new order ID for a new payment |
+| `94` | `FAILED` | `DUPLICATE_MERCHANT_ORDER_ID` | This merchant order ID is already used; `originalPayment` carries the payment holding it | Do not take another payment for the order. `originalPayment.responseStatus` `PENDING`: still being confirmed; otherwise already paid. The SDK's `message` says which |
 
 Payment status lookup (`refreshTransactionStatus` in either SDK, or the stored row by reference)
 returns the stored payment's triple from this table, or `25` / `FAILED` / `UNABLE_TO_LOCATE_RECORD`.
@@ -2661,7 +2663,16 @@ data class TransactionResponse(             // tap terminal outcome (makeCardPay
     val responseStatusReason: String?,          // why (e.g. INSUFFICIENT_FUNDS, NO_NETWORK_CONNECTION) — branch on this second
     val creditTransactionId: String?,           // merchant-bank credit id (approved + supported only)
     val isCreditConfirmationSupported: Boolean?, // true ⇒ the SDK will poll and fire onCreditConfirmation
+    val originalPayment: OriginalPayment?,      // on DUPLICATE_MERCHANT_ORDER_ID only — see below
     @Deprecated val sdkErrorCode: SdkErrorCode? // alias only — branch on responseStatus / responseStatusReason
+)
+
+data class OriginalPayment(                 // the payment already holding a reused order id
+    val responseCode: String?,
+    val responseStatus: String?,            // "APPROVED" (already paid) / "PENDING" (still being confirmed)
+    val responseStatusReason: String?,
+    val amount: Long?,                      // minor units
+    val merchantTransactionReference: String?, val transactionId: String?
 )
 
 data class TransactionInfo(                 // history row
@@ -2718,8 +2729,14 @@ data class CreatedPaymentContext(
     val txRef: String?, val expiry: String?, val kid: String?,
     val mpmPayload: String?,                // render as the QR; null unless APPROVED
     val responseStatus: String,             // APPROVED / FAILED / PENDING / NOT_SENT
-    val responseStatusReason: String?, val message: String?
+    val responseStatusReason: String?, val message: String?,
+    val originalPayment: OriginalPayment?   // on DUPLICATE_MERCHANT_ORDER_ID only
 ) { val created: Boolean }                  // APPROVED with txRef and mpmPayload
+data class PaymentContextStatusResult(      // contextStatus — a read: never PENDING, never throws
+    val status: PaymentContextStatus?,      // null when the poll could not be made
+    val failureReason: String?,             // null when it was made
+    val message: String?
+) { val checked: Boolean }                  // failureReason == null
 data class PaymentContextStatus(
     val txRef: String,
     val state: String,                      // PENDING / IN_FLIGHT / APPROVED / DECLINED / EXPIRED — the QR's lifecycle
@@ -2743,7 +2760,9 @@ data class ScannedCpmQr(
 data class PaymentResponse(                 // cpmCustomerQrService.charge — always returned
     val responseCode: String?, val responseStatus: ResponseStatus?, val responseStatusReason: String?,
     val message: String?, val merchantStatus: String?, val transactionId: String?,
-    val merchantTransactionReference: String?, val merchantOrderId: String?, /* … */
+    val merchantTransactionReference: String?, val merchantOrderId: String?,
+    val originalPayment: OriginalPayment?,  // on DUPLICATE_MERCHANT_ORDER_ID only
+    /* … */
 )
 ```
 

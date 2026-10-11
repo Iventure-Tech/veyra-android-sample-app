@@ -41,6 +41,8 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import co.veyra.bank.DUPLICATE_MERCHANT_ORDER_ID
+import co.veyra.bank.duplicateOrderText
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
 import co.veyra.common.outcome.OutcomeStatus
@@ -282,7 +284,8 @@ class GetPaidActivity : AppCompatActivity() {
                     title = getString(R.string.declined),
                     message = "Customer QR payment · ${response.responseCode ?: "-"}",
                     amountMinorUnits = scanned.amountMinorUnits,
-                    details = reason,
+                    details = if (response.responseStatusReason == DUPLICATE_MERCHANT_ORDER_ID)
+                        duplicateOrderText(response.originalPayment) else reason,
                 )
                 ResponseStatus.NOT_SENT -> showPaymentResult(
                     // Nothing reached the gateway: fix the reason, charge the same QR again.
@@ -1055,7 +1058,12 @@ class GetPaidActivity : AppCompatActivity() {
             val txRef = created.txRef
             val payload = created.mpmPayload
             if (created.responseStatus != OutcomeStatus.APPROVED || txRef == null || payload == null) {
-                showQrNotCreated(created.responseStatus, outcomeText(created.responseStatusReason, created.message, getString(R.string.qr_create_failed)))
+                showQrNotCreated(
+                    created.responseStatus,
+                    if (created.responseStatusReason == DUPLICATE_MERCHANT_ORDER_ID) duplicateOrderText(created.originalPayment)
+                    else outcomeText(created.responseStatusReason, created.message, getString(R.string.qr_create_failed)),
+                    retryable = created.responseStatusReason != DUPLICATE_MERCHANT_ORDER_ID,
+                )
                 return@launch
             }
             lastOriginalTransactionReference = txRef
@@ -1064,7 +1072,8 @@ class GetPaidActivity : AppCompatActivity() {
             // Poll the context lifecycle until the push settles (or the QR expires).
             while (isActive) {
                 delay(QR_POLL_INTERVAL_MS)
-                val status = client.contextStatus(txRef) ?: continue
+                // A poll that could not be made carries a reason and no state: just ask again.
+                val status = client.contextStatus(txRef).status ?: continue
                 when {
                     status.isSettled -> {
                         showPage(PAGE_PAYMENT_RESULT)
@@ -1103,9 +1112,10 @@ class GetPaidActivity : AppCompatActivity() {
     /**
      * No QR was created. `PENDING`: the create may have gone through — never repeat it; this sale
      * ends and the merchant starts again. `NOT_SENT` (fix the reason, same order id) and `FAILED`
-     * (e.g. `DUPLICATE_MERCHANT_ORDER_ID` — a new order id) offer Try again.
+     * (a new order id) offer Try again — except a duplicate order, which is already paid or still
+     * being confirmed: never take another payment for it.
      */
-    private fun showQrNotCreated(responseStatus: String?, reason: String) {
+    private fun showQrNotCreated(responseStatus: String?, reason: String, retryable: Boolean = true) {
         val placeholder = pageQrWaiting.findViewById<TextView>(R.id.qrPlaceholder)
         if (responseStatus == OutcomeStatus.PENDING) {
             placeholder.text = getString(R.string.outcome_processing)
@@ -1121,7 +1131,7 @@ class GetPaidActivity : AppCompatActivity() {
             message = reason,
             amountMinorUnits = currentAmountMinorUnits,
             details = if (notSent) getString(R.string.payment_not_sent_message) else "",
-            retry = if (notSent || responseStatus == OutcomeStatus.FAILED) {
+            retry = if (retryable && (notSent || responseStatus == OutcomeStatus.FAILED)) {
                 { showPage(PAGE_QR_WAITING) }
             } else null,
         )
@@ -1430,14 +1440,17 @@ class GetPaidActivity : AppCompatActivity() {
             ResponseStatus.FAILED -> {
                 lastSuccessfulResponse = null
                 // Our service received it and could not perform it: fix the reason, and the retry
-                // carries a NEW order id (attemptEnded has already dropped this one).
+                // carries a NEW order id (attemptEnded has already dropped this one). A duplicate
+                // order is the exception: the order is already paid (or still being confirmed), so
+                // the SDK's message says so and there is no retry.
+                val duplicate = response.responseStatusReason == DUPLICATE_MERCHANT_ORDER_ID
                 showPaymentResult(
                     isSuccess = false,
                     title = getString(R.string.payment_failed),
                     message = reason.ifEmpty { "Transaction failed" },
                     amountMinorUnits = currentAmountMinorUnits,
                     details = "",
-                    retry = ::navigateToContactlessAndStartPayment,
+                    retry = if (duplicate) null else ::navigateToContactlessAndStartPayment,
                 )
                 showViewReceiptButton()
             }

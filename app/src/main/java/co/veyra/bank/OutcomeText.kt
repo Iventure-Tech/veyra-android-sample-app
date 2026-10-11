@@ -18,3 +18,17 @@ fun outcomeText(reason: String?, message: String?, fallback: String): String {
         else -> fallback
     }
 }
+
+/** The gateway's refusal of an order ID that is already on another payment. */
+const val DUPLICATE_MERCHANT_ORDER_ID = "DUPLICATE_MERCHANT_ORDER_ID"
+
+/**
+ * What to tell the merchant when the order ID is already on another payment, chosen from that
+ * payment's status: already paid, or still being confirmed. Never "try again".
+ */
+fun duplicateOrderText(original: co.veyra.softpos.payment.sdk.payment.OriginalPayment?): String =
+    co.veyra.softpos.payment.sdk.payment.PaymentOutcomeMessage.of(
+        co.veyra.softpos.payment.sdk.payment.ResponseStatus.FAILED,
+        reason = DUPLICATE_MERCHANT_ORDER_ID,
+        originalStatus = original?.responseStatus,
+    )
