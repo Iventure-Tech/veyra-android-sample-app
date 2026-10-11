@@ -190,13 +190,11 @@ class GetPaidActivity : AppCompatActivity() {
 
     /**
      * The order id of the sale on screen — a stand-in for the till's own order/basket/invoice id,
-     * which a real integration would take from its POS rather than generate. Required, and unique
-     * per merchant across all its payments, whatever their outcome.
+     * which a real integration would take from its POS rather than generate. Required.
      *
-     * An attempt that ended `NOT_SENT` never reached the gateway, and one that ended `RETRY`
-     * reached it but was not sent to the bank, so its order id is still usable and the retry
-     * carries the **same** one. Any other outcome used it up (the gateway
-     * refuses a reused one with `DUPLICATE_MERCHANT_ORDER_ID`), so the next attempt gets a new one.
+     * An order can have several attempts. After `NOT_SENT`, `RETRY`, `DECLINED` or `FAILED` no money
+     * moved, so the retry carries the **same** order id. After `APPROVED` or `PENDING` the gateway
+     * refuses another payment for the order (`DUPLICATE_MERCHANT_ORDER_ID`), so it is dropped.
      * A new sale (new amount, new customer QR) always starts a new one.
      */
     private var saleOrderId: String? = null
@@ -205,9 +203,9 @@ class GetPaidActivity : AppCompatActivity() {
         saleOrderId ?: "ORDER-${System.currentTimeMillis()}".also { saleOrderId = it }
 
     private fun attemptEnded(responseStatus: String?) {
-        // NOT_SENT (never reached the gateway) and RETRY (the gateway did not send it on) both leave
-        // the order id usable: the retry carries the same one.
-        if (responseStatus != OutcomeStatus.NOT_SENT && responseStatus != OutcomeStatus.RETRY) saleOrderId = null
+        // Keep the order id for the retry unless the order is paid or may be (APPROVED / PENDING,
+        // or a status this build does not know — unresolved is treated as pending).
+        if (responseStatus !in REUSABLE_ORDER_STATUSES) saleOrderId = null
     }
 
     /**
@@ -228,6 +226,11 @@ class GetPaidActivity : AppCompatActivity() {
             CancelAction.LEAVE -> navigateToAmountEntry()
         }
     }
+
+    /** Outcomes after which no money moved, so the same order id may be paid again. */
+    private val REUSABLE_ORDER_STATUSES = setOf(
+        OutcomeStatus.NOT_SENT, OutcomeStatus.RETRY, OutcomeStatus.DECLINED, OutcomeStatus.FAILED,
+    )
 
     /** What "Try again" on the result page does — set only for a NOT_SENT or FAILED outcome. */
     private var retryAction: (() -> Unit)? = null
@@ -1010,7 +1013,7 @@ class GetPaidActivity : AppCompatActivity() {
             returnToHome()
         }
         
-        // Try again — the same sale (same order id after NOT_SENT, a new one after FAILED).
+        // Try again — the same sale, with the same order id (no money moved).
         retryButton.setOnClickListener { retryAction?.invoke() }
 
         // View Receipt - navigate to receipt page
@@ -1024,6 +1027,7 @@ class GetPaidActivity : AppCompatActivity() {
         pageTransactionsList.findViewById<View>(R.id.backButton).setOnClickListener {
             showPage(PAGE_AMOUNT_ENTRY)
         }
+        pageTransactionsList.findViewById<View>(R.id.lookupOrderButton).setOnClickListener { askOrderToLookUp() }
         
         // Transaction detail: back button
         pageTransactionDetail.findViewById<View>(R.id.backButton).setOnClickListener {
@@ -1155,9 +1159,53 @@ class GetPaidActivity : AppCompatActivity() {
     }
 
     /**
+     * "What happened to this order?" by your own order id — e.g. after the app restarted before a
+     * result arrived, or for a PENDING sale. One call for every rail (tap, merchant QR, customer QR).
+     */
+    private fun askOrderToLookUp() {
+        val input = android.widget.EditText(this).apply { hint = getString(R.string.lookup_order_hint) }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.lookup_order)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ -> lookUpOrder(input.text.toString()) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun lookUpOrder(orderId: String) {
+        lifecycleScope.launch {
+            // A read: never thrown (except a setup mistake). failureReason says why the gateway could
+            // not be asked; value is then what this phone holds for the order, if anything.
+            val lookup = sdk.transactionService.paymentStatus(orderId)
+            val order = lookup.value
+            val text = buildString {
+                if (order != null) {
+                    append(
+                        when (order.responseStatus) {
+                            OutcomeStatus.APPROVED -> "Paid — do not take another payment for this order."
+                            OutcomeStatus.PENDING -> "A payment may still be going through — do not take another payment yet."
+                            else -> "Not paid (${order.responseStatus}${order.responseStatusReason?.let { " · $it" } ?: ""}) — you can take a payment with the same order id."
+                        },
+                    )
+                    append("\n\nAttempts: ${order.attempts.size} · answered by ${order.answeredBy.lowercase()}")
+                    order.merchantTransactionReference?.let { append("\nReference: $it") }
+                } else {
+                    append("No record of this order on this device.")
+                }
+                lookup.failureReason?.let { append("\n\nCould not ask the gateway: ${outcomeText(it, lookup.message, it)}") }
+            }
+            androidx.appcompat.app.AlertDialog.Builder(this@GetPaidActivity)
+                .setTitle("Order $orderId")
+                .setMessage(text)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
+    }
+
+    /**
      * No QR was created. `PENDING`: the create may have gone through — never repeat it; this sale
-     * ends and the merchant starts again. `NOT_SENT` (fix the reason, same order id) and `FAILED`
-     * (a new order id) offer Try again — except a duplicate order, which is already paid or still
+     * ends and the merchant starts again. `NOT_SENT` / `RETRY` (fix the reason) and `FAILED` offer
+     * Try again with the same order id — except a duplicate order, which is already paid or still
      * being confirmed: never take another payment for it.
      */
     private fun showQrNotCreated(responseStatus: String?, reason: String, retryable: Boolean = true) {
@@ -1473,7 +1521,8 @@ class GetPaidActivity : AppCompatActivity() {
             }
             ResponseStatus.DECLINED -> {
                 lastSuccessfulResponse = null
-                // An authority refused: done. A new attempt is a new sale (new order id).
+                // An authority refused: no money moved. Another attempt (another card, say) may use the
+                // same order id.
                 showPaymentResult(
                     isSuccess = false,
                     title = getString(R.string.payment_failed),
@@ -1485,8 +1534,8 @@ class GetPaidActivity : AppCompatActivity() {
             }
             ResponseStatus.FAILED -> {
                 lastSuccessfulResponse = null
-                // Our service received it and could not perform it: fix the reason, and the retry
-                // carries a NEW order id (attemptEnded has already dropped this one). A duplicate
+                // Our service received it and could not perform it: no money moved, so fix the reason
+                // and the retry carries the SAME order id (attemptEnded kept it). A duplicate
                 // order is the exception: the order is already paid (or still being confirmed), so
                 // the SDK's message says so and there is no retry.
                 val duplicate = response.responseStatusReason == DUPLICATE_MERCHANT_ORDER_ID
