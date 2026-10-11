@@ -11,6 +11,9 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import co.veyra.bank.R
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeReason
+import co.veyra.common.outcome.OutcomeStatus
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -197,34 +200,35 @@ class TransactionDetailActivity : AppCompatActivity() {
         binding.txDetailStatusCheckNote.visibility = View.VISIBLE
 
         lifecycleScope.launch {
-            runCatching {
-                sdk.tokenisationService.refreshTransactionStatus(transactionHash)
-            }.onSuccess { fresh ->
-                if (fresh != null) {
-                    summary = fresh
-                    bindSummary(fresh)
-                }
-                val resolved = fresh?.authorizationStatus?.trim()?.uppercase() in
-                    setOf("APPROVED", "DECLINED", "FAILED")
-                if (resolved) {
-                    // bindSummary has already re-rendered the status line and hidden this button.
-                    binding.txDetailStatusCheckNote.visibility = View.GONE
-                } else {
-                    // Still unsettled — the honest answer, never a failure.
-                    binding.txDetailStatusCheckNote.text =
-                        getString(R.string.status_check_still_pending)
+            val refresh = sdk.tokenisationService.refreshTransactionStatus(transactionHash)
+            // Whatever happened, show the row as it now stands — a check that could not be made
+            // leaves it exactly as it was.
+            refresh.transaction?.let { fresh ->
+                summary = fresh
+                bindSummary(fresh)
+            }
+            val failureReason = refresh.failureReason
+            when {
+                failureReason != null -> {
+                    // An offline device gets the one piece of advice that helps. A failed check is
+                    // never an outcome.
+                    binding.txDetailStatusCheckNote.text = if (failureReason == OutcomeReason.NO_NETWORK_CONNECTION) {
+                        getString(R.string.status_check_offline)
+                    } else {
+                        getString(R.string.status_check_failed, outcomeText(failureReason, refresh.message, failureReason))
+                    }
                     binding.btnCheckStatus.isEnabled = true
                 }
-            }.onFailure { e ->
-                // An offline device gets the one piece of advice that helps. The row is untouched
-                // either way — a failed check is never an outcome.
-                val offline = e.message?.contains("NO_NETWORK_CONNECTION") == true
-                binding.txDetailStatusCheckNote.text = if (offline) {
-                    getString(R.string.status_check_offline)
-                } else {
-                    getString(R.string.status_check_failed, e.message ?: "unknown error")
+                refresh.transaction?.authorizationStatus in
+                    setOf(OutcomeStatus.APPROVED, OutcomeStatus.DECLINED, OutcomeStatus.FAILED) -> {
+                    // bindSummary has already re-rendered the status line and hidden this button.
+                    binding.txDetailStatusCheckNote.visibility = View.GONE
                 }
-                binding.btnCheckStatus.isEnabled = true
+                else -> {
+                    // Still unsettled — the honest answer, never a failure.
+                    binding.txDetailStatusCheckNote.text = getString(R.string.status_check_still_pending)
+                    binding.btnCheckStatus.isEnabled = true
+                }
             }
         }
     }
@@ -313,32 +317,31 @@ class TransactionDetailActivity : AppCompatActivity() {
         binding.txDetailCreditCheckNote.visibility = View.VISIBLE
 
         lifecycleScope.launch {
-            runCatching {
-                sdk.tokenisationService.refreshCreditConfirmation(transactionHash)
-            }.onSuccess { fresh ->
-                if (fresh != null) {
-                    summary = fresh
-                    bindSummary(fresh)
-                }
-                if (fresh?.creditConfirmationStatus == "RECEIVED") {
-                    // bindSummary has already re-rendered the credit line and hidden the button.
-                    binding.txDetailCreditCheckNote.visibility = View.GONE
-                } else {
-                    // Not confirmed **yet** — the honest answer, never "not received".
-                    binding.txDetailCreditCheckNote.text =
-                        getString(R.string.credit_check_still_unconfirmed)
-                    binding.btnCheckMerchantCredit.isEnabled = true
-                }
-            }.onFailure { e ->
-                // An offline device gets the one piece of advice that helps. The row is untouched
-                // either way — a failed check is never a settlement answer.
-                binding.txDetailCreditCheckNote.text =
-                    if (e.message?.contains("NO_NETWORK_CONNECTION") == true) {
+            val refresh = sdk.tokenisationService.refreshCreditConfirmation(transactionHash)
+            refresh.transaction?.let { fresh ->
+                summary = fresh
+                bindSummary(fresh)
+            }
+            val failureReason = refresh.failureReason
+            when {
+                failureReason != null -> {
+                    // An offline device gets the one piece of advice that helps. The row is untouched
+                    // either way — a failed check is never a settlement answer.
+                    binding.txDetailCreditCheckNote.text = if (failureReason == OutcomeReason.NO_NETWORK_CONNECTION) {
                         getString(R.string.credit_check_offline)
                     } else {
-                        getString(R.string.credit_check_failed, e.message ?: "unknown error")
+                        getString(R.string.credit_check_failed, outcomeText(failureReason, refresh.message, failureReason))
                     }
-                binding.btnCheckMerchantCredit.isEnabled = true
+                    binding.btnCheckMerchantCredit.isEnabled = true
+                }
+                // bindSummary has already re-rendered the credit line and hidden the button.
+                refresh.transaction?.creditConfirmationStatus == "RECEIVED" ->
+                    binding.txDetailCreditCheckNote.visibility = View.GONE
+                else -> {
+                    // Not confirmed **yet** — the honest answer, never "not received".
+                    binding.txDetailCreditCheckNote.text = getString(R.string.credit_check_still_unconfirmed)
+                    binding.btnCheckMerchantCredit.isEnabled = true
+                }
             }
         }
     }

@@ -9,6 +9,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import co.veyra.bank.R
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeReason
+import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.bank.databinding.ActivityTokenizationRequestBinding
 import co.veyra.wallet.sdk.AccountNumberSource
 import co.veyra.wallet.sdk.Bank
@@ -113,64 +116,64 @@ class TokenizationRequestActivity : AppCompatActivity() {
         selectedBank = null
         sdk.tokenisationService.getBanks(accountNumber) { result ->
             lifecycleScope.launch(Dispatchers.Main) {
-                result.fold(
-                    onSuccess = { bankList ->
-                        banks = bankList
-                        val displayItems = bankList.map { it.name } + getString(R.string.cant_find_my_bank)
-                        val adapter = ArrayAdapter(
+                if (result.responseStatus != OutcomeStatus.APPROVED) {
+                    // A read, so never PENDING: NOT_SENT (offline…) or FAILED. Say why, instead of
+                    // claiming the account has no banks.
+                    binding.bankAutoComplete.setText(
+                        if (result.responseStatusReason == OutcomeReason.NO_NETWORK_CONNECTION) {
+                            getString(R.string.no_network_connection)
+                        } else {
+                            outcomeText(result.responseStatusReason, result.message, getString(R.string.no_banks_found))
+                        },
+                        false,
+                    )
+                    banks = emptyList()
+                    return@launch
+                }
+                val bankList = result.banks
+                banks = bankList
+                val displayItems = bankList.map { it.name } + getString(R.string.cant_find_my_bank)
+                val adapter = ArrayAdapter(
+                    this@TokenizationRequestActivity,
+                    R.layout.item_bank_dropdown,
+                    android.R.id.text1,
+                    displayItems
+                )
+                binding.bankAutoComplete.setAdapter(adapter)
+                binding.bankAutoComplete.threshold = 1
+                binding.bankAutoComplete.setDropDownBackgroundResource(R.drawable.dropdown_background)
+                binding.bankAutoComplete.setOnItemClickListener { _, _, position, _ ->
+                    if (position == banks.size) {
+                        // "Can't find my bank" clicked - fetch full bank list
+                        fetchBanks(null)
+                    } else {
+                        selectedBank = banks.getOrNull(position)
+                    }
+                }
+                if (bankList.isEmpty()) {
+                    binding.bankAutoComplete.setText(getString(R.string.no_banks_found), false)
+                } else {
+                    binding.bankAutoComplete.setText("", false)
+                    binding.bankInputLayout.hint = getString(R.string.bank_hint)
+                    if (bankList.size == 1 && accountNumber != null) {
+                        selectedBank = bankList.first()
+                        binding.bankAutoComplete.setText(selectedBank!!.name, false)
+                        // Bank is pre-selected — replace adapter so the dropdown only offers
+                        // "Can't find my bank" and doesn't echo the already-visible bank name.
+                        val changeAdapter = ArrayAdapter(
                             this@TokenizationRequestActivity,
                             R.layout.item_bank_dropdown,
                             android.R.id.text1,
-                            displayItems
+                            listOf(getString(R.string.cant_find_my_bank))
                         )
-                        binding.bankAutoComplete.setAdapter(adapter)
-                        binding.bankAutoComplete.threshold = 1
-                        binding.bankAutoComplete.setDropDownBackgroundResource(R.drawable.dropdown_background)
-                        binding.bankAutoComplete.setOnItemClickListener { _, _, position, _ ->
-                            if (position == banks.size) {
-                                // "Can't find my bank" clicked - fetch full bank list
-                                fetchBanks(null)
-                            } else {
-                                selectedBank = banks.getOrNull(position)
-                            }
+                        binding.bankAutoComplete.setAdapter(changeAdapter)
+                        binding.bankAutoComplete.setOnItemClickListener { _, _, _, _ ->
+                            fetchBanks(null)
                         }
-                        if (bankList.isEmpty()) {
-                            binding.bankAutoComplete.setText(getString(R.string.no_banks_found), false)
-                        } else {
-                            binding.bankAutoComplete.setText("", false)
-                            binding.bankInputLayout.hint = getString(R.string.bank_hint)
-                            if (bankList.size == 1 && accountNumber != null) {
-                                selectedBank = bankList.first()
-                                binding.bankAutoComplete.setText(selectedBank!!.name, false)
-                                // Bank is pre-selected — replace adapter so the dropdown only offers
-                                // "Can't find my bank" and doesn't echo the already-visible bank name.
-                                val changeAdapter = ArrayAdapter(
-                                    this@TokenizationRequestActivity,
-                                    R.layout.item_bank_dropdown,
-                                    android.R.id.text1,
-                                    listOf(getString(R.string.cant_find_my_bank))
-                                )
-                                binding.bankAutoComplete.setAdapter(changeAdapter)
-                                binding.bankAutoComplete.setOnItemClickListener { _, _, _, _ ->
-                                    fetchBanks(null)
-                                }
-                            } else if (accountNumber == null) {
-                                binding.bankAutoComplete.showDropDown()
-                            }
-                        }
-                    },
-                    onFailure = { error ->
-                        // An offline device says so, instead of claiming the account has no banks.
-                        // The wallet SDK's failure idiom is a stable code prefix on the message
-                        // (the same shape as ONLINE_REQUIRED:) — see the developer guide.
-                        val offline = error.message?.contains("NO_NETWORK_CONNECTION") == true
-                        binding.bankAutoComplete.setText(
-                            getString(if (offline) R.string.no_network_connection else R.string.no_banks_found),
-                            false,
-                        )
-                        banks = emptyList()
+                    } else if (accountNumber == null) {
+                        binding.bankAutoComplete.showDropDown()
                     }
-                )
+                }
             }
         }
     }
@@ -227,37 +230,30 @@ class TokenizationRequestActivity : AppCompatActivity() {
             .accountNumberSource(AccountNumberSource.MANUAL)
             .build()
 
-        sdk.tokenisationService.checkAccountEligibility(params) { verifyResult ->
-            verifyResult.fold(
-                onSuccess = { verifyResponse ->
-                    if (verifyResponse.responseCode?.uppercase() == "APPROVED") {
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            startActivity(
-                                AccountEligibilityActivity.intent(
-                                    this@TokenizationRequestActivity,
-                                    accountNumber,
-                                    bank.institutionCode,
-                                    bank.name,
-                                    customerId,
-                                    accountName,
-                                    bvn,
-                                    email,
-                                )
-                            )
-                            finish()
-                        }
-                    } else {
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            showEligibilityError(verifyResponse.message ?: getString(R.string.error_occurred))
-                        }
-                    }
-                },
-                onFailure = { error ->
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        showEligibilityError(error.message ?: getString(R.string.error_occurred))
-                    }
+        sdk.tokenisationService.checkAccountEligibility(params) { response ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                if (response.responseStatus == OutcomeStatus.APPROVED) {
+                    startActivity(
+                        AccountEligibilityActivity.intent(
+                            this@TokenizationRequestActivity,
+                            accountNumber,
+                            bank.institutionCode,
+                            bank.name,
+                            customerId,
+                            accountName,
+                            bvn,
+                            email,
+                        )
+                    )
+                    finish()
+                } else {
+                    // A read, so never PENDING: DECLINED / FAILED (the account is not eligible) or
+                    // NOT_SENT (fix the reason — e.g. reconnect — and check again).
+                    showEligibilityError(
+                        outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)),
+                    )
                 }
-            )
+            }
         }
     }
 

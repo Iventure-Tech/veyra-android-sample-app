@@ -12,6 +12,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityActivationOtpBinding
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.wallet.sdk.ActivationCodeReason
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.VeyraWalletSdk
@@ -87,20 +89,21 @@ class ActivationOtpActivity : AppCompatActivity() {
             selectedActivationMethod = method,
             preferredActivationChannel = method,
             reasonCode = ActivationCodeReason.ADD_CARD
-        ) { result ->
-            result.fold(
-                onSuccess = { response ->
-                    if (response.status?.uppercase() == "FAILURE") {
-                        Toast.makeText(this, response.message ?: getString(R.string.error_occurred), Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(this, getString(R.string.activation_code_sent), Toast.LENGTH_SHORT).show()
-                        response.expirationDateTime?.let { startCountdown(it) }
-                    }
-                },
-                onFailure = { e ->
-                    Toast.makeText(this, getString(R.string.error_occurred) + ": " + (e.message ?: ""), Toast.LENGTH_LONG).show()
+        ) { response ->
+            when (response.responseStatus) {
+                OutcomeStatus.APPROVED -> {
+                    Toast.makeText(this, getString(R.string.activation_code_sent), Toast.LENGTH_SHORT).show()
+                    response.expirationDateTime?.let { startCountdown(it) }
                 }
-            )
+                // The code may already be on its way — don't ask again.
+                OutcomeStatus.PENDING ->
+                    Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
+                // NOT_SENT or FAILED: say why, and offer Resend again.
+                else -> {
+                    Toast.makeText(this, outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)), Toast.LENGTH_LONG).show()
+                    binding.resendButton.visibility = View.VISIBLE
+                }
+            }
         }
     }
 
@@ -190,24 +193,25 @@ class ActivationOtpActivity : AppCompatActivity() {
         sdk.tokenisationService.activate(
             tokenUniqueReference = ref,
             activationCode = code
-        ) { result ->
-            binding.submitButton.isEnabled = true
-            result.fold(
-                onSuccess = { response ->
-                    if (response.status?.uppercase() == "SUCCESS") {
-                        Toast.makeText(this, response.message ?: getString(R.string.activation_code_submitted), Toast.LENGTH_SHORT).show()
-                        startActivity(
-                            Intent(this, PayActivity::class.java)
-                                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        )
-                    } else {
-                        Toast.makeText(this, response.message ?: getString(R.string.error_occurred), Toast.LENGTH_LONG).show()
-                    }
-                },
-                onFailure = { e ->
-                    Toast.makeText(this, getString(R.string.error_occurred) + ": " + (e.message ?: ""), Toast.LENGTH_LONG).show()
+        ) { response ->
+            when (response.responseStatus) {
+                OutcomeStatus.APPROVED -> {
+                    Toast.makeText(this, response.message ?: getString(R.string.activation_code_submitted), Toast.LENGTH_SHORT).show()
+                    startActivity(
+                        Intent(this, PayActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    )
                 }
-            )
+                // The code may have been accepted — don't submit it again; the wallet picks up the
+                // card's new state on its own.
+                OutcomeStatus.PENDING ->
+                    Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
+                // NOT_SENT (fix the reason, submit again) or FAILED (e.g. CODE_INVALID): say why.
+                else -> {
+                    binding.submitButton.isEnabled = true
+                    Toast.makeText(this, outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)), Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 

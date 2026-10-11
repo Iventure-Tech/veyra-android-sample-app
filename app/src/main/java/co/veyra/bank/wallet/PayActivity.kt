@@ -18,6 +18,8 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityPayBinding
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.wallet.sdk.ActivationMethod
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.Environment
@@ -26,7 +28,6 @@ import co.veyra.wallet.sdk.TransactionSummary
 import co.veyra.wallet.sdk.VeyraWalletSdkConfig
 import co.veyra.wallet.sdk.Token
 import co.veyra.wallet.sdk.TransactionResponse
-import co.veyra.wallet.sdk.exception.WalletRefusalException
 import co.veyra.wallet.sdk.util.CurrencyUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -176,16 +177,22 @@ class PayActivity : AppCompatActivity() {
     }
 
     private fun removeToken(tokenUniqueReference: String) {
-        sdk.tokenisationService.deactivateToken(tokenUniqueReference) { result ->
-            result.fold(
-                onSuccess = {
+        sdk.tokenisationService.deactivateToken(tokenUniqueReference) { response ->
+            when (response.responseStatus) {
+                OutcomeStatus.APPROVED -> {
                     Toast.makeText(this, "Card removed", Toast.LENGTH_SHORT).show()
                     loadCards()
-                },
-                onFailure = { error ->
-                    Toast.makeText(this, "Failed to remove card: ${error.message}", Toast.LENGTH_LONG).show()
                 }
-            )
+                // The removal may have gone through — don't send it again.
+                OutcomeStatus.PENDING ->
+                    Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
+                // NOT_SENT or FAILED: the card is still there; say why.
+                else -> Toast.makeText(
+                    this,
+                    "Failed to remove card: " + outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
@@ -235,22 +242,35 @@ class PayActivity : AppCompatActivity() {
             amountMinorUnits,
             onExpired = { onQrExpired?.invoke() },
         ) { result ->
-            result.fold(
-                onSuccess = { qr -> showPaymentQrDialog(qr, amountText) },
-                onFailure = { e ->
-                    // A device-not-bound refusal has already been shown by the onDeviceNotBound
-                    // callback registered when this card was armed; don't say it twice.
-                    if (e !is WalletRefusalException.DeviceNotBound) {
-                        Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
-                    }
-                },
-            )
+            // The Result fails only on a setup mistake (VeyraSetupException) — a bug in this app's
+            // integration, found in development. Every refusal is an outcome on the QR itself.
+            val qr = result.getOrElse { setupError ->
+                Log.e(TAG, "showQrToPay: setup error", setupError)
+                Toast.makeText(this, setupError.message, Toast.LENGTH_LONG).show()
+                return@showQrToPay
+            }
+            when {
+                qr.responseStatus == OutcomeStatus.APPROVED -> showPaymentQrDialog(qr, amountText)
+                // NOT_SENT: no QR was made (AUTH_CANCELLED, ONLINE_REQUIRED…). A device-not-bound
+                // refusal has already been shown by the onDeviceNotBound callback registered when
+                // this card was armed; don't say it twice.
+                qr.responseStatusReason == "DEVICE_NOT_BOUND" -> Unit
+                else -> Toast.makeText(
+                    this,
+                    outcomeText(qr.responseStatusReason, qr.message, getString(R.string.error_occurred)),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
     private fun showPaymentQrDialog(qr: co.veyra.wallet.sdk.CpmPaymentQr, amountText: String) {
+        // An APPROVED render always carries these three.
+        val payload = checkNotNull(qr.payload)
+        val tokenUniqueReference = checkNotNull(qr.tokenUniqueReference)
+        val transactionHash = checkNotNull(qr.transactionHash)
         val density = resources.displayMetrics.density
-        val qrBitmap = encodeQrBitmap(qr.payload)
+        val qrBitmap = encodeQrBitmap(payload)
         val qrImage = android.widget.ImageView(this).apply {
             setPadding((24 * density).toInt(), (24 * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
             setImageBitmap(qrBitmap)
@@ -300,7 +320,7 @@ class PayActivity : AppCompatActivity() {
         // Poll the gateway reconcile directly every 3s while the QR is up,
         // so the outcome lands within seconds of the merchant charging — not on WorkManager's
         // schedule. Stops on settle or when the dialog is dismissed.
-        val settlePoll = startCpmSettlePolling(qr.tokenUniqueReference, qr.transactionHash) { approved, merchant ->
+        val settlePoll = startCpmSettlePolling(tokenUniqueReference, transactionHash) { approved, merchant ->
             // Settled — stop the expiry watch so it can't later overwrite the outcome with "Expired".
             onQrExpired = null
             sdk.tokenisationService.cancelQrExpiry()

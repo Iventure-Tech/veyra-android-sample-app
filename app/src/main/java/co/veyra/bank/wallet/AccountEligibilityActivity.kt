@@ -8,6 +8,8 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import co.veyra.bank.R
+import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.bank.databinding.ActivityAccountEligibilityBinding
 import co.veyra.wallet.sdk.AccountNumberSource
 import co.veyra.wallet.sdk.ActivationMethods
@@ -75,7 +77,10 @@ class AccountEligibilityActivity : AppCompatActivity() {
     }
 
     private fun handleDigitizeResponse(response: TokenisationResponse) {
-        if (response.isSuccess) {
+        // Digitise is never PENDING: APPROVED (the response code says whether the card still needs
+        // activating), or DECLINED / FAILED / NOT_SENT with the reason — a new attempt starts a new
+        // digitisation.
+        if (response.responseStatus == OutcomeStatus.APPROVED) {
             when (response.responseCode?.uppercase()) {
                 ActivationMethods.ResponseCode.APPROVED -> {
                     Toast.makeText(this, getString(R.string.tokenization_request_success), Toast.LENGTH_SHORT).show()
@@ -104,10 +109,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
                 }
             }
         } else {
-            val errorMessage = response.error?.message
-                ?: response.message
-                ?: getString(R.string.error_occurred)
-            showError(errorMessage)
+            showError(outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)))
             binding.addToWalletButton.isEnabled = true
             binding.addToWalletButton.text = getString(R.string.add_to_wallet)
         }

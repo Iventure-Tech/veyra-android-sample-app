@@ -226,6 +226,14 @@
     <string name="status_check_failed">Could not check right now: %1$s</string>
     <string name="status_check_offline">No internet connection — connect and try again.</string>
     <!--
+      The five outcome statuses. PENDING means the request may have been done — never repeat it;
+      the SDK resolves it. NOT_SENT means nothing was done — fix the reason and try again (the same
+      order). FAILED / DECLINED used the order up — a new attempt is a new order.
+    -->
+    <string name="outcome_processing">Still processing — please don\'t repeat it.</string>
+    <string name="payment_not_sent">Payment not sent</string>
+    <string name="payment_not_sent_message">Nothing was charged. Fix the problem and try again.</string>
+    <!--
       The manual "check merchant credit now" beside the SDK's own backoff sweep. Shown only on an
       approved row whose bank is on the confirmation rail and whose credit is not yet RECEIVED —
       which includes a row the 30-day sweep gave up on, since the give-up means "we stopped
