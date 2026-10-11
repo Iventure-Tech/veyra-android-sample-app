@@ -41,7 +41,10 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import co.veyra.bank.CancelAction
 import co.veyra.bank.DUPLICATE_MERCHANT_ORDER_ID
+import co.veyra.bank.cancelAction
+import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.duplicateOrderText
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
@@ -207,6 +210,25 @@ class GetPaidActivity : AppCompatActivity() {
         if (responseStatus != OutcomeStatus.NOT_SENT && responseStatus != OutcomeStatus.RETRY) saleOrderId = null
     }
 
+    /**
+     * Every Cancel on a sale in progress — card tap, customer-QR charge, payment-QR create — names
+     * the sale's order ID; the SDK finds the payment whichever rail it is on. It can be cancelled
+     * only while its request is still on the phone:
+     *  - `CANCELLED`: the payment's own result arrives as `NOT_SENT` / `CANCELLED` and that handler
+     *    goes back to amount entry (the order ID stays usable).
+     *  - `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT`: say so and keep waiting for the real result.
+     *  - nothing in progress for this order ID: just go back.
+     */
+    private fun cancelSale() {
+        val orderId = saleOrderId ?: return navigateToAmountEntry()
+        val answer = sdk.cancelPayment(orderId)
+        when (cancelAction(answer)) {
+            CancelAction.AWAIT_CANCELLED_OUTCOME -> Unit
+            CancelAction.KEEP_WAITING -> if (cancelRefusedTooLate(answer)) toast(getString(R.string.cancel_too_late))
+            CancelAction.LEAVE -> navigateToAmountEntry()
+        }
+    }
+
     /** What "Try again" on the result page does — set only for a NOT_SENT or FAILED outcome. */
     private var retryAction: (() -> Unit)? = null
 
@@ -245,11 +267,17 @@ class GetPaidActivity : AppCompatActivity() {
     private var pendingCpmScan: co.veyra.softpos.payment.sdk.cpm.ScannedCpmQr? = null
 
 
-    /** While a CPM charge is in flight the confirm page shows progress instead of buttons. */
+    /** True while a CPM charge is in flight: the confirm page's Cancel then cancels the charge. */
+    private var cpmCharging = false
+
+    /**
+     * While a CPM charge is in flight the confirm page shows progress instead of Charge; Cancel
+     * stays, and cancels the charge by its order ID (refused once the charge has left the phone).
+     */
     private fun setCpmConfirmCharging(charging: Boolean) {
-        val buttons = if (charging) View.GONE else View.VISIBLE
-        pageCpmConfirm.findViewById<MaterialButton>(R.id.cpmConfirmChargeButton).visibility = buttons
-        pageCpmConfirm.findViewById<MaterialButton>(R.id.cpmConfirmCancelButton).visibility = buttons
+        cpmCharging = charging
+        pageCpmConfirm.findViewById<MaterialButton>(R.id.cpmConfirmChargeButton).visibility =
+            if (charging) View.GONE else View.VISIBLE
         pageCpmConfirm.findViewById<View>(R.id.cpmChargingIndicator).visibility =
             if (charging) View.VISIBLE else View.GONE
     }
@@ -267,8 +295,15 @@ class GetPaidActivity : AppCompatActivity() {
         lifecycleScope.launch {
             // Always an outcome — never thrown.
             val response = sdk.cpmCustomerQrService.charge(scanned, merchantOrderId = orderId)
+            setCpmConfirmCharging(false)
             val status = response.responseStatus
             attemptEnded(status?.name)
+            // Cancelled from the confirm page before the charge left the phone: nothing was
+            // charged — not a result to show, just go back.
+            if (response.responseStatusReason == OutcomeReason.CANCELLED) {
+                navigateToAmountEntry()
+                return@launch
+            }
             // Key the receipt and the credit watch off the reference the SDK returns.
             lastOriginalTransactionReference = response.merchantTransactionReference.orEmpty()
             showPage(PAGE_PAYMENT_RESULT)
@@ -940,7 +975,8 @@ class GetPaidActivity : AppCompatActivity() {
         pagePaymentMethod.findViewById<MaterialButton>(R.id.tapToPayButton).setOnClickListener {
             startTapToPay()
         }
-        // CPM confirm page: Charge sends; Cancel discards the scan.
+        // CPM confirm page: Charge sends; Cancel discards the scan — or, once Charge was pressed,
+        // cancels the charge by its order ID.
         pageCpmConfirm.findViewById<MaterialButton>(R.id.cpmConfirmChargeButton).setOnClickListener {
             pendingCpmScan?.let { scanned ->
                 pendingCpmScan = null
@@ -948,6 +984,7 @@ class GetPaidActivity : AppCompatActivity() {
             }
         }
         pageCpmConfirm.findViewById<MaterialButton>(R.id.cpmConfirmCancelButton).setOnClickListener {
+            if (cpmCharging) return@setOnClickListener cancelSale()
             pendingCpmScan = null
             showPage(PAGE_AMOUNT_ENTRY)
         }
@@ -956,18 +993,17 @@ class GetPaidActivity : AppCompatActivity() {
             showPage(PAGE_QR_WAITING)
         }
 
-        // QR waiting: cancel back to amount entry (mirror of the contactless cancel).
+        // QR waiting: cancel the QR create by its order ID while it is still on the phone; once
+        // the QR is up (the create finished) the cancel finds nothing and the page just closes.
         pageQrWaiting.findViewById<ImageButton>(R.id.qrCancelButton).setOnClickListener {
-            navigateToAmountEntry()
+            cancelSale()
         }
 
 
-        // Page 2: Cancel Button — clear the armed payment so it cannot fire on a later
-        // tap (and so a mode switch is never blocked by a stale pending payment)
-        cancelButton.setOnClickListener {
-            sdk.cardPaymentService.cancelPendingPayment()
-            navigateToAmountEntry()
-        }
+        // Page 2: Cancel — cancel this sale's tap by its order ID (waiting for a card, reading it,
+        // or preparing the request); once the request has left the phone it is refused and the
+        // result still arrives.
+        cancelButton.setOnClickListener { cancelSale() }
         
         // Result page: Done confirms the outcome and returns to Home.
         doneButton.setOnClickListener {
@@ -1059,6 +1095,11 @@ class GetPaidActivity : AppCompatActivity() {
                 },
             )
             attemptEnded(created.responseStatus)
+            // Cancelled before the create left the phone: no QR exists — just go back.
+            if (created.responseStatusReason == OutcomeReason.CANCELLED) {
+                navigateToAmountEntry()
+                return@launch
+            }
             val txRef = created.txRef
             val payload = created.mpmPayload
             if (created.responseStatus != OutcomeStatus.APPROVED || txRef == null || payload == null) {
@@ -1294,13 +1335,12 @@ class GetPaidActivity : AppCompatActivity() {
                 },
                 onCardDetected = {
                     runOnUiThread {
-                        // Update UI to show card detected and hide cancel button during processing
+                        // Update UI to show card detected. Cancel stays: until the request leaves the
+                        // phone it still cancels; after that the SDK refuses it and we keep waiting.
                         waitingText.text = getString(R.string.card_detected)
                         waitingText.setTextColor(getColor(R.color.success_green))
                         statusMessage.text = "Card detected! Processing..."
                         nfcProgressBar.visibility = View.VISIBLE
-                        // Hide cancel button while processing
-                        cancelButton.visibility = View.GONE
                     }
                 },
                 // Tapped target had no compatible payment app (another phone, a transit/access
@@ -1382,8 +1422,10 @@ class GetPaidActivity : AppCompatActivity() {
     private fun handlePaymentResponse(response: TransactionResponse) {
         val status = response.responseStatus
         attemptEnded(status?.name)
-        // A cancelled pending payment (Cancel button / mode switch) is not a result.
+        // A cancelled payment (Cancel button, or the SDK withdrawing an armed tap on a mode switch)
+        // is not a result: nothing was sent. Go back to amount entry if we are still waiting on it.
         if (response.responseStatusReason == OutcomeReason.CANCELLED) {
+            if (currentPage == PAGE_CONTACTLESS_WAITING) navigateToAmountEntry()
             return
         }
 
@@ -1873,6 +1915,10 @@ class GetPaidActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cancelAutoNavigate()
+        // Leaving the screen: cancel any sale still on this phone (an armed or reading tap, a
+        // charge or QR create not yet sent) by its order ID. One already sent runs to its result,
+        // which the SDK records in history.
+        saleOrderId?.let { sdk.cancelPayment(it) }
         stopQrContextPayment()
     }
     

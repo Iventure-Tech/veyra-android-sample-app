@@ -203,6 +203,7 @@ val sdk = VeyraSoftPOSSdk.initialize(this, customerId, softposConfig, provider)
 | `merchantService` | — | Merchant registration, status, profile, banks. |
 | `transactionService` | — | Merchant transaction history + receipts (all rails). |
 | `cpmCustomerQrService` | — | Charge a scanned customer payment QR. |
+| `cancelPayment(merchantOrderId)` | `merchantOrderId` — the order ID the payment was started with | Cancel a tap, customer-QR charge or get-paid QR create while its request is still on the phone. Returns a `CancelResult` at once — see [Cancelling a call](#cancelling-a-call). |
 
 The reader arms on resume and disarms on pause automatically. If NFC is unavailable or off, the SDK shows its own prompt dialogs at initialise.
 
@@ -775,7 +776,7 @@ sdk.cardPaymentService.makeCardPayment(
 |-----------|----------|-------------|
 | `request` | **Mandatory** | `TransactionRequest` — see below. |
 | `callback` | **Mandatory** | `(TransactionResponse) -> Unit`. Fires **once**, with the terminal outcome only — branch on `responseStatus` (`APPROVED` / `DECLINED` / `FAILED` / `PENDING` / `RETRY` / `NOT_SENT`). Never fires for unsupported cards or lost contact. Nothing about a payment throws; only a [setup error](#1-setup-errors-thrown) does. |
-| `onCardDetected` | Optional | Card entered the field, processing started — hide the Cancel button, show "processing". |
+| `onCardDetected` | Optional | Card entered the field, processing started — show "processing". Keep Cancel visible: the payment can still be cancelled until its request is sent (see [Cancelling a call](#cancelling-a-call)). |
 | `onCardContactLost` | Optional | Contact lost before completion — reader **stays armed**; show "hold steady" and wait for a re-tap. |
 | `onUnsupportedCard` | Optional | Non-payment target / unreadable card — reader **stays armed**; show "card not supported, try another". |
 | `onCardReadingComplete` / `onSendingRequestOnline` / `onReceivingOnlineResponse` | Optional | Progress hooks: card read finished; online request sent; online response received. |
@@ -801,7 +802,7 @@ sdk.cardPaymentService.makeCardPayment(
 > own identifier instead — and note the two differ in kind: the reference identifies *an attempt*, the
 > order id identifies *your sale*, which is why a retry gets a new reference but keeps the order id.
 
-**Also on `cardPaymentService`:** `cancelPendingPayment()` (cancels an armed, untapped payment — the callback receives `NOT_SENT` / `CANCELLED`; no-op when nothing is pending), `isTransactionInProgress`, `isAwaitingCardTap`.
+**Also on `cardPaymentService`:** `isTransactionInProgress`, `isAwaitingCardTap`. To cancel a payment, call `VeyraSoftPOSSdk.cancelPayment(merchantOrderId)` with its order ID — the callback then receives `NOT_SENT` / `CANCELLED` if it was still on the phone. See [Cancelling a call](#cancelling-a-call).
 
 ---
 
@@ -1149,7 +1150,7 @@ Tokenise the account: the SDK attests the device, sends the request, and on succ
 | `walletAccountId` | Same identifier as in eligibility. |
 | `emailAddress` | The customer's email. |
 
-Optional chains: `.clientRequestId(String)` (default: SDK-generated UUID), `.accountNumberSource(...)`, `.walletProviderDeviceScore(TrustScore)` (default `LOW_TRUST`), `.walletProviderAccountScore(TrustScore)` (default `LOW_TRUST`), `.walletProviderTokenizationRecommendationReasons(List<TokenizationRecommendationReason>)` (default `[UNABLE_TO_ASSESS]`). `TrustScore`: `UNTRUSTED`, `LOW_TRUST`, `MODERATE_TRUST`, `TRUSTED`, `HIGHLY_TRUSTED`. A blank required field makes `build()` throw `TokenizationRequestValidationException` synchronously — a bug in the calling code, before the SDK is involved. `digitizeAccount` itself never throws for anything that happens to the request.
+Optional chains: `.clientRequestId(String)` (default: SDK-generated UUID; set your own per attempt to be able to cancel it with `cancelDigitise` — see [Cancelling a call](#cancelling-a-call)), `.accountNumberSource(...)`, `.walletProviderDeviceScore(TrustScore)` (default `LOW_TRUST`), `.walletProviderAccountScore(TrustScore)` (default `LOW_TRUST`), `.walletProviderTokenizationRecommendationReasons(List<TokenizationRecommendationReason>)` (default `[UNABLE_TO_ASSESS]`). `TrustScore`: `UNTRUSTED`, `LOW_TRUST`, `MODERATE_TRUST`, `TRUSTED`, `HIGHLY_TRUSTED`. A blank required field makes `build()` throw `TokenizationRequestValidationException` synchronously — a bug in the calling code, before the SDK is involved. `digitizeAccount` itself never throws for anything that happens to the request.
 
 ```kotlin
 val params = TokenizationRequestParams.builder(
@@ -1757,6 +1758,115 @@ val receipt  = sdk.tokenisationService.getReceiptForTransaction(hash)    // by t
 
 ---
 
+## Cancelling a call
+
+A payment or an add-card can be cancelled **only while its request is still on the phone**. Each
+call has one point of no return: the moment its request is handed to the network. Before it, a
+cancel stops the call and nothing is sent. After it, the cancel is refused and the call carries on
+to its normal result: an approved, declined or pending payment cannot be taken back from the phone.
+
+Every cancel names the call by a **reference you already hold**:
+
+| Call | Cancel with | Reference |
+|---|---|---|
+| Card tap (`cardPaymentService.makeCardPayment`), customer-QR charge (`cpmCustomerQrService.charge`), get-paid QR create (`createContextPayment`) | `VeyraSoftPOSSdk.cancelPayment(merchantOrderId)` | The `merchantOrderId` the payment was started with. You don't say which rail: the order ID identifies the payment |
+| Scan to pay (`tokenisationService.payScannedContext`) | `tokenisationService.cancelPayment(merchantOrderId)` | `VerifiedPaymentContext.merchantOrderId` — the order ID signed into the scanned QR. `null` on a QR that carries none: that payment cannot be cancelled (disable your Cancel button while it is paying) |
+| Add a card (`tokenisationService.digitizeAccount`) | `tokenisationService.cancelDigitise(clientRequestId)` | The `clientRequestId` you set with `TokenizationRequestParams.builder(...).clientRequestId(...)`. Set none and the SDK generates one, and that add-card cannot be cancelled |
+
+The merchant's and the wallet's payments are kept apart: in a combined app the wallet's
+`cancelPayment("ORDER-1")` can never cancel the merchant's own payment with the same order ID.
+
+### API
+
+| Member | Returns | Description |
+|---|---|---|
+| `VeyraSoftPOSSdk.cancelPayment(merchantOrderId: String)` | `CancelResult` | Cancel the merchant payment started with this order ID — tap, customer-QR charge or get-paid QR create — while it is still on the phone. Answers at once, from any thread |
+| `tokenisationService.cancelPayment(merchantOrderId: String)` | `CancelResult` | Cancel the scan-to-pay of the QR carrying this order ID while it is still on the phone. Answers at once, from any thread |
+| `tokenisationService.cancelDigitise(clientRequestId: String)` | `CancelResult` | Cancel the add-card started with this `clientRequestId` while it is still on the phone. Answers at once, from any thread |
+| `CancelResult` | — | `co.veyra.common.cancel.CancelResult`, the answer to a cancel: `CANCELLED`, `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT`, `TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED`, `NO_PAYMENT_IN_PROGRESS_FOR_ORDER_ID`, `NO_DIGITISATION_IN_PROGRESS_FOR_CLIENT_REQUEST_ID` |
+
+### What the cancel answers, and what to show
+
+The cancel answers at once with a `CancelResult`. **That is the answer to the cancel, never the
+call's outcome**: the call still delivers its own result to its callback (or return value), exactly
+once.
+
+| `CancelResult` | What happened | What your app shows |
+|---|---|---|
+| `CANCELLED` | The call was stopped before anything was sent. Its result arrives as `NOT_SENT` / `CANCELLED` | Go back to the previous screen when that result arrives. The same order ID or `clientRequestId` can be used again |
+| `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT` | The request has already left the phone. The call carries on | "This can no longer be cancelled" — keep waiting, and show the call's own result (approved, declined, pending…) when it arrives |
+| `TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED` | The call had already finished | Nothing to do: show the result it delivered |
+| `NO_PAYMENT_IN_PROGRESS_FOR_ORDER_ID` | No payment with that order ID is armed or running on this phone (wrong ID, never started, already finished, or a scanned QR with no order ID) | Just go back |
+| `NO_DIGITISATION_IN_PROGRESS_FOR_CLIENT_REQUEST_ID` | No add-card with that `clientRequestId` is running (wrong ID, started without one, or already finished) | Just go back |
+
+```kotlin
+// Merchant: the Cancel button on the tap / charge / QR waiting screen.
+when (softposSdk.cancelPayment(orderId)) {
+    CancelResult.CANCELLED -> Unit                    // the payment's own result is NOT_SENT / CANCELLED → go back there
+    CancelResult.TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT ->
+        showHint("This can no longer be cancelled")   // keep waiting for the result
+    CancelResult.TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED -> Unit  // its result is already on screen
+    else -> goBack()                                  // nothing in flight under that order ID
+}
+
+// …and where the result arrives (makeCardPayment callback, charge, createContextPayment):
+if (response.responseStatusReason == OutcomeReason.CANCELLED) {
+    goBack()                                          // nothing was charged; the order ID is still unused
+    return
+}
+
+// Wallet add-card: set your own clientRequestId so the attempt can be cancelled.
+val requestId = UUID.randomUUID().toString()
+val params = TokenizationRequestParams.builder(/* … */)
+    .clientRequestId(requestId)
+    .build()
+walletSdk.tokenisationService.digitizeAccount(params) { response -> /* … */ }
+// Cancel button, while that digitisation is running:
+val answer = walletSdk.tokenisationService.cancelDigitise(requestId)
+
+// Wallet scan-to-pay: cancel by the order ID in the QR (no order ID → cannot be cancelled).
+verified.merchantOrderId?.let { orderId ->
+    val answer = walletSdk.tokenisationService.cancelPayment(orderId)
+}
+```
+
+The sample's screens (`GetPaidActivity`, `AccountEligibilityActivity`, `ScanToPayActivity`) share one
+rule for the answer, in `CancelAnswer.kt`.
+
+### Which steps can be cancelled
+
+Everything **before sending** can be cancelled; **once the request is sent, nothing can**.
+
+| Rail | Cancellable (still on the phone) | Not cancellable (sent) |
+|---|---|---|
+| Card tap (merchant) | Arming the reader and waiting for a tap; reading the card; the window after the card is read (`onCardReadingComplete`) until the request is sent — the card's cryptogram is discarded and never sent later. Keep Cancel visible after `onCardDetected` | From `onSendingRequestOnline` on |
+| Customer-QR charge (merchant) | Building the charge | Once the charge is sent |
+| Get-paid QR create (merchant) | Building the create request | Once it is sent. A QR that is already live has nothing in flight: the cancel answers `NO_PAYMENT_IN_PROGRESS_FOR_ORDER_ID` — just leave the screen (and call `cancelQrExpiry()`) |
+| Scan to pay (wallet) | Checking the card and its keys; the key top-up beforehand; the device authentication sheet; building the payment | Once the payment is sent |
+| Add a card (wallet) | Device attestation; building the request | Once the request is sent to the token service |
+| Show QR to pay (wallet) | — no wallet-side cancel | The wallet sends nothing: the **merchant's** charge is the request, under an order ID the merchant assigns. Only the merchant can cancel it, with `VeyraSoftPOSSdk.cancelPayment(merchantOrderId)`. Taking the QR off the screen does not stop a merchant who has already scanned it |
+
+If the authentication sheet is showing when a scan-to-pay is cancelled, it stays until the customer
+dismisses it, but nothing is paid. When your get-paid screen goes away with a tap still armed, the SDK
+ends that tap itself (`NOT_SENT` / `CANCELLED`); a payment that has already been sent runs to its
+result, which the SDK records in history.
+
+### A cancelled call ends `NOT_SENT` / `CANCELLED`
+
+A cancel that wins ends the call with `responseStatus` `NOT_SENT`, `responseStatusReason`
+`CANCELLED` and no `responseCode`. It is an ordinary `NOT_SENT` outcome — nothing reached Veyra, the
+order ID (or `clientRequestId`) is still unused and may be used again. See
+[Errors and outcomes](#errors-and-outcomes) and
+[Table A](#table-a--outcomes-the-sdk-itself-produces).
+
+### Cancelling: migrating from 2.x
+
+| 2.x | 3.0.0 |
+|---|---|
+| `cardPaymentService.cancelPendingPayment()` | **Removed.** It cancelled whatever payment happened to be armed. Call `VeyraSoftPOSSdk.cancelPayment(merchantOrderId)` with the sale's order ID: it reaches only that payment, works while the card is being read and until the request is sent, and tells you when it is too late |
+| No way to cancel a customer-QR charge, a get-paid QR create, a scan to pay or an add-card | `VeyraSoftPOSSdk.cancelPayment(merchantOrderId)` (merchant), `tokenisationService.cancelPayment(merchantOrderId)` and `tokenisationService.cancelDigitise(clientRequestId)` (wallet) |
+| `.clientRequestId(...)` was only a request identifier | It is also the reference `cancelDigitise` names — set one per add-card attempt to make it cancellable |
+
 ## Errors and outcomes
 
 Every SDK call ends in one of two ways:
@@ -1809,10 +1919,10 @@ the other mode's payment being in flight (combined apps) ends `NOT_SENT` / `MODE
 payment for a merchant that is not registered ends `NOT_SENT` / `MISSING_MANDATORY_CONFIG` (see
 [Table A](#table-a--outcomes-the-sdk-itself-produces)).
 
-**Cancelling is not an error.** When you cancel an armed payment with
-`cardPaymentService.cancelPendingPayment()`, the reply to the cancel — including "too late"
+**Cancelling is not an error.** When you cancel a call (`cancelPayment` / `cancelDigitise`, see
+[Cancelling a call](#cancelling-a-call)), the `CancelResult` — including "too late"
 (`TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT`, `TOO_LATE_TO_CANCEL_TASK_ALREADY_PROCESSED`) — is the
-answer to the cancel, not an error and not an outcome of the payment you tried to cancel.
+answer to the cancel, not an error and not an outcome of the call you tried to cancel.
 
 ### 2. Processing outcomes (the response triple)
 
@@ -2077,7 +2187,7 @@ The remaining `NOT_SENT` rows are payment-only reasons.
 | `NOT_SENT` or `FAILED` | — | `NO_NETWORK_CONNECTION` | The phone has no internet connection | Ask the user to connect; retry (a payment with the same order ID) |
 | `NOT_SENT` or `FAILED` | — | `SDK_UNABLE_TO_CONNECT` | The phone is online but could not connect to Veyra | Try again shortly (a payment with the same order ID) |
 | `NOT_SENT` or `FAILED` | — | `NOT_AUTHENTICATED` | The SDK could not get credentials (your assertion or proxy provider returned nothing, or the token endpoint refused) | Check your provider; retry |
-| `NOT_SENT` | — | `CANCELLED` | Your app cancelled the call before it was sent (`cancelPendingPayment()`) | Back to the previous screen |
+| `NOT_SENT` | — | `CANCELLED` | Your app cancelled the call before it was sent (`cancelPayment` / `cancelDigitise` answered `CANCELLED`; see [Cancelling a call](#cancelling-a-call)) | Back to the previous screen; the same order ID / `clientRequestId` can be used again |
 | `NOT_SENT` | — | `AUTH_CANCELLED` | The customer dismissed the device authentication sheet | Stay on the confirm screen; let them try again |
 | `NOT_SENT` | — | `AUTH_FAILED` | Device authentication did not succeed | Stay on the confirm screen |
 | `NOT_SENT` | — | `AUTH_UNAVAILABLE` | The device has no screen lock and no biometrics | Send the customer to Settings |
@@ -2372,6 +2482,7 @@ checklist for code written against 2.x:
 | 2.x | 3.0.0 |
 |---|---|
 | `Result<…>` / `onError` / `null` on failure (`getBanks`, `checkAccountEligibility`, `requestActivationCode`, `activate`, `tokenStatus`, `deactivateToken`, merchant `getBanks` / `activate` / `deactivate` / `updateMerchant`, `createContextPayment`) | The callback (or return) is always an outcome type — `BankList`, `VerifyAccountResponse`, `ActivationCodeResponse`, `ActivateResponse`, `TokenStatusResult`, `TokenStatusUpdateResponse`, `NubanBankListResponse`, `MerchantStatusResponse`, `MerchantUpdateResponse`, `CreatedPaymentContext`. Branch on `responseStatus`. |
+| `cardPaymentService.cancelPendingPayment()` | Removed: `VeyraSoftPOSSdk.cancelPayment(merchantOrderId)`, which answers a `CancelResult` — see [Cancelling a call](#cancelling-migrating-from-2x) |
 | `cpmCustomerQrService.inspect` threw `IllegalArgumentException` | Returns `CpmInspection`; not a payment QR is `FAILED` / `INVALID_REQUEST` |
 | `processReceipt` called back `Result<TransactionReceipt>` (failure on a refused receipt) | Calls back (or, `suspend`, returns) `ReceiptScanResult`: `APPROVED` with `receipt`, or `FAILED` with `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` / `SDK_INTERNAL_ERROR` |
 | `reconcilePendingTransactions` called back `Result<Unit>` | Calls back `ReconcileResult`: `failureReason` set only when the reconcile could not run |
@@ -2776,6 +2887,8 @@ data class VerifiedPaymentContext(
     val amount: String,                     // display, major units: "5000.00"
     val amountMinorUnits: Long, val currencyNumeric: String,
     val expiryEpochSeconds: Long, /* … */
+    val merchantOrderId: String?,           // the merchant's order ID signed into the QR; null when it carries none.
+                                            // The reference tokenisationService.cancelPayment names.
 )
 data class MpmPushOutcome(
     val responseCode: String?,              // "00", "51", "68"… — always populated, quote it verbatim
@@ -2978,8 +3091,8 @@ checkAccountEligibility
         ├─ not APPROVED ──► show error (flow ends)
         │
         ▼ APPROVED
-digitizeAccount
-        │
+digitizeAccount  (your clientRequestId; Cancel until sent: cancelDigitise(id)
+        │                 → NOT_SENT / CANCELLED → leave)
         ├────────────────┬──────────────────────────┐
         ▼                ▼                          ▼
     APPROVED     APPROVE_REQUIRE_AUTH           DECLINED
@@ -3018,6 +3131,8 @@ Merchant registered & ACTIVE? ──no──► register / activate first
  Amount entry (minor units)
         │
         ├─────────────── Tap ───────────────► makeCardPayment
+        │                                       ├─ Cancel (until sent): cancelPayment(orderId)
+        │                                       │    → NOT_SENT / CANCELLED → back to amount entry
         │                                       ├─ onCardDetected: "hold steady"
         │                                       ├─ onUnsupportedCard / contact lost:
         │                                       │    transient hint, stays armed
@@ -3044,6 +3159,9 @@ Camera scan ──► inspectScannedQr
                                         │ user confirms
                                         ▼
                               payScannedContext  (the SDK raises the biometric sheet itself)
+                                        │   Cancel while paying ──► cancelPayment(merchantOrderId)
+                                        │     CANCELLED → NOT_SENT / CANCELLED → leave
+                                        │     too late  → "can no longer be cancelled", keep waiting
                                         ├─ APPROVED ──► success screen; history row APPROVED
                                         ├─ DECLINED / FAILED ──► refused screen; history row says why
                                         ├─ PENDING ──► "still processing" — never pay again; the SDK resolves it
