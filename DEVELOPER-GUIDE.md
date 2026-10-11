@@ -818,8 +818,9 @@ val created = client.createContextPayment(
     merchantOrderId = "ORDER-42",            // required: YOUR order id, unique per merchant
     onExpired = { blankQr(); showHint("This payment code has expired — start a new payment") },
 ) ?: run { showError("Could not create payment QR"); return }
-// Throws VeyraSdkException(DUPLICATE_MERCHANT_ORDER_ID) when a payment already uses the order id,
-// whatever its outcome — create the QR with a different one.
+// A payment that already uses the order id, whatever its outcome, ends FAILED /
+// DUPLICATE_MERCHANT_ORDER_ID and carries the original payment — read its outcome, and create
+// the QR with a different order id for a new payment.
 
 renderQrPayload(created.mpmPayload)          // encode the string verbatim into a QR bitmap
 while (isActive) {
@@ -945,9 +946,10 @@ background sweep writes, so an on-demand check and a background check can never 
   is for.
 - **It is not a way to force an outcome.** A payment that is still unsettled answers `PENDING` again.
   Show a brief "still processing" note; do not retry in a loop.
-- **A failed call throws and changes nothing** — `NO_NETWORK_CONNECTION` when the device is offline.
-  Show the error and leave the row pending; that is the correct handling, not an error state on the
-  transaction.
+- **A failed lookup never changes the payment.** When the check itself cannot be made it ends
+  `NOT_SENT` (e.g. `NO_NETWORK_CONNECTION` when the device is offline) and the row stays as it was.
+  Show a short note and leave the row pending; that is the correct handling, not an error state on
+  the transaction.
 - **No SDK-side throttle.** Disable your button while a call is in flight, as the sample does.
 
 #### `refreshCreditConfirmation`
@@ -986,8 +988,8 @@ val updated = sdk.transactionService.refreshCreditConfirmation(reference)
 - **It writes the store and fires `onCreditConfirmation`**, exactly as the background sweep does —
   both go through the same write — so a manual check and a swept one are indistinguishable once
   stored, and your existing observer needs no change.
-- **A failed call throws and changes nothing** — `SdkErrorCode.NO_NETWORK_CONNECTION` when the device
-  is offline. Show the error and leave the credit line reading "not confirmed yet".
+- **A failed check changes nothing.** When it cannot be made it ends `NOT_SENT` (e.g.
+  `NO_NETWORK_CONNECTION` when the device is offline). Leave the credit line reading "not confirmed yet".
 - **No SDK-side throttle.** Disable your button while a call is in flight, as the sample does.
 
 #### `generateTransactionReceipt`
@@ -1125,12 +1127,13 @@ sdk.tokenisationService.digitizeAccount(params) { response ->
         "APPROVED" -> showCardAdded()                       // provisioned; can pay now
         "APPROVE_REQUIRE_AUTH" ->                           // provisioned; needs activation
             showActivationMethods(response.tokenUniqueReference, response.activationMethods)
-        else -> showError(response.message ?: response.error?.message ?: "Could not add card")
+        // DECLINED, FAILED or NOT_SENT: responseStatusReason says why
+        else -> showError(response.message ?: response.responseStatusReason ?: "Could not add card")
     }
 }
 ```
 
-`TokenisationResponse`: `responseCode` (`APPROVED` / `APPROVE_REQUIRE_AUTH` / `DECLINED`), `tokenUniqueReference` (the card's identity for every later call), `activationMethods` (non-null when activation is needed), `isSuccess`, `status`, `message`, `error` (`TokenisationError(code, message, details)`).
+`TokenisationResponse`: `responseCode` (`APPROVED` / `APPROVE_REQUIRE_AUTH` / `DECLINED`), `tokenUniqueReference` (the card's identity for every later call), `activationMethods` (non-null when activation is needed), `responseStatus` and `responseStatusReason` (the outcome — branch on these; see [Table C](#table-c--veyra-token-service-wallet-add-card-activation-cards)), `isSuccess`, `status`, `message`.
 
 ---
 
@@ -1602,8 +1605,8 @@ val updated = sdk.tokenisationService.refreshCreditConfirmation(transactionHash)
   `responseStatusReason`.
 - **Still no callback** — the returned row and the stored history are the wallet's whole credit
   surface, by design.
-- **A failed call throws and changes nothing** — the message carries `NO_NETWORK_CONNECTION` when the
-  device is offline. Show the error and leave the credit line reading "not confirmed yet".
+- **A failed check changes nothing.** When it cannot be made it ends `NOT_SENT` (e.g.
+  `NO_NETWORK_CONNECTION` when the device is offline). Leave the credit line reading "not confirmed yet".
 
 #### `reconcilePendingTransactions`
 
@@ -1630,8 +1633,8 @@ stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the custome
 which is the route for anything still pending after the window closes.
 
 The same five rules as the merchant method above apply: show it only while the row is `PENDING`; it
-works past the window and off the sweep's list; it never forces an outcome; a failed call throws
-(`NO_NETWORK_CONNECTION` when offline) and leaves the row untouched; and there is no SDK-side
+works past the window and off the sweep's list; it never forces an outcome; a lookup that cannot be made ends
+`NOT_SENT` (`NO_NETWORK_CONNECTION` when offline) and never changes the payment; and there is no SDK-side
 throttle, so disable the button while a call is in flight.
 
 #### `processReceipt` / `getLastReceipts` / `getReceiptForTransaction`
@@ -1771,12 +1774,15 @@ Four rules follow from this table:
 | `NOT_SENT` | — | `MERCHANT_PROFILE_INCOMPLETE` | The merchant's account details are missing | Finish merchant setup |
 | `NOT_SENT` | — | `MISSING_MANDATORY_CONFIG` | Terminal / merchant config is missing | Register the merchant / pass the config |
 | `NOT_SENT` | — | `MODE_REFUSED` | Combined apps: the other mode's payment is in progress | Wait for it to finish |
-| `NOT_SENT` | — | `UNRECOGNISED_RESPONSE_CODE` | Add card was answered with a code this SDK version doesn't know; nothing was stored | Retry; update the SDK if it persists |
+| `NOT_SENT` | — | `CARD_READ_FAILED` | Card tap: the card could not be read, so the payment ended before anything was sent | Ask the customer to tap again |
+| `NOT_SENT` | — | `NO_ACTIVE_CARD` | Wallet: no card is set as active (e.g. show QR to pay) | Ask the user to choose a card |
+| `NOT_SENT` | — | `CARD_CANNOT_SHOW_QR` | Wallet: the active card can't produce a QR | Use another card, or tap |
 | `NOT_SENT` | — | `SDK_INTERNAL_ERROR` | The SDK failed before sending | Report to support; retry is safe |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | The request was sent but no answer came back (timeout, connection lost) | Wait; the SDK resolves it |
 | `PENDING` | `06` | `UPSTREAM_ERROR` | Veyra answered with an error or something unreadable | Wait; the SDK resolves it |
 | `PENDING` | — | `SDK_INTERNAL_ERROR` | The SDK failed after sending | Wait; the SDK still resolves the payment |
 | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | **Add card only**: no answer after sending | Start a new digitisation |
+| `FAILED` | — | `UNRECOGNISED_RESPONSE_CODE` | **Add card only**: the Veyra token service answered with a code this SDK version doesn't know; the card was discarded, nothing stored | Start a new add card; update the SDK if it persists |
 
 #### The triple is the same on every Veyra service
 
@@ -1796,9 +1802,9 @@ One code always means one reason.
 |---|---|---|---|---|
 | `00` | `APPROVED` | `APPROVED` | Approved | Complete |
 | `05` | `DECLINED` | `DO_NOT_HONOR` | The bank refused without a specific reason | Show it; another payment method |
-| `07` | `DECLINED` | `ACCOUNT_VALIDATION_FAILED` | The account could not be validated | Show it |
+| `07` | `FAILED` | `ACCOUNT_VALIDATION_FAILED` | The beneficiary account failed validation before any transfer was made; nothing was dispatched | Check the merchant's account details; retry with a new order ID |
 | `14` | `DECLINED` | `INVALID_TOKEN` | The card token is not valid | The customer should re-add the card |
-| `21` | `DECLINED` | `NAME_ENQUIRY_FAILED` | The beneficiary account lookup failed | Check the merchant's account details |
+| `21` | `FAILED` | `NAME_ENQUIRY_FAILED` | The beneficiary account lookup could not be completed; nothing was dispatched | Retry with a new order ID |
 | `51` | `DECLINED` | `INSUFFICIENT_FUNDS` | Not enough funds | Another payment method |
 | `54` | `DECLINED` | `EXPIRED_CARD_OR_TOKEN` | The card or token has expired | Re-add the card |
 | `58` | `DECLINED` | `DOMAIN_RESTRICTION_FAILED` | The card can't be used this way (wrong channel / domain) | Another payment method |
@@ -1833,6 +1839,7 @@ Wallet SDK only, grouped by call.
 | Add card | `DECLINED` | `DECLINED` | The issuer's reason | The issuer refused this account; show the reason (see [the issuer's causes](#add-a-card--the-issuers-decision-and-causes)) |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | The Veyra token service could not complete it; start a new add card |
 | Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer (Table A); start a new add card |
+| Add card | `FAILED` | any other value | `UNRECOGNISED_RESPONSE_CODE` | A code this SDK version doesn't know; the card was discarded (Table A). Start a new add card |
 | Activation code request (`requestActivationCode`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `ACTIVATION_LOCKED`, `CODE_REQUEST_RATE_LIMITED`, `ACTIVATION_FAILED` | A code can't be sent now. Locked or rate-limited: wait, or contact the issuer |
 | Activation code verify (`activate`) | `FAILED` | — | `CODE_INVALID`, `CODE_EXPIRED`, `MAX_ATTEMPTS_EXCEEDED`, `NO_PENDING_ACTIVATION`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `TOKEN_NOT_FOUND`, `ACTIVATION_FAILED` | Wrong or expired code: ask again (`attemptsRemaining` is included). Max attempts or locked: remove the card and add it again |
 | Remove card (`deactivateToken`) | `FAILED` | — | `TOKEN_NOT_FOUND`, `TOKEN_STATE_CONFLICT` | The card isn't known, or the change isn't allowed from its current state |
@@ -1928,8 +1935,8 @@ mistake, a card that lost contact) is not a result. **The SDK keeps the reader a
 
 **Give the merchant one message** — "Card not supported — try another card" — and keep the waiting
 screen up. Don't write per-cause copy, and never end the sale on one. When a card-read failure does
-end the payment, it is `NOT_SENT`: nothing was sent, so retry with the same order ID. The message
-names the card-level cause for support.
+end the payment, it is `NOT_SENT` / `CARD_READ_FAILED`: nothing was sent, so ask for another tap
+and keep the same order ID. The message names the card-level cause for support.
 
 #### Wallet tap — `onTransactionCompleted`
 
@@ -2043,7 +2050,7 @@ and they never contradict one.
 | `"APPROVE_REQUIRE_AUTH"` | Provisioned, needs activation | Run the activation flow with the returned `activationMethods`. `responseStatusReason` says why step-up is needed. |
 | `"DECLINED"` | Refused | Show the reason. The flow ends. |
 
-Any other code ends `NOT_SENT` / `UNRECOGNISED_RESPONSE_CODE` and the token is **discarded** —
+Any other code ends `FAILED` / `UNRECOGNISED_RESPONSE_CODE` and the token is **discarded** —
 nothing provisioned, no card added — even if the response carried full token data.
 
 The issuer states a cause for every non-approval, and you receive it as `responseStatusReason`.
@@ -2268,9 +2275,8 @@ data class TokenisationResponse(
     val isSuccess: Boolean,
     val status: String?,                    // SUCCESS / PENDING / FAILED
     val message: String?,
-    val responseStatus: String?,            // APPROVED / DECLINED / FAILED / PENDING — what the call did (1.2.4+)
-    val responseStatusReason: String?,      // the symbolic cause — branch on this; null = none stated (1.2.4+)
-    val error: TokenisationError?           // code: CONFIG_ERROR / TOKENIZATION_ERROR / UNEXPECTED_ERROR
+    val responseStatus: String?,            // APPROVED / DECLINED / FAILED / NOT_SENT — branch on this first
+    val responseStatusReason: String?       // why — branch on this second; see Errors and outcomes
 )
 
 data class ActivationCodeResponse(
@@ -2389,7 +2395,7 @@ data class StoredMerchantData(
 )
 
 data class TransactionResponse(             // tap terminal outcome (makeCardPayment callback)
-    val transactionCode: String,            // see Response codes
+    val transactionCode: String,            // the payment's response code (empty on NOT_SENT) — receipts/support only
     val message: String?,
     val amount: String?,                    // minor units as string
     val cardScheme: String?,                // "VISA", "MASTERCARD", …
@@ -2397,11 +2403,10 @@ data class TransactionResponse(             // tap terminal outcome (makeCardPay
     val merchantTransactionReference: String?,  // SDK-MINTED reference — receipt/status lookup key
     val transactionType: String?, val maskedTokenLast4: String?,
     val merchantStatus: String?, val transactionId: String?, val aid: String?,
-    val responseStatus: ResponseStatus?,        // APPROVED / DECLINED / FAILED / PENDING / Unknown — branch on this
-    val responseStatusReason: String?,          // the stated cause; display, never parse
+    val responseStatus: ResponseStatus?,        // APPROVED / DECLINED / FAILED / PENDING / NOT_SENT / Unknown — branch on this
+    val responseStatusReason: String?,          // why (e.g. INSUFFICIENT_FUNDS, NO_NETWORK_CONNECTION) — branch on this second
     val creditTransactionId: String?,           // merchant-bank credit id (approved + supported only)
-    val isCreditConfirmationSupported: Boolean?, // true ⇒ the SDK will poll and fire onCreditConfirmation
-    val sdkErrorCode: SdkErrorCode?             // set ⇒ never attempted / SDK failure, not a payment outcome
+    val isCreditConfirmationSupported: Boolean? // true ⇒ the SDK will poll and fire onCreditConfirmation
 )
 
 data class TransactionInfo(                 // history row
