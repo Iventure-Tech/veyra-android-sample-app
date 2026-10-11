@@ -7,8 +7,12 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import co.veyra.bank.CancelAction
 import co.veyra.bank.R
+import co.veyra.bank.cancelAction
+import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeReason
 import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.bank.databinding.ActivityAccountEligibilityBinding
 import co.veyra.wallet.sdk.AccountNumberSource
@@ -34,6 +38,12 @@ class AccountEligibilityActivity : AppCompatActivity() {
     private lateinit var bvn: String
     private lateinit var email: String
 
+    /**
+     * The `clientRequestId` of the add-card attempt in flight, or null when none is. A fresh one per
+     * attempt; it is also how Cancel names the digitisation to the SDK.
+     */
+    private var digitiseRequestId: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityAccountEligibilityBinding.inflate(layoutInflater)
@@ -50,7 +60,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         bindAccountDetails()
 
         binding.addToWalletButton.setOnClickListener { startTokenization() }
-        binding.cancelTextView.setOnClickListener { finish() }
+        binding.cancelTextView.setOnClickListener { cancel() }
     }
 
     private fun bindAccountDetails() {
@@ -68,15 +78,44 @@ class AccountEligibilityActivity : AppCompatActivity() {
         binding.addToWalletButton.text = getString(R.string.adding_to_wallet)
         binding.errorTextView.visibility = View.GONE
 
-        val params = buildTokenizationParams()
+        val requestId = UUID.randomUUID().toString()
+        digitiseRequestId = requestId
+        val params = buildTokenizationParams(requestId)
         sdk.tokenisationService.digitizeAccount(params) { response ->
             lifecycleScope.launch(Dispatchers.Main) {
+                digitiseRequestId = null
                 handleDigitizeResponse(response)
             }
         }
     }
 
+    /**
+     * Cancel: with no add-card in flight, just leave. Otherwise cancel the digitisation by its
+     * `clientRequestId` — possible only while the request is still on the phone:
+     *  - `CANCELLED`: the digitise callback receives `NOT_SENT` / `CANCELLED` and leaves the screen.
+     *  - `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT`: the server may be creating the token, so say it
+     *    can no longer be cancelled and keep waiting for the result (a token it creates is stored).
+     *  - nothing in progress for that ID: leave.
+     */
+    private fun cancel() {
+        val requestId = digitiseRequestId ?: return finish()
+        val sdk = VeyraWalletSdk.getInstance() ?: return finish()
+        val answer = sdk.tokenisationService.cancelDigitise(requestId)
+        when (cancelAction(answer)) {
+            CancelAction.AWAIT_CANCELLED_OUTCOME -> Unit
+            CancelAction.KEEP_WAITING -> if (cancelRefusedTooLate(answer)) {
+                Toast.makeText(this, getString(R.string.cancel_too_late), Toast.LENGTH_SHORT).show()
+            }
+            CancelAction.LEAVE -> finish()
+        }
+    }
+
     private fun handleDigitizeResponse(response: TokenisationResponse) {
+        // Cancelled before the request left the phone: nothing was created — leave.
+        if (response.responseStatusReason == OutcomeReason.CANCELLED) {
+            finish()
+            return
+        }
         // Digitise is never PENDING: APPROVED (the response code says whether the card still needs
         // activating), or DECLINED / FAILED / NOT_SENT with the reason — a new attempt starts a new
         // digitisation.
@@ -115,7 +154,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildTokenizationParams(): TokenizationRequestParams {
+    private fun buildTokenizationParams(clientRequestId: String): TokenizationRequestParams {
         // Account number, bank, customer id, account name, BVN and email are what the user
         // entered on the previous screen. The customer id is also the consumer identifier: the
         // one id this app knows the customer by; the email is also the wallet account id. The
@@ -133,7 +172,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
             walletAccountId = email,
             emailAddress = email,
         )
-            .clientRequestId(UUID.randomUUID().toString())
+            .clientRequestId(clientRequestId)
             .accountNumberSource(AccountNumberSource.MANUAL)
             .walletProviderDeviceScore(TrustScore.TRUSTED)
             .walletProviderAccountScore(TrustScore.HIGHLY_TRUSTED)

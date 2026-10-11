@@ -9,8 +9,12 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import co.veyra.bank.HomeActivity
+import co.veyra.bank.CancelAction
 import co.veyra.bank.R
+import co.veyra.bank.cancelAction
+import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.outcomeText
+import co.veyra.common.outcome.OutcomeReason
 import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.softpos.payment.sdk.CurrencyUtils
 import co.veyra.wallet.sdk.VeyraWalletSdk
@@ -31,6 +35,9 @@ class ScanToPayActivity : AppCompatActivity() {
     private lateinit var sdk: VeyraWalletSdk
     private var verified: VerifiedPaymentContext? = null
 
+    /** True from Pay until the payment's outcome arrives. */
+    private var paying = false
+
     private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
         val payload = result.contents
         if (payload == null) {
@@ -46,7 +53,7 @@ class ScanToPayActivity : AppCompatActivity() {
         sdk = VeyraWalletSdk.initialize(this, co.veyra.bank.VeyraBank.customerId(this), co.veyra.bank.VeyraBank.walletConfig(this), co.veyra.bank.VeyraBank.provider(), activity = this)
         setContentView(R.layout.activity_scan_to_pay)
 
-        findViewById<MaterialButton>(R.id.cancelScanButton).setOnClickListener { finish() }
+        findViewById<MaterialButton>(R.id.cancelScanButton).setOnClickListener { cancel() }
         findViewById<MaterialButton>(R.id.doneButton).setOnClickListener { returnToHome() }
         findViewById<MaterialButton>(R.id.payButton).setOnClickListener { pay() }
 
@@ -95,25 +102,54 @@ class ScanToPayActivity : AppCompatActivity() {
         pushPayment(context)
     }
 
-    private fun pushPayment(context: VerifiedPaymentContext) {
+    /**
+     * Cancel: before Pay (or after a not-sent attempt), just leave. While paying, cancel the payment
+     * by the order ID signed into the QR — possible only while it is still on the phone:
+     *  - `CANCELLED`: the pay callback receives `NOT_SENT` / `CANCELLED` and leaves the screen.
+     *  - `TOO_LATE_TO_CANCEL_REQUEST_ALREADY_SENT`: say it can no longer be cancelled; keep waiting.
+     *  - nothing in progress for that order ID: leave.
+     * A QR with no order ID cannot be cancelled once paying, so Cancel is disabled for it then.
+     */
+    private fun cancel() {
+        val orderId = verified?.merchantOrderId
+        if (!paying || orderId.isNullOrBlank()) return finish()
+        val answer = sdk.tokenisationService.cancelPayment(orderId)
+        when (cancelAction(answer)) {
+            CancelAction.AWAIT_CANCELLED_OUTCOME -> Unit
+            CancelAction.KEEP_WAITING -> if (cancelRefusedTooLate(answer)) showReason(getString(R.string.cancel_too_late))
+            CancelAction.LEAVE -> finish()
+        }
+    }
+
+    private fun setPaying(value: Boolean, context: VerifiedPaymentContext) {
+        paying = value
         val payButton = findViewById<MaterialButton>(R.id.payButton)
-        payButton.isEnabled = false
-        payButton.text = getString(R.string.scan_paying)
+        payButton.isEnabled = !value
+        payButton.text = getString(if (value) R.string.scan_paying else R.string.scan_pay_confirm)
+        // Nothing to name the payment by: a QR without an order ID can't be cancelled mid-payment.
+        findViewById<MaterialButton>(R.id.cancelScanButton).isEnabled =
+            !value || !context.merchantOrderId.isNullOrBlank()
+    }
+
+    private fun pushPayment(context: VerifiedPaymentContext) {
+        setPaying(true, context)
         sdk.tokenisationService.payScannedContext(context) { result ->
+            setPaying(false, context)
             // The Result fails only on a setup mistake (VeyraSetupException) — a bug in this app's
             // integration, found in development. Every refusal is an outcome.
             val outcome = result.getOrElse { setupError ->
-                payButton.isEnabled = true
-                payButton.text = getString(R.string.scan_pay_confirm)
                 showReason(setupError.message ?: getString(R.string.error_occurred))
+                return@payScannedContext
+            }
+            if (outcome.responseStatusReason == OutcomeReason.CANCELLED) {
+                // Cancelled before it left the phone: nothing was paid — leave.
+                finish()
                 return@payScannedContext
             }
             if (outcome.responseStatus == OutcomeStatus.NOT_SENT) {
                 // Nothing reached the gateway, so nothing was charged: stay on the confirm screen
                 // and say what to fix (AUTH_CANCELLED, ONLINE_REQUIRED, NO_NETWORK_CONNECTION…).
                 // Paying again pays this same QR.
-                payButton.isEnabled = true
-                payButton.text = getString(R.string.scan_pay_confirm)
                 showReason(
                     if (outcome.responseStatusReason == "DEVICE_NOT_BOUND") {
                         // Card added on another device: retrying can never succeed here.

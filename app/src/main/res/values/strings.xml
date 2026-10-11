@@ -125,6 +125,7 @@
     <string name="currency_symbol">$</string>
     <string name="clear">Clear</string>
     <string name="cancel">Cancel</string>
+    <string name="cancel_too_late">This can no longer be cancelled</string>
     <string name="new_transaction">New Transaction</string>
     <string name="new_payment">New Payment</string>
     <string name="done">Done</string>
