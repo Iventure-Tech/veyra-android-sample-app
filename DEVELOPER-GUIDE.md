@@ -2518,7 +2518,7 @@ and React Native (`merchant.onMerchantStatusChanged(listener)`).
 | Field | Values |
 |---|---|
 | Wallet `TransactionSummary.authorizationStatus` | `PENDING` (the SDK is still checking) / `APPROVED` / `DECLINED` / `FAILED` / `null` (old row — outcome not known) |
-| Merchant `TransactionInfo.transactionStatus` | `APPROVED` / `DECLINED` / `PENDING` (outcome not known yet, the SDK keeps checking) / `FAILED` |
+| Merchant `TransactionInfo.transactionStatus` | `APPROVED` / `DECLINED` / `PENDING` (outcome not known yet, the SDK keeps checking) / `FAILED` / `RETRY` (reached Veyra, not sent to the bank; nothing was debited — retry with the same order id) |
 | Credit confirmation (`TransactionInfo.creditConfirmationStatus`) | `RECEIVED` (funds landed in the merchant's account), `UNABLE_TO_CONFIRM` (30 days passed with no answer), or `null` while unconfirmed — show "not confirmed yet", never "not received". A settlement fact, never a payment outcome |
 | Wallet scan rejection (`inspectScannedQr` → `MpmScanResult.Rejected`) | `MALFORMED` / `MISSING_SIGNATURE` / `UNKNOWN_KEY` / `BAD_SIGNATURE` (show "couldn't verify this code") / `EXPIRED` (show "code expired — ask the merchant for a fresh one"). Every rejection ends the flow; no payment was attempted |
 

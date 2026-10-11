@@ -41,7 +41,7 @@ class TransactionAdapter(
         holder.statusText.setTextColor(
             when (item.transactionStatus) {
                 TransactionStatus.APPROVED -> holder.itemView.context.getColor(R.color.success_green)
-                TransactionStatus.DECLINED, TransactionStatus.FAILED -> holder.itemView.context.getColor(R.color.error_red)
+                TransactionStatus.DECLINED, TransactionStatus.FAILED, TransactionStatus.RETRY -> holder.itemView.context.getColor(R.color.error_red)
                 TransactionStatus.PENDING -> holder.itemView.context.getColor(android.R.color.holo_orange_dark)
             }
         )
