@@ -343,7 +343,7 @@ class PayActivity : AppCompatActivity() {
      * Drive the SDK reconcile on a 3s loop while a CPM QR is displayed and report the
      * terminal outcome. The reconcile is AWAITED before reading (fire-and-forget would race
      * the read). Settlement is matched on THIS render's own [transactionHash], never a
-     * time window: `getTransactions` returns only TERMINAL rows, so a record-time
+     * time window: `getTransactions` includes earlier settled rows, so a record-time
      * heuristic would let a just-settled PREVIOUS CPM payment be shown as this unscanned
      * QR's outcome ("Paid — <merchant>" before the merchant charged). The hash is unique per
      * render, so only the row for this QR can settle the display. "QR payment" is the pre-backfill
@@ -364,7 +364,9 @@ class PayActivity : AppCompatActivity() {
                 sdk.tokenisationService.getTransactions(tokenUniqueReference, 10)
                     .firstOrNull { it.transactionHash == transactionHash }
             }
-            if (row != null) { // terminal by construction: getTransactions returns settled rows only
+            // getTransactions returns this render's own PENDING row too — only a final
+            // status settles the display; anything else keeps the QR up and polling.
+            if (row != null && row.authorizationStatus?.uppercase() in setOf("APPROVED", "DECLINED", "FAILED")) {
                 val name = row.merchantName?.takeIf { it != "QR payment" }
                 onSettled(row.authorizationStatus == "APPROVED", name)
                 return@launch
