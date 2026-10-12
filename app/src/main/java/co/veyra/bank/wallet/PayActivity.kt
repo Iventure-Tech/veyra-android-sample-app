@@ -317,10 +317,10 @@ class PayActivity : AppCompatActivity() {
             }
             override fun onFinish() { /* SDK onExpired handles the blank + label */ }
         }.also { it.start() }
-        // Poll the gateway reconcile directly every 3s while the QR is up,
-        // so the outcome lands within seconds of the merchant charging — not on WorkManager's
-        // schedule. Stops on settle or when the dialog is dismissed.
-        val settlePoll = startCpmSettlePolling(tokenUniqueReference, transactionHash) { approved, merchant ->
+        // Check this payment's status every 3s while the QR is up, so the outcome lands within
+        // seconds of the merchant charging — not on the SDK's backoff schedule. Stops on settle or
+        // when the dialog is dismissed.
+        val settlePoll = startCpmSettlePolling(transactionHash) { approved, merchant ->
             // Settled — stop the expiry watch so it can't later overwrite the outcome with "Expired".
             onQrExpired = null
             sdk.tokenisationService.cancelQrExpiry()
@@ -340,32 +340,24 @@ class PayActivity : AppCompatActivity() {
     }
 
     /**
-     * Drive the SDK reconcile on a 3s loop while a CPM QR is displayed and report the
-     * terminal outcome. The reconcile is AWAITED before reading (fire-and-forget would race
-     * the read). Settlement is matched on THIS render's own [transactionHash], never a
-     * time window: `getTransactions` includes earlier settled rows, so a record-time
-     * heuristic would let a just-settled PREVIOUS CPM payment be shown as this unscanned
-     * QR's outcome ("Paid — <merchant>" before the merchant charged). The hash is unique per
-     * render, so only the row for this QR can settle the display. "QR payment" is the pre-backfill
-     * placeholder — don't show it as a merchant name.
+     * Check THIS payment's status on a 3s loop while a CPM QR is displayed and report the
+     * terminal outcome. It asks about this render's own [transactionHash] only — one request
+     * per check. `reconcilePendingTransactions` asks about every pending payment on the device,
+     * so calling it on a loop sends a burst of requests each time and gets the wallet throttled
+     * (429) by the gateway. The hash is unique per render, so only the row for this QR can
+     * settle the display. "QR payment" is the pre-backfill placeholder — don't show it as a
+     * merchant name.
      */
     private fun startCpmSettlePolling(
-        tokenUniqueReference: String,
         transactionHash: String,
         onSettled: (approved: Boolean, merchantName: String?) -> Unit,
     ): kotlinx.coroutines.Job = lifecycleScope.launch {
         while (isActive) {
             kotlinx.coroutines.delay(3000)
-            val done = kotlinx.coroutines.CompletableDeferred<Unit>()
-            // A reconcile that could not run carries a failureReason; this loop just asks again.
-            sdk.tokenisationService.reconcilePendingTransactions { done.complete(Unit) }
-            done.await()
-            val row = withContext(Dispatchers.IO) {
-                sdk.tokenisationService.getTransactions(tokenUniqueReference, 10)
-                    .firstOrNull { it.transactionHash == transactionHash }
-            }
-            // getTransactions returns this render's own PENDING row too — only a final
-            // status settles the display; anything else keeps the QR up and polling.
+            // A check that could not be made carries a failureReason; this loop just asks again.
+            val row = sdk.tokenisationService.refreshTransactionStatus(transactionHash).transaction
+            // The row stays PENDING until the merchant charges — only a final status
+            // settles the display; anything else keeps the QR up and polling.
             if (row != null && row.authorizationStatus?.uppercase() in setOf("APPROVED", "DECLINED", "FAILED")) {
                 val name = row.merchantName?.takeIf { it != "QR payment" }
                 onSettled(row.authorizationStatus == "APPROVED", name)
