@@ -1148,8 +1148,11 @@ gateway, because an attempt this phone never recorded can outrank its own.
 
 **A payment still on its way counts.** A tap or customer-QR charge is on the history as `PENDING` before its request leaves, and the gateway's answer is combined with this phone's own attempts — so while a payment is in flight the lookup answers `PENDING` (don't take another payment), even when the gateway has no record of it yet.
 
-**A merchant QR that has not been paid yet** has no attempt, so it answers rank 4 —
-`RETRY` / `25` / `UNABLE_TO_LOCATE_RECORD` — until the customer pays it. That is not a failure.
+**A merchant QR that has not been paid yet** answers `PENDING` on the phone that created it — the QR is
+on its history from creation, as an open attempt — until the customer pays it. That is not a failure,
+and it means the same thing: don't take another payment for the order while the QR can still be paid.
+Asked from a phone with no record of the QR (another phone, or after a reinstall), the gateway has no
+attempt to report, so it answers rank 4 — `RETRY` / `25` / `UNABLE_TO_LOCATE_RECORD`.
 
 **It is a read.** It changes nothing, so asking again is always safe, and it never answers with an
 outcome of its own. When the gateway could not be asked, `failureReason` says why
@@ -1666,21 +1669,26 @@ sdk.tokenisationService.showQrToPay(amountMinorUnits, onExpired = { blankQr() })
 sdk.tokenisationService.cancelQrExpiry()
 ```
 
-The result (`CpmPaymentQr`): `responseStatus` / `responseStatusReason` / `message` (the outcome — `APPROVED`, or `NOT_SENT` with the reason, when `payload` and the other QR fields are `null`), `payload` (**render as the QR**), `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. To show "paid ✓" on the customer's screen, poll while the QR is up: call `reconcilePendingTransactions`, then look for the history row whose `transactionHash` matches:
+The result (`CpmPaymentQr`): `responseStatus` / `responseStatusReason` / `message` (the outcome — `APPROVED`, or `NOT_SENT` with the reason, when `payload` and the other QR fields are `null`), `payload` (**render as the QR**), `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. To show "paid ✓" on the customer's screen, check **this QR's own payment** while the QR is up: call [`refreshTransactionStatus`](#refreshtransactionstatus-1) with its `transactionHash` — one request per check — and stop on a final status:
 
 ```kotlin
+val hash = qr.transactionHash ?: return
 while (isActive) {
     delay(3000)
-    val done = CompletableDeferred<ReconcileResult>()
-    sdk.tokenisationService.reconcilePendingTransactions { done.complete(it) }
-    done.await()   // failureReason set only when the reconcile could not run; read the history either way
-    val row = withContext(Dispatchers.IO) {
-        sdk.tokenisationService.getTransactions(tokenUniqueReference, 10)
-            .firstOrNull { it.transactionHash == qr.transactionHash }
+    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
+    val row = sdk.tokenisationService.refreshTransactionStatus(hash).transaction
+    when (row?.authorizationStatus) {
+        "APPROVED" -> { onSettled(true); break }
+        "DECLINED", "FAILED" -> { onSettled(false); break }
+        else -> Unit   // PENDING (the QR's own row exists from the moment it is shown), RETRY, or not found yet: keep the QR up
     }
-    if (row != null) { onSettled(row.authorizationStatus == "APPROVED"); break }
 }
 ```
+
+The QR's history row is created `PENDING` as soon as the QR is shown, so finding the row is not
+the answer — only a final status is. **Don't loop `reconcilePendingTransactions` here:** it asks
+about every open payment on the device back-to-back, so on a short loop it gets the wallet
+throttled (`429`) by the gateway.
 
 ---
 
@@ -1789,7 +1797,7 @@ val refresh: TransactionRefresh = sdk.tokenisationService.refreshCreditConfirmat
 
 #### `reconcilePendingTransactions`
 
-Reconcile still-`PENDING` rows against the backend. Call it opportunistically: on returning to the foreground, on pull-to-refresh, and on a short loop while a shown QR is on screen (that rail is offline — reconciliation is how its outcome arrives).
+Reconcile still-`PENDING` rows against the backend. It asks about **every** open row on the device, so call it on an occasion — on returning to the foreground, on pull-to-refresh, when history is opened — **never on a loop**. A screen waiting for one payment (a [shown QR](#show-qr-to-pay-customer-presented), say) calls [`refreshTransactionStatus`](#refreshtransactionstatus-1) with that payment's hash instead: one request rather than one per open row. If the gateway throttles (`429`), the pass stops there and the remaining rows wait for the SDK's next sweep.
 
 ```kotlin
 sdk.tokenisationService.reconcilePendingTransactions { result: ReconcileResult ->
