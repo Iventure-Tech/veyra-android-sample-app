@@ -49,18 +49,19 @@ import co.veyra.bank.duplicateOrderText
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
 import co.veyra.common.outcome.OutcomeStatus
-import co.veyra.softpos.payment.sdk.TransactionResponse
+import co.veyra.softpos.payment.sdk.TapEvent
+import co.veyra.softpos.payment.sdk.TapResult
 import co.veyra.softpos.payment.sdk.payment.ResponseStatus
 import co.veyra.softpos.payment.sdk.merchant.NubanBank
 import co.veyra.softpos.payment.sdk.VeyraSoftPOSSdk
-import co.veyra.common.Environment
 import co.veyra.softpos.payment.sdk.VeyraSoftPosSdkConfig
 import co.veyra.softpos.payment.sdk.CurrencyUtils
 import co.veyra.softpos.payment.sdk.TransactionInfo
-import co.veyra.softpos.payment.sdk.TransactionRequest
+import co.veyra.softpos.payment.sdk.TapRequest
 import co.veyra.softpos.payment.sdk.TransactionStatus
-import co.veyra.softpos.payment.sdk.merchant.MerchantRegistrationData
-import co.veyra.softpos.payment.sdk.context.ContextPaymentClient
+import co.veyra.softpos.payment.sdk.merchant.MerchantRegistration
+import co.veyra.softpos.payment.sdk.merchant.MerchantType
+import co.veyra.softpos.payment.sdk.merchant.MerchantUpdate
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -165,8 +166,6 @@ class GetPaidActivity : AppCompatActivity() {
     private var qrPaymentJob: Job? = null
     // The MPM result page's credit-confirmation watch (see watchCreditConfirmationForQr).
     private var creditWatchJob: Job? = null
-    // Kept so the QR page can stop the SDK-owned expiry watch on teardown.
-    private var contextClient: co.veyra.softpos.payment.sdk.context.ContextPaymentClient? = null
 
     // Transactions flow
     private lateinit var pageTransactionsList: View
@@ -177,7 +176,7 @@ class GetPaidActivity : AppCompatActivity() {
     
     // Current page state
     private var currentPage = PAGE_AMOUNT_ENTRY
-    /** Authorised amount in minor units (matches [TransactionRequest.amount] / EMV 9F02). */
+    /** Authorised amount in minor units (matches [TapRequest.amountMinorUnits] / EMV 9F02). */
     private var currentAmountMinorUnits: Long = 0
     private var currentPaymentCurrencyCode: String = "0566"
     /**
@@ -186,7 +185,7 @@ class GetPaidActivity : AppCompatActivity() {
      * key the gateway has never seen, and every receipt or status lookup built on it would miss.
      */
     private var lastOriginalTransactionReference: String = ""
-    private var lastSuccessfulResponse: TransactionResponse? = null
+    private var lastSuccessfulResponse: TapResult? = null
 
     /**
      * The order id of the sale on screen — a stand-in for the till's own order/basket/invoice id,
@@ -253,9 +252,9 @@ class GetPaidActivity : AppCompatActivity() {
         com.journeyapps.barcodescanner.ScanContract(),
     ) { result ->
         val text = result.contents ?: return@registerForActivityResult // scan cancelled
-        // Checked on the phone: APPROVED with the QR, or NOT_SENT / INVALID_REQUEST when it is not a
+        // Checked on the phone: APPROVED with the QR, or FAILED / INVALID_REQUEST when it is not a
         // payment QR — a hint, and the merchant simply scans again.
-        val inspection = sdk.cpmCustomerQrService.inspect(text)
+        val inspection = sdk.inspectCustomerQr(text)
         val scanned = inspection.qr
         if (inspection.responseStatus != OutcomeStatus.APPROVED || scanned == null) {
             Toast.makeText(this, "Not a payment code — try again", Toast.LENGTH_SHORT).show()
@@ -297,7 +296,7 @@ class GetPaidActivity : AppCompatActivity() {
         setCpmConfirmCharging(true)
         lifecycleScope.launch {
             // Always an outcome — never thrown.
-            val response = sdk.cpmCustomerQrService.charge(scanned, merchantOrderId = orderId)
+            val response = sdk.chargeCustomerQr(scanned, merchantOrderId = orderId)
             setCpmConfirmCharging(false)
             val status = response.responseStatus
             attemptEnded(status?.name)
@@ -424,6 +423,9 @@ class GetPaidActivity : AppCompatActivity() {
         // initialised here so its reader arming binds to this activity's lifecycle.
         co.veyra.bank.VeyraBank.ensureInitialized(this)
         sdk = VeyraSoftPOSSdk.initialize(this, co.veyra.bank.VeyraBank.customerId(this), co.veyra.bank.VeyraBank.softposConfig(this), co.veyra.bank.VeyraBank.provider())
+        // The SDK confirms an approved sale's credit in the background — possibly minutes later,
+        // possibly for a sale from an earlier session — and reports it here; match by reference.
+        sdk.onCreditConfirmation { showCreditConfirmation(it) }
 
 
         container = findViewById(R.id.container)
@@ -443,9 +445,9 @@ class GetPaidActivity : AppCompatActivity() {
         when {
             // Opened from Home's Settings gear: go straight to merchant registration/edit
             // (NONE mode — no reader), regardless of amount-entry readiness.
-            openMerchantSettings && sdk.merchantService.isRegistered() -> showPage(PAGE_MERCHANT_EDIT)
+            openMerchantSettings && sdk.isRegistered() -> showPage(PAGE_MERCHANT_EDIT)
             openMerchantSettings -> showPage(PAGE_MERCHANT_TYPE_SELECTION)
-            sdk.merchantService.isRegistered() -> showPage(PAGE_AMOUNT_ENTRY)
+            sdk.isRegistered() -> showPage(PAGE_AMOUNT_ENTRY)
             else -> showPage(PAGE_MERCHANT_TYPE_SELECTION)
         }
 
@@ -453,7 +455,7 @@ class GetPaidActivity : AppCompatActivity() {
 
     /** Runs a merchant activate/deactivate requested from Home, then finishes back to Home. */
     private fun performMerchantAction(action: String) {
-        if (!sdk.merchantService.isRegistered()) {
+        if (!sdk.isRegistered()) {
             Toast.makeText(this, getString(R.string.merchant_not_registered), Toast.LENGTH_LONG).show()
             finish()
             return
@@ -473,9 +475,9 @@ class GetPaidActivity : AppCompatActivity() {
             }
         }
         if (action == ACTION_ACTIVATE) {
-            sdk.merchantService.activate(onResult)
+            sdk.activate(onResult)
         } else {
-            sdk.merchantService.deactivate(onResult)
+            sdk.deactivate(onResult)
         }
     }
 
@@ -669,7 +671,7 @@ class GetPaidActivity : AppCompatActivity() {
     }
 
     private fun updateMerchantActiveState() {
-        val isActive = sdk.merchantService.isMerchantActive()
+        val isActive = sdk.isMerchantActive()
         if (isActive) {
             merchantInactiveMessage.visibility = View.GONE
             processPaymentButton.isEnabled = true
@@ -678,13 +680,13 @@ class GetPaidActivity : AppCompatActivity() {
             processPaymentButton.isEnabled = false
             // Still waiting to be activated — kick an immediate backend status check so the
             // amount screen unlocks as soon as the merchant goes active, without waiting
-            // for the periodic (foreground) poll.
-            sdk.merchantService.refreshStatus()
+            // for the periodic (foreground) poll; the answer unlocks it the moment it is active.
+            sdk.refreshStatus { if (sdk.isMerchantActive()) updateMerchantActiveState() }
         }
     }
     
     private fun loadTransactionsList() {
-        val transactions = sdk.transactionService.getLastTransactions(50)
+        val transactions = sdk.getTransactions()
         transactionsEmptyText.visibility = if (transactions.isEmpty()) View.VISIBLE else View.GONE
         transactionsRecyclerView.visibility = if (transactions.isEmpty()) View.GONE else View.VISIBLE
         transactionsRecyclerView.layoutManager = LinearLayoutManager(this)
@@ -695,7 +697,7 @@ class GetPaidActivity : AppCompatActivity() {
     }
     
     private fun loadTransactionDetail(ref: String) {
-        val tx = sdk.transactionService.getTransaction(ref) ?: return
+        val tx = sdk.getTransaction(ref) ?: return
         pageTransactionDetail.findViewById<TextView>(R.id.detailReference).text = getString(R.string.reference)
         pageTransactionDetail.findViewById<TextView>(R.id.detailReferenceValue).text = tx.merchantTransactionReference
         // Your own order id, from the stored row. Always a row, em-dash when the sale carried
@@ -782,7 +784,7 @@ class GetPaidActivity : AppCompatActivity() {
             note.text = getString(R.string.status_check_in_flight)
             note.visibility = View.VISIBLE
             lifecycleScope.launch {
-                val refresh = sdk.transactionService.refreshTransactionStatus(tx.merchantTransactionReference)
+                val refresh = sdk.refreshTransactionStatus(tx.merchantTransactionReference)
                 val failureReason = refresh.failureReason
                 val fresh = refresh.transaction
                 when {
@@ -848,7 +850,7 @@ class GetPaidActivity : AppCompatActivity() {
             note.text = getString(R.string.credit_check_in_flight)
             note.visibility = View.VISIBLE
             lifecycleScope.launch {
-                val refresh = sdk.transactionService.refreshCreditConfirmation(tx.merchantTransactionReference)
+                val refresh = sdk.refreshCreditConfirmation(tx.merchantTransactionReference)
                 val failureReason = refresh.failureReason
                 when {
                     // An offline device gets the one piece of advice that helps. The row is
@@ -929,7 +931,7 @@ class GetPaidActivity : AppCompatActivity() {
         
         // Amount Entry: Process Payment Button
         processPaymentButton.setOnClickListener {
-            if (!sdk.merchantService.isMerchantActive()) {
+            if (!sdk.isMerchantActive()) {
                 Toast.makeText(this, getString(R.string.merchant_not_active), Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
@@ -944,7 +946,7 @@ class GetPaidActivity : AppCompatActivity() {
             hideKeyboard()
             currentAmountMinorUnits = minorUnits
             saleOrderId = null // a new amount is a new sale
-            val storedMerchant = sdk.merchantService.getStoredMerchantData()
+            val storedMerchant = sdk.getStored()
             currentPaymentCurrencyCode = storedMerchant?.currencyCode
                 ?: storedMerchant?.countryCode?.trim()?.padStart(4, '0')?.takeIf { it.length == 4 }
                 ?: "0566"
@@ -957,7 +959,7 @@ class GetPaidActivity : AppCompatActivity() {
         // amount, so no amount entry happens on this side; the merchant confirms what it says.
         pageAmountEntry.findViewById<com.google.android.material.button.MaterialButton>(R.id.scanCustomerQrButton)
             .setOnClickListener {
-                if (!sdk.merchantService.isMerchantActive()) {
+                if (!sdk.isMerchantActive()) {
                     Toast.makeText(this, getString(R.string.merchant_not_active), Toast.LENGTH_LONG).show()
                     return@setOnClickListener
                 }
@@ -1070,24 +1072,19 @@ class GetPaidActivity : AppCompatActivity() {
         placeholder.visibility = View.VISIBLE
         placeholder.text = getString(R.string.qr_creating)
 
-        val merchantId = sdk.merchantService.getStoredMerchantData()?.merchantId
-        if (merchantId.isNullOrBlank()) {
+        if (!sdk.hasStoredMerchant()) {
             placeholder.text = getString(R.string.merchant_not_registered)
             return
         }
         qrPaymentJob = lifecycleScope.launch {
-            val client = ContextPaymentClient(
-                this@GetPaidActivity,
-                Environment.TEST,
-            )
-            contextClient = client
             // The SDK owns the expiry timer; blank the QR the moment it fires (an expired
             // QR must not stay scannable), instead of waiting for the server-polled
             // EXPIRED state up to one poll interval later.
             // Always an outcome: APPROVED with the QR, the gateway's refusal
             // (DUPLICATE_MERCHANT_ORDER_ID…), or one the SDK originated (NOT_SENT / PENDING).
-            val created = client.createContextPayment(
-                merchantId, currentAmountMinorUnits, currentPaymentCurrencyCode,
+            val created = sdk.createPaymentContext(
+                amountMinorUnits = currentAmountMinorUnits,
+                currency = currentPaymentCurrencyCode,
                 // The merchant-presented rail carries your order id too, so all three rails
                 // (tap, CPM charge, MPM) tie a sale back to the same POS order.
                 merchantOrderId = orderIdForAttempt(),
@@ -1122,7 +1119,7 @@ class GetPaidActivity : AppCompatActivity() {
             while (isActive) {
                 delay(QR_POLL_INTERVAL_MS)
                 // A poll that could not be made carries a reason and no state: just ask again.
-                val status = client.contextStatus(txRef).status ?: continue
+                val status = sdk.contextStatus(txRef).status ?: continue
                 when {
                     status.isSettled -> {
                         showPage(PAGE_PAYMENT_RESULT)
@@ -1176,7 +1173,7 @@ class GetPaidActivity : AppCompatActivity() {
         lifecycleScope.launch {
             // A read: never thrown (except a setup mistake). failureReason says why the gateway could
             // not be asked; value is then what this phone holds for the order, if anything.
-            val lookup = sdk.transactionService.paymentStatus(orderId)
+            val lookup = sdk.paymentStatus(orderId)
             val order = lookup.value
             val text = buildString {
                 if (order != null) {
@@ -1236,8 +1233,8 @@ class GetPaidActivity : AppCompatActivity() {
      * but the plumbing differs — the contexts endpoint carries no credit fields, so the SDK's
      * settle reconciler learns `isCreditConfirmationSupported` from the transaction-status rail
      * moments after the settle, and the background credit sweep then confirms the credit onto the
-     * stored row. Neither leg pushes a callback the app registered for this sale (the
-     * `onCreditConfirmation` param belongs to `makeCardPayment`), so the result page watches the
+     * stored row. No callback says when the bank turns out to support confirmation (the SDK-wide
+     * `onCreditConfirmation` observer only brings the final answer), so the result page watches the
      * SDK's own stored row: first for the supported flag (shows the waiting line), then for the
      * terminal confirmation state (flips it). Leaving the result page ends the watch — a later
      * confirmation still lands in history and as the SDK-wide toast/callback where registered.
@@ -1254,7 +1251,7 @@ class GetPaidActivity : AppCompatActivity() {
         creditWatchJob = lifecycleScope.launch {
             var waiting = false
             while (currentPage == PAGE_PAYMENT_RESULT) {
-                val row = sdk.transactionService.getTransaction(ref)
+                val row = sdk.getTransaction(ref)
                 val confirmation = row?.creditConfirmationStatus
                 when {
                     confirmation != null -> {
@@ -1289,8 +1286,7 @@ class GetPaidActivity : AppCompatActivity() {
         qrPaymentJob?.cancel()
         qrPaymentJob = null
         // Stop the SDK expiry watch so its callback can't fire after the QR page is left.
-        contextClient?.cancelQrExpiry()
-        contextClient = null
+        if (::sdk.isInitialized) sdk.cancelQrExpiry()
     }
 
     /** Encode [payload] verbatim into the qrImage slot. */
@@ -1364,51 +1360,37 @@ class GetPaidActivity : AppCompatActivity() {
         // the response; an app that invents one is keying its receipts off a value the gateway
         // has never seen.
         lastOriginalTransactionReference = ""
-        val request = TransactionRequest.Builder(
-            amount = currentAmountMinorUnits,
+        val request = TapRequest(
+            amountMinorUnits = currentAmountMinorUnits,
             currency = currentPaymentCurrencyCode,
             merchantOrderId = orderIdForAttempt(),
-        ).build()
+        )
         
-        // Initiate payment using SDK. makeCardPayment claims SOFTPOS at the point of use; in this
+        // Initiate payment using SDK. tap.start claims SOFTPOS at the point of use; in this
         // combined app the claim is refused only while a wallet payment is genuinely mid-flight,
         // which arrives on the callback as NOT_SENT / MODE_REFUSED like any other refusal.
         try {
-            sdk.cardPaymentService.makeCardPayment(
-                request = request,
-                callback = { transactionResponse ->
-                    runOnUiThread {
-                        handlePaymentResponse(transactionResponse)
-                    }
-                },
-                onCardDetected = {
-                    runOnUiThread {
-                        // Update UI to show card detected. Cancel stays: until the request leaves the
-                        // phone it still cancels; after that the SDK refuses it and we keep waiting.
+            // One event stream for the tap, delivered on the main thread; it ends with one Result.
+            sdk.tap.start(request) { event ->
+                when (event) {
+                    is TapEvent.CardDetected -> {
+                        // Cancel stays: until the request leaves the phone it still cancels; after
+                        // that the SDK refuses it and we keep waiting.
                         waitingText.text = getString(R.string.card_detected)
                         waitingText.setTextColor(getColor(R.color.success_green))
                         statusMessage.text = "Card detected! Processing..."
                         nfcProgressBar.visibility = View.VISIBLE
                     }
-                },
-                // Tapped target had no compatible payment app (another phone, a transit/access
-                // card, an empty wallet). The SDK stays armed — just hint and keep waiting.
-                onUnsupportedCard = {
-                    runOnUiThread { showReTapHint(getString(R.string.card_not_supported)) }
-                },
-                // Card contact lost before it could be read. The SDK stays armed — prompt a
-                // steady re-tap and keep waiting.
-                onCardContactLost = {
-                    runOnUiThread { showReTapHint(getString(R.string.card_hold_steady)) }
-                },
-                // The SDK polls the beneficiary bank after an approved sale (when the
-                // payment response says confirmation is supported) and pushes the answer here —
-                // possibly minutes later, possibly for a sale from an earlier session, so match by
-                // the reference. Settlement news only; the payment outcome is already on screen.
-                onCreditConfirmation = { confirmation ->
-                    runOnUiThread { showCreditConfirmation(confirmation) }
+                    // Tapped target had no compatible payment app (another phone, a transit/access
+                    // card, an empty wallet). The SDK stays armed — just hint and keep waiting.
+                    is TapEvent.UnsupportedCard -> showReTapHint(getString(R.string.card_not_supported))
+                    // Card contact lost before it could be read. The SDK stays armed — prompt a
+                    // steady re-tap and keep waiting.
+                    is TapEvent.CardContactLost -> showReTapHint(getString(R.string.card_hold_steady))
+                    is TapEvent.Result -> handlePaymentResponse(event.result)
+                    else -> Unit
                 }
-            )
+            }
         } catch (e: co.veyra.common.VeyraSetupException) {
             // A mistake in this app's integration (not signed in, both SDKs used without the
             // VeyraSdk facade…) — found in development, never a payment outcome.
@@ -1467,7 +1449,7 @@ class GetPaidActivity : AppCompatActivity() {
         cancelButton.visibility = View.VISIBLE
     }
 
-    private fun handlePaymentResponse(response: TransactionResponse) {
+    private fun handlePaymentResponse(response: TapResult) {
         val status = response.responseStatus
         attemptEnded(status?.name)
         // A cancelled payment (Cancel button, or the SDK withdrawing an armed tap on a mode switch)
@@ -1724,7 +1706,8 @@ class GetPaidActivity : AppCompatActivity() {
         registerButton.isEnabled = false
         registerProgressBar.visibility = View.VISIBLE
 
-        val data = MerchantRegistrationData(
+        val data = MerchantRegistration(
+            merchantType = if (merchantTypeIsPersonal) MerchantType.PERSONAL else MerchantType.BUSINESS,
             merchantName = merchantName,
             emailAddress = email,
             phoneNumber = phone,
@@ -1743,10 +1726,7 @@ class GetPaidActivity : AppCompatActivity() {
             walletAccountId = email.takeIf { it.isNotBlank() }
         )
 
-        // Personal vs business differ only in which SDK call is made — the result handling is shared.
-        val register = if (merchantTypeIsPersonal) sdk.merchantService::registerPersonalMerchant
-                       else sdk.merchantService::registerBusinessMerchant
-        register(data) { response ->
+        sdk.register(data) { response ->
             runOnUiThread {
                 registerButton.isEnabled = true
                 registerProgressBar.visibility = View.GONE
@@ -1770,7 +1750,7 @@ class GetPaidActivity : AppCompatActivity() {
     }
     
     private fun populateEditForm() {
-        val merchant = sdk.merchantService.getStoredMerchantData() ?: return
+        val merchant = sdk.getStored() ?: return
         editMerchantNameEditText.setText(merchant.merchantName)
         editEmailEditText.setText(merchant.emailAddress)
         editPhoneEditText.setText(merchant.phoneNumber)
@@ -1815,17 +1795,19 @@ class GetPaidActivity : AppCompatActivity() {
         ) ?: return
 
         saveChangesButton.isEnabled = false
-        sdk.merchantService.updateMerchant(
-            merchantName = merchantName,
-            emailAddress = email,
-            phoneNumber = phone,
-            addressLine1 = addressLine1,
-            addressLine2 = addressLine2,
-            city = city,
-            state = state,
-            countryCode = countryCodePadded,
-            accountNumber = accountNumber,
-            institutionCode = institutionCode
+        sdk.update(
+            MerchantUpdate(
+                merchantName = merchantName,
+                emailAddress = email,
+                phoneNumber = phone,
+                addressLine1 = addressLine1,
+                addressLine2 = addressLine2,
+                city = city,
+                state = state,
+                countryCode = countryCodePadded,
+                accountNumber = accountNumber,
+                institutionCode = institutionCode,
+            ),
         ) { response ->
             saveChangesButton.isEnabled = true
             when (response.responseStatus) {
@@ -1862,7 +1844,7 @@ class GetPaidActivity : AppCompatActivity() {
         }
         bankLoadingProgress.visibility = View.VISIBLE
         bankDropdown.isEnabled = false
-        sdk.merchantService.getBanks { result ->
+        sdk.getSettlementBanks { result ->
             bankLoadingProgress.visibility = View.GONE
             bankDropdown.isEnabled = true
             if (result.responseStatus == OutcomeStatus.APPROVED) {
@@ -1881,7 +1863,7 @@ class GetPaidActivity : AppCompatActivity() {
     }
 
     private fun loadBanksForEdit() {
-        val merchantCode = sdk.merchantService.getStoredMerchantData()?.institutionCode
+        val merchantCode = sdk.getStored()?.institutionCode
         editSelectedBankCode = merchantCode ?: ""
         editBankDropdown.setText("", false)
         val banks = cachedBanks
@@ -1891,7 +1873,7 @@ class GetPaidActivity : AppCompatActivity() {
         }
         editBankLoadingProgress.visibility = View.VISIBLE
         editBankDropdown.isEnabled = false
-        sdk.merchantService.getBanks { result ->
+        sdk.getSettlementBanks { result ->
             editBankLoadingProgress.visibility = View.GONE
             editBankDropdown.isEnabled = true
             if (result.responseStatus == OutcomeStatus.APPROVED) {
@@ -1964,6 +1946,7 @@ class GetPaidActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cancelAutoNavigate()
+        if (::sdk.isInitialized) sdk.stopObservingCreditConfirmation()
         // Leaving the screen: cancel any sale still on this phone (an armed or reading tap, a
         // charge or QR create not yet sent) by its order ID. One already sent runs to its result,
         // which the SDK records in history.
@@ -1981,7 +1964,7 @@ class GetPaidActivity : AppCompatActivity() {
     }
     
     private fun loadReceiptPage() {
-        val result = sdk.transactionService.generateTransactionReceipt(receiptTransactionRef)
+        val result = sdk.getReceipt(receiptTransactionRef)
         if (result != null) {
             val bytes = Base64.decode(result.qrCodeBase64, Base64.DEFAULT)
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
