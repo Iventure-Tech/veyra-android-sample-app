@@ -2120,6 +2120,14 @@ Registering the same card again replaces its handlers; other cards are unaffecte
 
 ---
 
+## Setup — migrating from 3.0.0
+
+Nothing changes on Android. `VeyraSdk.initialize(activity, customerId, VeyraSdkConfig(softpos, wallet), provider)`,
+`VeyraSoftPOSSdk.initialize(activity, customerId, config, provider)` and
+`VeyraWalletSdk.initialize(context, customerId, config, provider, activity)` keep their 3.0.0 shape.
+iOS and React Native now take the same `(customerId, config, provider)` order, so the three
+platforms' setup code reads alike.
+
 ## Wallet — migrating from 3.0.0
 
 The wallet API now has one name, one owner and one shape per operation on Android, iOS and React
