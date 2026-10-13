@@ -2122,9 +2122,12 @@ Registering the same card again replaces its handlers; other cards are unaffecte
 
 ## Setup — migrating from 3.0.0
 
-Nothing changes on Android. `VeyraSdk.initialize(activity, customerId, VeyraSdkConfig(softpos, wallet), provider)`,
+The Android signatures keep their 3.0.0 shape: `VeyraSdk.initialize(activity, customerId, VeyraSdkConfig(softpos, wallet), provider)`,
 `VeyraSoftPOSSdk.initialize(activity, customerId, config, provider)` and
-`VeyraWalletSdk.initialize(context, customerId, config, provider, activity)` keep their 3.0.0 shape.
+`VeyraWalletSdk.initialize(context, customerId, config, provider, activity)`. What changed is that
+`VeyraSdk.initialize` now sets up and signs in **both** SDKs, so wallet and SoftPOS calls work right
+after it, from any screen; payment screens still call their own SDK's `initialize` with themselves,
+which is what makes that SDK's NFC follow the screen.
 iOS and React Native now take the same `(customerId, config, provider)` order, so the three
 platforms' setup code reads alike.
 
