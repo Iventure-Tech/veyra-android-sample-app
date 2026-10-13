@@ -754,6 +754,12 @@ sdk.merchantService.updateMerchant(
 
 Arm the reader for one sale and wait for the customer's tap. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only real outcomes (approved / declined / pending / failed) end the payment.
 
+**The screen stays awake while a payment is live.** From the moment a tap payment starts until it
+ends or is cancelled (waiting for a card, reading it, and contacting the bank), the SDK keeps
+your get-paid screen on, because a phone whose screen has gone off cannot read a card. With no
+payment running, the screen sleeps as usual. If your activity already keeps its screen on, the SDK
+leaves that setting alone.
+
 ```kotlin
 val request = TransactionRequest.Builder(
     amount = 32500L,                                   // MINOR units: ₦325.00
