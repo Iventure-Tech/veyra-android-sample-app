@@ -1177,11 +1177,16 @@ The sample has a **Look up an order** button on its Transactions page (`GetPaidA
 
 Every operation is called on the wallet object (`val wallet = VeyraWalletSdk.initialize(...)`, or `VeyraSdk.wallet` in a combined app), under the same names as on iOS and React Native; callbacks arrive on the main thread; every call ends in an outcome you branch on by `responseStatus` and `responseStatusReason` — see [Errors and outcomes](#errors-and-outcomes).
 
-### Add a card (digitisation)
+### Add token
+
+| Call | What it does | Returns |
+|---|---|---|
+| `getBanks(accountNumber?) { }` | The banks a card can be added from, or the one bank for an account number | `BankList` |
+| `verifyAccount(params) { }` | Checks with the issuer that the account can be added | `VerifyAccountResponse` |
+| `digitise(params) { }` | Adds the card and stores its payment data on the phone | `DigitiseResult` |
+| `cancelDigitise(clientRequestId)` | Cancels a `digitise` while it is still on the phone | `CancelResult` |
 
 Flow: `getBanks` → `verifyAccount` → `digitise`. On success the SDK receives, decrypts and stores the payment material on-device — the card can pay immediately (`APPROVED`) or after activation (`APPROVE_REQUIRE_AUTH`).
-
----
 
 #### `getBanks`
 
@@ -1205,8 +1210,6 @@ wallet.getBanks(accountNumber = "1234567890") { list ->
     }
 }
 ```
-
----
 
 #### `verifyAccount`
 
@@ -1244,8 +1247,6 @@ wallet.verifyAccount(params) { response ->
 ```
 
 `VerifyAccountResponse`: `responseStatus`, `responseStatusReason` (the issuer's cause on a decline), `responseCode` (the issuer's decision literal), `message`. The SDK counts the cards already in this wallet itself.
-
----
 
 #### `digitise`
 
@@ -1306,9 +1307,23 @@ wallet.digitise(params) { result ->
 
 `DigitiseResult`: `responseStatus` and `responseStatusReason` (the outcome — branch on these first; see [Table C](#table-c--veyra-token-service-wallet-add-card-activation-cards)), `responseCode` (the add-card decision: `APPROVED` / `APPROVE_REQUIRE_AUTH` / `DECLINED`), `tokenUniqueReference` (the card's identity for every later call), `activationMethods` (`DigitiseActivationMethod(medium, contact)`; empty unless activation is needed), `tokenStored` (the card's payment data is on the phone), `message`. The same type as on iOS and React Native.
 
+#### `cancelDigitise`
+
+`wallet.cancelDigitise(clientRequestId)` cancels the `digitise` started with that `clientRequestId`
+while its request is still on the phone, and answers at once with a `CancelResult`. See
+[Cancelling a call](#cancelling-a-call).
+
 ---
 
 ### Activation
+
+| Call | What it does | Returns |
+|---|---|---|
+| `requestActivationCode(tokenUniqueReference, medium, reason = ADD_CARD) { }` | Sends an activation code to the method the customer picked | `ActivationCodeResponse` |
+| `activate(tokenUniqueReference, activationCode) { }` | Activates the token with the code the customer entered | `ActivateResponse` |
+| `observeActivation(tokenUniqueReference, onActivated, onTimeout, onError?)` | Polls a token activated out of band (call centre, website, issuer app) | — (callbacks) |
+| `pauseActivationObserver(ref)` / `resumeActivationObserver(ref)` / `stopActivationObserver(ref)` | Pause, resume or stop that polling | — |
+| `hasActivationObserver(ref)` | Whether an observer for that token is still polling | `Boolean` |
 
 When digitise returns `APPROVE_REQUIRE_AUTH`, the response carries the issuer's **activation methods**. Branch on each entry's `medium`:
 
@@ -1318,8 +1333,6 @@ When digitise returns `APPROVE_REQUIRE_AUTH`, the response carries the issuer's 
 | `CALL_CENTER_PHONE` / `AUTOMATED_CALL_CENTER_PHONE` | Show the phone number + "Call now" | `observeActivation` while they call |
 | `WEBSITE` | Show the domain + "Open website" | `observeActivation` |
 | `MOBILE_APPLICATION` | "Open your bank's app" | `observeActivation` |
-
----
 
 #### `requestActivationCode`
 
@@ -1380,7 +1393,7 @@ wallet.activate(tokenUniqueReference = ref, activationCode = code) { response ->
 
 `ActivateResponse` carries `responseStatus` / `responseStatusReason` (on `FAILED` the reason is the failure code), `tokenUniqueReference`, `status`, `message`, and these failure fields (all null on success): `failureCode` — typed `ActivationFailureCode`, one of `TOKEN_NOT_FOUND`, `TOKEN_NOT_ACTIVATABLE`, `ACTIVATION_LOCKED`, `NO_PENDING_ACTIVATION`, `CODE_EXPIRED`, `CODE_INVALID`, `MAX_ATTEMPTS_EXCEEDED`, `CODE_REQUEST_RATE_LIMITED`, `INVALID_REQUEST`, `ACTIVATION_FAILED`, or `UNKNOWN` for a code newer than this SDK (raw value in `failureCodeRaw`); `attemptsRemaining` — code attempts left where a cap applies (0 when exhausted/locked); `recommendDelete` — `RecommendDelete.MUST` / `MAY` after an exhausted cycle (delete the dead token rather than leaving it in the card list), null otherwise (raw in `recommendDeleteRaw`).
 
-#### `observeActivation` (+ pause / resume / stop)
+#### `observeActivation` (+ pause / resume / stop / `hasActivationObserver`)
 
 For the out-of-band methods (call centre / website / issuer app) the activation happens elsewhere — observe the token until it activates. The SDK polls every 10 s for up to 5 minutes; callbacks arrive on the main thread; observing the same token again replaces the previous observer.
 
@@ -1391,7 +1404,7 @@ For the out-of-band methods (call centre / website / issuer app) the activation 
 | `onTimeout` | After 5 minutes without activation — show a fallback message (the SDK keeps checking in the background thereafter). |
 | `onError` | Optional — each failed check (polling continues). |
 
-Wire the lifecycle: `pauseActivationObserver(ref)` when the screen backgrounds, `resumeActivationObserver(ref)` on return (the timeout clock keeps running while paused — if it lapsed, `onTimeout` fires immediately), `stopActivationObserver(ref)` when the screen is dismissed. Extras: `tokenStatus(ref) { result: TokenStatusResult -> }` for a one-shot check — `responseStatus` `APPROVED` with `lifecycleStatus` (`TokenStatus`: `ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `DEACTIVATED` / `EXPIRED`, plus `UNKNOWN` for a value newer than this SDK; raw value in `tokenStatus`) — lets you say "suspended — contact your bank" vs "pending — enter your code" vs "expired — re-add the card"; otherwise `FAILED` with `responseStatusReason` and `lifecycleStatus == null` (a read, never `PENDING`). `hasActivationObserver(ref)` says whether an observer for that card is still polling.
+Wire the lifecycle: `pauseActivationObserver(ref)` when the screen backgrounds, `resumeActivationObserver(ref)` on return (the timeout clock keeps running while paused — if it lapsed, `onTimeout` fires immediately), `stopActivationObserver(ref)` when the screen is dismissed. For a one-shot check, see [`tokenStatus`](#tokenstatus). `hasActivationObserver(ref)` says whether an observer for that card is still polling.
 
 ```kotlin
 wallet.observeActivation(
@@ -1405,7 +1418,17 @@ wallet.observeActivation(
 
 ---
 
-### Cards & tokens
+### Tokens
+
+| Call | What it does | Returns |
+|---|---|---|
+| `getTokens()` | The tokens in this wallet that can pay, each with its last 3 payments. Local read | `List<Token>` |
+| `getActiveToken()` | The token a tap or a payment QR pays with | `Token?` |
+| `setActiveToken(tokenUniqueReference)` | Selects the token payments use; arms tap-to-pay when a pay session is open | `CardSelection` |
+| `getToken(tokenUniqueReference)` | One token | `Token?` |
+| `tokenStatus(tokenUniqueReference) { }` | Asks the server for the token's status | `TokenStatusResult` |
+| `deactivateToken(tokenUniqueReference) { }` | Deactivates the token on the server and removes it from the phone | `TokenStatusUpdateResponse` |
+| `getPaymentApplicationInstanceId()` | This install's SDK-generated instance ID | `String` |
 
 #### `getTokens`
 
@@ -1425,7 +1448,7 @@ payButtons.isEnabled = active?.requiresOnline != true
 
 **`deviceNotBound`** — `true` when the backend refused to issue payment keys for this card to this device: the card was added on another phone, or on this one before the app was reinstalled or its data wiped. The SDK stops asking for keys for that card. Render it greyed-out and non-tappable with "Add this card again on this phone" — **not** "go online": while it is `true`, `requiresOnline` is always `false`, because connecting cannot fix it. Removing the card and adding it again on this phone is the only remedy, and removal is the only thing that clears the flag.
 
-#### Handling card states in your UI
+#### Handling token states in your UI
 
 A card is not simply "there or not" — it can be awaiting activation, frozen for a refresh, or suspended server-side. Derive one display state per card, in this precedence order, every time you render the wallet:
 
@@ -1488,6 +1511,20 @@ showQrButton.isEnabled = !blocked
 
 A deactivated card needs no rendering rule — the SDK removes it from the list entirely when your app calls `deactivateToken`.
 
+#### `getActiveToken`
+
+Read the currently selected card, or `null` when none is selected — the counterpart to
+`setActiveToken`, and the way a screen answers "which card would pay right now?" without inferring
+it from a list.
+
+```kotlin
+val active: Token? = wallet.getActiveToken()
+```
+
+Synchronous, and a read of stored state rather than a network call. It returns `null` both when no
+card has ever been selected and when the selected card has since been removed, so treat `null` as
+"prompt the customer to choose" rather than as an error.
+
 #### `setActiveToken`
 
 Select the card payments use (at most one card is active), by its `tokenUniqueReference`. Selecting it also arms it for tap-to-pay (unless your app has [closed its pay session](#arming-and-disarming-tap-to-pay-pay-session)). The selection happens on the phone — nothing is sent — and it returns a `CardSelection` instead of throwing (only a [setup error](#1-setup-errors-thrown) throws). Tap events and refusals are observed separately, once, not per selection:
@@ -1525,6 +1562,51 @@ if (!selection.selected) {
 | `FAILED` | `CARD_DATA_MISSING` | The card is listed but its payment data is not on this phone — remove it and add it again |
 
 `stopObservingTapEvents()` and `stopObservingPaymentRefusals(tokenUniqueReference)` stop them — call them when the screen that registered them goes away. A card whose payment data is gone answers `CARD_DATA_MISSING` here, and is not in `getTokens()`.
+
+#### `getToken`
+
+`wallet.getToken(tokenUniqueReference)` reads one token from the phone, or `null` when it is not in
+this wallet (or cannot pay — see [`getTokens`](#gettokens)).
+
+#### `tokenStatus`
+
+`wallet.tokenStatus(tokenUniqueReference) { result: TokenStatusResult -> }` asks the server for the
+token's status once and updates the stored token. `responseStatus` `APPROVED` comes with
+`lifecycleStatus` (`TokenStatus`: `ACTIVE` / `PENDING_ACTIVATION` / `SUSPENDED` / `DEACTIVATED` /
+`EXPIRED`, or `UNKNOWN` for a value newer than this SDK; the raw value is in `tokenStatus`). It lets
+you say "suspended — contact your bank" vs "pending — enter your code" vs "expired — add it again".
+Otherwise `FAILED` with `responseStatusReason` and `lifecycleStatus == null` (a read, never `PENDING`).
+
+#### `deactivateToken`
+
+`deactivateToken(ref) { response: TokenStatusUpdateResponse -> }` deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active. The callback always receives an outcome: `APPROVED` (removed); `FAILED` (`TOKEN_NOT_FOUND`, `TOKEN_STATE_CONFLICT`); `PENDING` (sent, no usable answer — re-read the card list before trying again). Never sent (e.g. offline) is also `FAILED`, with the reason (`NO_NETWORK_CONNECTION`) — retry once it is fixed.
+
+```kotlin
+wallet.deactivateToken(ref) { response ->
+    when (response.responseStatus) {
+        OutcomeStatus.APPROVED -> refreshCards()
+        OutcomeStatus.PENDING -> { showHint("Still removing — check again shortly"); refreshCards() }
+        else -> showError("Failed to remove card: ${response.message ?: response.responseStatusReason}")
+    }
+}
+```
+
+#### `getPaymentApplicationInstanceId`
+
+`wallet.getPaymentApplicationInstanceId()` returns this install's `payment_application_instance_id` —
+SDK-generated (`VYRA` + 32 hex characters), minted on first use, never backed up, new on reinstall.
+Read-only: the app cannot set or regenerate it.
+
+---
+
+### Tap to pay
+
+| Call | What it does | Returns |
+|---|---|---|
+| `openPaySession(activity)` | Arms tap-to-pay on your pay screen until `closePaySession` | `PaySessionResult` |
+| `closePaySession()` | Disarms tap-to-pay at once | — |
+| `isPaySessionOpen()` | Whether a session opened with `openPaySession` is open | `Boolean` |
+| `observeTapEvents { }` / `stopObservingTapEvents()` | Tap started / completed at a terminal, for whichever token is active | `WalletTapEvent` (to the listener) |
 
 #### Arming and disarming tap-to-pay (pay session)
 
@@ -1593,37 +1675,77 @@ handles it the same way as an Android phone without NFC.
 `openPaySession` throws `VeyraSetupException` (`INVALID_CONFIGURATION`) only for integration
 mistakes: `enableNfc = false` in `VeyraWalletSdkConfig`, or a call that is not on the main thread.
 
-#### `getActiveToken`
+#### `observeTapEvents`
 
-Read the currently selected card, or `null` when none is selected — the counterpart to
-`setActiveToken`, and the way a screen answers "which card would pay right now?" without inferring
-it from a list.
+`wallet.observeTapEvents { event -> }` registers one listener for the wallet, whichever token is
+active; registering again replaces it, and `stopObservingTapEvents()` removes it. Events arrive on the
+main thread: `WalletTapEvent.TransactionStarted(tokenUniqueReference)` when a terminal starts reading
+the token, and `WalletTapEvent.TransactionCompleted(response)` with what the phone saw. That is a
+card-reading event, not the payment's outcome — see [Wallet tap](#wallet-tap--transactioncompleted).
+Register it again after each `initialize`. The example is under [`setActiveToken`](#setactivetoken).
+
+---
+
+### QR pay
+
+| Call | What it does | Returns |
+|---|---|---|
+| `showQrToPay(amountMinorUnits, onExpired?) { }` | Renders a payment QR for the active token; `onExpired` fires when it lapses | `Result<CpmPaymentQr>` |
+| `cancelQrExpiry()` | Stops the `onExpired` watch | — |
+| `inspectScannedQr(payload)` | Verifies a scanned merchant QR on the phone | `MpmScanResult` |
+| `payScannedContext(verified) { }` | Pays a verified merchant QR with the active token | `Result<PaymentOutcome>` |
+| `cancelPayment(merchantOrderId)` | Cancels a `payScannedContext` while it is still on the phone | `CancelResult` |
+
+#### Show QR to pay (customer-presented)
+
+The customer keys nothing at the till: your app asks the amount first (the merchant states it), authenticates, and renders a **dynamic payment QR** with the amount cryptographically bound inside. Fully offline — the merchant's SoftPOS submits the payment; the outcome lands in history via reconciliation.
+
+#### `showQrToPay` + `cancelQrExpiry`
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `amountMinorUnits` | **Mandatory** | The merchant-stated amount — bound into the QR's cryptogram; the merchant's scan charges exactly this or fails. |
+| `onExpired` | Optional | Fired **once, on the main thread**, when the QR lapses — blank or replace the code (a dimmed QR is still scannable). A new render supersedes the watch; `cancelQrExpiry()` stops it (call on screen teardown). |
+
+The SDK raises the authentication sheet itself — **one gesture per QR**; regenerating after expiry is a fresh payment attempt and asks again.
 
 ```kotlin
-val active: Token? = wallet.getActiveToken()
+wallet.showQrToPay(amountMinorUnits, onExpired = { blankQr() }) { result ->
+    val qr = result.getOrElse { setupError -> throw setupError }   // VeyraSetupException only
+    if (qr.responseStatus == OutcomeStatus.APPROVED && qr.payload != null) {
+        renderQr(qr.payload); pollForSettlement(qr)
+    } else {
+        // NOT_SENT: no QR was made — AUTH_CANCELLED / AUTH_FAILED / AUTH_UNAVAILABLE, NO_ACTIVE_CARD,
+        // CARD_CANNOT_SHOW_QR, ONLINE_REQUIRED, TOKEN_NOT_ACTIVE, DEVICE_NOT_BOUND…
+        showError(qr.message ?: qr.responseStatusReason)
+    }
+}
+// dialog/screen teardown:
+wallet.cancelQrExpiry()
 ```
 
-Synchronous, and a read of stored state rather than a network call. It returns `null` both when no
-card has ever been selected and when the selected card has since been removed, so treat `null` as
-"prompt the customer to choose" rather than as an error.
-
-#### `deactivateToken`
-
-`deactivateToken(ref) { response: TokenStatusUpdateResponse -> }` deactivates on the backend, then wipes every on-device artefact for the card and promotes the next card to active. The callback always receives an outcome: `APPROVED` (removed); `FAILED` (`TOKEN_NOT_FOUND`, `TOKEN_STATE_CONFLICT`); `PENDING` (sent, no usable answer — re-read the card list before trying again). Never sent (e.g. offline) is also `FAILED`, with the reason (`NO_NETWORK_CONNECTION`) — retry once it is fixed.
+The result (`CpmPaymentQr`): `responseStatus` / `responseStatusReason` / `message` (the outcome — `APPROVED`, or `NOT_SENT` with the reason, when `payload` and the other QR fields are `null`), `payload` (**render as the QR**), `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. To show "paid ✓" on the customer's screen, check **this QR's own payment** while the QR is up: call [`refreshTransactionStatus`](#refreshtransactionstatus-1) with its `transactionHash` — one request per check — and stop on a final status:
 
 ```kotlin
-wallet.deactivateToken(ref) { response ->
-    when (response.responseStatus) {
-        OutcomeStatus.APPROVED -> refreshCards()
-        OutcomeStatus.PENDING -> { showHint("Still removing — check again shortly"); refreshCards() }
-        else -> showError("Failed to remove card: ${response.message ?: response.responseStatusReason}")
+val hash = qr.transactionHash ?: return
+while (isActive) {
+    delay(3000)
+    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
+    val row = wallet.refreshTransactionStatus(hash).value
+    when (row?.authorizationStatus) {
+        "APPROVED" -> { onSettled(true); break }
+        "DECLINED", "FAILED" -> { onSettled(false); break }
+        else -> Unit   // PENDING (the QR's own row exists from the moment it is shown), RETRY, or not found yet: keep the QR up
     }
 }
 ```
 
----
+The QR's history row is created `PENDING` as soon as the QR is shown, so finding the row is not
+the answer — only a final status is. **Don't loop `reconcilePendingTransactions` here:** it asks
+about every open payment on the device back-to-back, so on a short loop it gets the wallet
+throttled (`429`) by the gateway.
 
-### Scan to pay (merchant QR)
+#### Scan to pay (merchant QR)
 
 The customer scans a merchant's get-paid QR: **inspect** (on-device verification) → confirm screen → **authenticate** (biometric) → **pay**.
 
@@ -1706,60 +1828,26 @@ wallet.payScannedContext(ctx) { result ->
 }
 ```
 
----
+#### `cancelPayment`
 
-### Show QR to pay (customer-presented)
-
-The customer keys nothing at the till: your app asks the amount first (the merchant states it), authenticates, and renders a **dynamic payment QR** with the amount cryptographically bound inside. Fully offline — the merchant's SoftPOS submits the payment; the outcome lands in history via reconciliation.
-
-#### `showQrToPay` + `cancelQrExpiry`
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `amountMinorUnits` | **Mandatory** | The merchant-stated amount — bound into the QR's cryptogram; the merchant's scan charges exactly this or fails. |
-| `onExpired` | Optional | Fired **once, on the main thread**, when the QR lapses — blank or replace the code (a dimmed QR is still scannable). A new render supersedes the watch; `cancelQrExpiry()` stops it (call on screen teardown). |
-
-The SDK raises the authentication sheet itself — **one gesture per QR**; regenerating after expiry is a fresh payment attempt and asks again.
-
-```kotlin
-wallet.showQrToPay(amountMinorUnits, onExpired = { blankQr() }) { result ->
-    val qr = result.getOrElse { setupError -> throw setupError }   // VeyraSetupException only
-    if (qr.responseStatus == OutcomeStatus.APPROVED && qr.payload != null) {
-        renderQr(qr.payload); pollForSettlement(qr)
-    } else {
-        // NOT_SENT: no QR was made — AUTH_CANCELLED / AUTH_FAILED / AUTH_UNAVAILABLE, NO_ACTIVE_CARD,
-        // CARD_CANNOT_SHOW_QR, ONLINE_REQUIRED, TOKEN_NOT_ACTIVE, DEVICE_NOT_BOUND…
-        showError(qr.message ?: qr.responseStatusReason)
-    }
-}
-// dialog/screen teardown:
-wallet.cancelQrExpiry()
-```
-
-The result (`CpmPaymentQr`): `responseStatus` / `responseStatusReason` / `message` (the outcome — `APPROVED`, or `NOT_SENT` with the reason, when `payload` and the other QR fields are `null`), `payload` (**render as the QR**), `amountMinorUnits`, `currencyNumeric`, `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. To show "paid ✓" on the customer's screen, check **this QR's own payment** while the QR is up: call [`refreshTransactionStatus`](#refreshtransactionstatus-1) with its `transactionHash` — one request per check — and stop on a final status:
-
-```kotlin
-val hash = qr.transactionHash ?: return
-while (isActive) {
-    delay(3000)
-    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
-    val row = wallet.refreshTransactionStatus(hash).value
-    when (row?.authorizationStatus) {
-        "APPROVED" -> { onSettled(true); break }
-        "DECLINED", "FAILED" -> { onSettled(false); break }
-        else -> Unit   // PENDING (the QR's own row exists from the moment it is shown), RETRY, or not found yet: keep the QR up
-    }
-}
-```
-
-The QR's history row is created `PENDING` as soon as the QR is shown, so finding the row is not
-the answer — only a final status is. **Don't loop `reconcilePendingTransactions` here:** it asks
-about every open payment on the device back-to-back, so on a short loop it gets the wallet
-throttled (`429`) by the gateway.
+`wallet.cancelPayment(merchantOrderId)` cancels the `payScannedContext` of the QR carrying that order
+ID (`VerifiedPaymentContext.merchantOrderId`) while it is still on the phone, and answers at once with
+a `CancelResult`. A QR that carries no order ID cannot be cancelled. See
+[Cancelling a call](#cancelling-a-call).
 
 ---
 
-### History, receipts & maintenance
+### History, receipts and reconciliation
+
+| Call | What it does | Returns |
+|---|---|---|
+| `getTransactions(tokenUniqueReference, limit = 50)` | A token's payments, most recent first. Local read | `List<TransactionSummary>` |
+| `reconcilePendingTransactions { }` | Asks the backend about every pending payment, once | `ReconcileResult` |
+| `refreshTransactionStatus(transactionHash)` | Asks about one pending payment now (`suspend`) | `VeyraLookup<TransactionSummary>` |
+| `refreshCreditConfirmation(transactionHash)` | Asks now whether the merchant's bank received the funds (`suspend`) | `VeyraLookup<TransactionSummary>` |
+| `processReceipt(qrPayload, expectedTransactionHash?)` | Verifies and stores a scanned merchant receipt | `ReceiptScanResult` |
+| `getReceipts(limit = 100)` | The stored receipts, most recent first | `List<TransactionReceipt>` |
+| `getReceiptForTransaction(transactionHash)` | The receipt for one payment | `TransactionReceipt?` |
 
 #### `getTransactions`
 
@@ -1772,34 +1860,7 @@ val lastFive = wallet.getTransactions(tokenUniqueReference, limit = 5)
 
 `TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED` / `RETRY` — `RETRY`: the payment reached Veyra but was not sent to the bank, nothing was charged; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderId` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, tap and generated-QR rows learn it from the status poll, so `null` on a still-open row means "not learned yet", not "no order id"; for display and reconciliation — receipts and status refreshes key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
-##### `observeTransactionResolved` (wallet) — a `PENDING` payment reached its outcome
-
-A wallet payment that gets no immediate answer is stored and polled by the SDK until the backend
-settles it — seconds, or days. Unresolved rows are visible in history, so the customer can be
-looking at the row at the moment it settles. This is how your app hears it without polling:
-
-```kotlin
-wallet.observeTransactionResolved { resolution ->
-    // resolution.transactionHash        — which payment (match your row on this)
-    // resolution.tokenUniqueReference   — the card that paid
-    // resolution.status                 — APPROVED / DECLINED / FAILED (never PENDING)
-    // resolution.responseCode           — the wire literal, for receipts and support
-    // resolution.reason                 — e.g. INSUFFICIENT_FUNDS — display, never parse
-    // resolution.amountInMinorUnit, resolution.merchantName
-}
-```
-
-**This is not the same channel as the merchant SDK's `TransactionResolvedObserver`**, and the two
-are not interchangeable: that one is the *merchant's* side of a payment and identifies a sale by the
-reference the merchant's own app supplied — a value a wallet never sees. The wallet keys on
-`transactionHash`.
-
-Fires only on a genuine `PENDING` → final transition: a poll that leaves the row pending, and a
-later write that backfills merchant details onto an already-final row, both wake nothing. Register
-once after each `initialize` (a sign-out or customer switch drops it), no replay (read `getTransactions` on appear), last registration wins, delivered
-on the main thread. `stopObservingTransactionResolved()` stops it.
-
-##### Merchant credit confirmation (wallet side)
+#### Merchant credit confirmation (wallet side)
 
 Did the money actually reach the merchant's bank? The wallet asks the same question the merchant's own SDK asks about that sale, from the payer's side — **settlement confirmation only**, it never changes or restates the payment outcome.
 
@@ -1825,43 +1886,6 @@ Two things to get right, because they are easy to get wrong in the user's favour
 The same three core fields, with the same meanings, exist on the SoftPOS side of the SDK — so an app that implements both halves reads one contract.
 
 **Cadence, stated plainly:** the wallet's periodic sweep rides WorkManager, whose floor is **15 minutes**, so the backoff ladder is measured in sweep cycles and the practical resolution is coarser than the merchant SDK's ten-second loop. A one-shot chain runs immediately after a payment resolves, so a credit that lands promptly is usually picked up within seconds; after that, expect minutes, not seconds.
-
-##### `refreshCreditConfirmation` — let the customer ask on demand
-
-The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
-days**, finalising the row as `UNABLE_TO_CONFIRM` — which means "we stopped asking", never "the funds
-were not received". Expose **`refreshCreditConfirmation`** in your UI so the user can ask on demand;
-it works after the window closes, and a later `RECEIVED` replaces the give-up state.
-
-**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
-this rail. `true` means the SDK is polling and you may offer the manual check; `false`/`null` means
-there is nothing to ask — do not call it, and show no credit UI for that transaction. Offer the
-action only while
-
-```kotlin
-tx.authorizationStatus == "APPROVED" &&
-    tx.isCreditConfirmationSupported == true &&
-    tx.creditConfirmationStatus != "RECEIVED"
-```
-
-```kotlin
-// suspend — call from a coroutine. Keyed by the row's transaction hash, never by a credit id.
-val refresh: VeyraLookup<TransactionSummary> = wallet.refreshCreditConfirmation(transactionHash)
-// refresh.value — the row as it now stands; refresh.failureReason — null when the check was made
-```
-
-- **A row outside that predicate is a no-op**, not an error: no request is made and the unchanged row
-  comes back.
-- **It works past the 30-day window**, including on a row already stamped `UNABLE_TO_CONFIRM` — that
-  is the case it exists for. Nothing ever replaces `RECEIVED`.
-- **Only a confirmation is written.** Anything else leaves the row exactly as it was.
-- **Settlement only.** Nothing on this path can change `authorizationStatus`, `responseCode` or
-  `responseStatusReason`.
-- **Still no callback** — the returned row and the stored history are the wallet's whole credit
-  surface, by design.
-- **A failed check changes nothing.** When it cannot be made the result carries a `failureReason`
-  (e.g. `NO_NETWORK_CONNECTION` when the device is offline) beside the unchanged row. Leave the credit
-  line reading "not confirmed yet".
 
 #### `reconcilePendingTransactions`
 
@@ -1905,6 +1929,43 @@ works past the window and off the sweep's list; it never forces an outcome; a lo
 made returns the unchanged row with a `failureReason` (`NO_NETWORK_CONNECTION` when offline) and never
 changes the payment; and there is no SDK-side throttle, so disable the button while a call is in flight.
 
+#### `refreshCreditConfirmation`
+
+The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
+days**, finalising the row as `UNABLE_TO_CONFIRM` — which means "we stopped asking", never "the funds
+were not received". Expose **`refreshCreditConfirmation`** in your UI so the user can ask on demand;
+it works after the window closes, and a later `RECEIVED` replaces the give-up state.
+
+**Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
+this rail. `true` means the SDK is polling and you may offer the manual check; `false`/`null` means
+there is nothing to ask — do not call it, and show no credit UI for that transaction. Offer the
+action only while
+
+```kotlin
+tx.authorizationStatus == "APPROVED" &&
+    tx.isCreditConfirmationSupported == true &&
+    tx.creditConfirmationStatus != "RECEIVED"
+```
+
+```kotlin
+// suspend — call from a coroutine. Keyed by the row's transaction hash, never by a credit id.
+val refresh: VeyraLookup<TransactionSummary> = wallet.refreshCreditConfirmation(transactionHash)
+// refresh.value — the row as it now stands; refresh.failureReason — null when the check was made
+```
+
+- **A row outside that predicate is a no-op**, not an error: no request is made and the unchanged row
+  comes back.
+- **It works past the 30-day window**, including on a row already stamped `UNABLE_TO_CONFIRM` — that
+  is the case it exists for. Nothing ever replaces `RECEIVED`.
+- **Only a confirmation is written.** Anything else leaves the row exactly as it was.
+- **Settlement only.** Nothing on this path can change `authorizationStatus`, `responseCode` or
+  `responseStatusReason`.
+- **Still no callback** — the returned row and the stored history are the wallet's whole credit
+  surface, by design.
+- **A failed check changes nothing.** When it cannot be made the result carries a `failureReason`
+  (e.g. `NO_NETWORK_CONNECTION` when the device is offline) beside the unchanged row. Leave the credit
+  line reading "not confirmed yet".
+
 #### `processReceipt` / `getReceipts` / `getReceiptForTransaction`
 
 Scan a merchant's **receipt QR** to store the customer's copy. The SDK decodes, validates that the receipt matches a payment this wallet actually made, de-duplicates and stores it. It is checked on the phone — nothing is sent — and the callback always receives a `ReceiptScanResult` (the `suspend` variant returns it); only a [setup error](#1-setup-errors-thrown) throws.
@@ -1938,6 +1999,117 @@ val receipt  = wallet.getReceiptForTransaction(hash)         // by transactionHa
 | `FAILED` | `PAYMENT_NOT_CONFIRMED` | The matching payment's outcome is not confirmed yet — scan again shortly |
 | `FAILED` | `RECEIPT_FOR_ANOTHER_TRANSACTION` | Scoped scan (`expectedTransactionHash`): the receipt is for a different transaction |
 | `FAILED` | `SDK_INTERNAL_ERROR` | The SDK failed inside itself |
+
+---
+
+### Observers
+
+The SDK tells you when stored truth changes. Each observer is one listener for the wallet —
+registering again replaces it, its `stopObserving…` call removes it — delivered on the main thread,
+with no replay: read the store (`getTokens`, `getTransactions`) when a screen appears. Register them
+again after each `initialize`, because a sign-out or a customer switch drops them. The same names
+exist on iOS and React Native.
+
+| Call | What it does | Delivers |
+|---|---|---|
+| `observeTokenStatusChanged { }` / `stopObservingTokenStatusChanged()` | A token's status changed — suspended, reactivated, expired, deactivated | `TokenStatusChange` |
+| `observeTransactionResolved { }` / `stopObservingTransactionResolved()` | A pending payment reached its final outcome | `WalletTransactionResolution` |
+| `observeCardKeyStateChanged { }` / `stopObservingCardKeyStateChanged()` | A token ran out of payment keys, or got them back | `CardKeyState` |
+| `observePaymentRefusals(tokenUniqueReference, …)` / `stopObservingPaymentRefusals(tokenUniqueReference)` | A payment with that token was refused before anything was sent | `RequireOnlineEvent` / `AmountExceedCardLimitEvent` / `DeviceNotBoundEvent` |
+
+#### `observeTokenStatusChanged`
+
+The sweep can apply `SUSPENDED` while the customer is *looking at* a card screen. Subscribe and you
+are told the moment it is applied:
+
+```kotlin
+wallet.observeTokenStatusChanged { change ->
+    // change.tokenUniqueReference — which card (it fires for any stored card)
+    // change.status               — ACTIVE / SUSPENDED / EXPIRED / DEACTIVATED /
+    //                               PENDING_ACTIVATION / UNKNOWN
+    // change.rawStatus            — the literal as stored; log this one
+    // change.canPay               — whether the card can pay right now
+    // change.previousRawStatus    — what it held before, or null if this is its first status
+}
+```
+
+- **Branch on `canPay`, not on `status`.** It is the same check the SDK's own payment gates use, so a
+  status added after your build shipped is correctly reported as *not* payable.
+- **Register once, after each `initialize`** — not per card screen (a sign-out or customer switch
+  drops it).
+- **It does not replay.** Read `getTokens()` at start-up.
+- **Only genuine changes fire.** A sweep that re-applies the status a card already had wakes nothing.
+- **Last registration wins.** `stopObservingTokenStatusChanged()` stops it. Delivered on the main thread.
+
+The same channel exists with the same name on iOS (`VeyraWallet.shared.observeTokenStatusChanged { … }`)
+and React Native (`wallet.observeTokenStatusChanged(listener)`).
+
+#### `observeTransactionResolved`
+
+A wallet payment that gets no immediate answer is stored and polled by the SDK until the backend
+settles it — seconds, or days. Unresolved rows are visible in history, so the customer can be
+looking at the row at the moment it settles. This is how your app hears it without polling:
+
+```kotlin
+wallet.observeTransactionResolved { resolution ->
+    // resolution.transactionHash        — which payment (match your row on this)
+    // resolution.tokenUniqueReference   — the card that paid
+    // resolution.status                 — APPROVED / DECLINED / FAILED (never PENDING)
+    // resolution.responseCode           — the wire literal, for receipts and support
+    // resolution.reason                 — e.g. INSUFFICIENT_FUNDS — display, never parse
+    // resolution.amountInMinorUnit, resolution.merchantName
+}
+```
+
+**This is not the same channel as the merchant SDK's `TransactionResolvedObserver`**, and the two
+are not interchangeable: that one is the *merchant's* side of a payment and identifies a sale by the
+reference the merchant's own app supplied — a value a wallet never sees. The wallet keys on
+`transactionHash`.
+
+Fires only on a genuine `PENDING` → final transition: a poll that leaves the row pending, and a
+later write that backfills merchant details onto an already-final row, both wake nothing. Register
+once after each `initialize` (a sign-out or customer switch drops it), no replay (read `getTransactions` on appear), last registration wins, delivered
+on the main thread. `stopObservingTransactionResolved()` stops it.
+
+#### `observeCardKeyStateChanged`
+
+```kotlin
+wallet.observeCardKeyStateChanged { state ->
+    // state.tokenUniqueReference, state.requiresOnline, state.deviceNotBound
+}
+// stopObservingCardKeyStateChanged() stops it
+```
+
+`requiresOnline` here is **the same value `getTokens()` reports**, so a callback can never contradict
+the list you are about to draw. `CardKeyState.deviceNotBound` mirrors `Token.deviceNotBound`: render
+it as "add this card again on this phone", not as a connect prompt.
+
+**Know its limit before you word your UI.** It fires when a payment uses a key and when a refresh
+delivers new ones. Payment keys *also* expire by clock, with no SDK code running — **nothing fires
+for that**, and such a card simply reads as `requiresOnline` on your next `getTokens()`. Keep reading
+the card list when a screen appears. There is deliberately no API to trigger a key refresh — the SDK
+owns when keys are replenished.
+
+#### `observePaymentRefusals`
+
+What each refusal means, and what to tell the payer, is under
+[Refused payments](#refused-payments--onrequireonline-onamountexceedcardlimit-and-ondevicenotbound).
+
+Register them per card — the active one, or several, for a wallet list that reflects refusals across
+cards:
+
+```kotlin
+wallet.observePaymentRefusals(
+    tokenUniqueReference = card.tokenUniqueReference!!,
+    onRequireOnline = { event -> promptToConnect(event.amountMinorUnits) },
+    onAmountExceedCardLimit = { event -> offerSmallerAmount(event.cardLimitMinorUnits) },
+    onDeviceNotBound = { event -> promptToAddCardAgain(event.tokenUniqueReference) },
+)
+// when the screen goes:
+wallet.stopObservingPaymentRefusals(card.tokenUniqueReference!!)
+```
+
+Registering the same card again replaces its handlers; other cards are unaffected.
 
 ---
 
@@ -2431,7 +2603,7 @@ The remaining `NOT_SENT` rows are payment-only reasons.
 | `FAILED` | — | `CARD_NOT_FOUND` | Card selection (`setActiveToken`): no card with that id is in this wallet | Refresh the card list |
 | `FAILED` | — | `CARD_DATA_MISSING` | Card selection (`setActiveToken`): the card's payment data is not on this phone | Remove the card and add it again |
 | `FAILED` | — | `NFC_DISABLED` / `NFC_UNAVAILABLE` / `MODE_REFUSED` / `TAP_ROUTING_REFUSED` / `SCREEN_NOT_ACTIVE` | Opening a pay session (`openPaySession`): tap-to-pay could not be armed — see [the pay session table](#arming-and-disarming-tap-to-pay-pay-session) | Per that table; nothing changed |
-| `FAILED` | — | `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `RECEIPT_FOR_ANOTHER_TRANSACTION` | Receipt scan (`processReceipt`): the receipt was refused — see [`processReceipt`](#processreceipt--getlastreceipts--getreceiptfortransaction) | Show the reason |
+| `FAILED` | — | `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `RECEIPT_FOR_ANOTHER_TRANSACTION` | Receipt scan (`processReceipt`): the receipt was refused — see [`processReceipt`](#processreceipt--getreceipts--getreceiptfortransaction) | Show the reason |
 | `FAILED` | — | `PAYMENT_NOT_CONFIRMED` | Receipt scan: the matching payment's outcome is not confirmed yet | Scan again shortly |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | The request was sent but no answer came back (timeout, connection lost) | Wait; the SDK resolves it |
 | `PENDING` | `06` | `UPSTREAM_ERROR` | Veyra answered with an error or something unreadable | Wait; the SDK resolves it |
@@ -2648,7 +2820,7 @@ with `wallet.observePaymentRefusals` (below).
 **`onDeviceNotBound` is a card state too.** When the SDK's automatic key request is refused this way,
 it stops every automatic key request for that card and sets `Token.deviceNotBound`. From then on a
 payment on that card is refused before anything is sent, so it is right to grey the card out (see
-[Handling card states in your UI](#handling-card-states-in-your-ui)).
+[Handling card states in your UI](#handling-token-states-in-your-ui)).
 
 **Timing on the tap rail.** `onRequireOnline` arrives at the earliest moment it is actually true:
 immediately if the device is already offline, otherwise only after the SDK's automatic background
@@ -2666,23 +2838,9 @@ handler. iOS registers with `observePaymentRefusals(forTokenUniqueReference:…)
 `wallet.observePaymentRefusals(tokenUniqueReference, listener)`; iOS fires from the QR rails only, having
 no tap-to-pay.
 
-##### `observePaymentRefusals`
+##### Registering refusals
 
-Register them per card — the active one, or several, for a wallet list that reflects refusals across
-cards:
-
-```kotlin
-wallet.observePaymentRefusals(
-    tokenUniqueReference = card.tokenUniqueReference!!,
-    onRequireOnline = { event -> promptToConnect(event.amountMinorUnits) },
-    onAmountExceedCardLimit = { event -> offerSmallerAmount(event.cardLimitMinorUnits) },
-    onDeviceNotBound = { event -> promptToAddCardAgain(event.tokenUniqueReference) },
-)
-// when the screen goes:
-wallet.stopObservingPaymentRefusals(card.tokenUniqueReference!!)
-```
-
-Registering the same card again replaces its handlers; other cards are unaffected.
+Register them with [`observePaymentRefusals`](#observepaymentrefusals) — see the wallet's Observers.
 
 #### Three things end with "get online", and they are not the same
 
@@ -2855,51 +3013,13 @@ The wallet syncs each card's server status automatically (foreground sweeps and 
 | `SUSPENDED` / `EXPIRED` / `PENDING_ACTIVATION` | Card refuses to pay (`NOT_SENT` / `TOKEN_NOT_ACTIVE`); `Token.isActive` flips false | Render the card as unavailable. **Not sticky** — a later sync unfreezes it automatically. |
 | `DEACTIVATED` | The card and all its on-device material are wiped when your app calls `deactivateToken`, and it disappears from `getTokens()` | Refresh your card list; the user re-adds the card if needed. |
 
-##### `observeTokenStatusChanged` — the SDK tells you when a card's status changes
+##### Token status changed
 
-The sweep can apply `SUSPENDED` while the customer is *looking at* a card screen. Subscribe and you
-are told the moment it is applied:
+See [`observeTokenStatusChanged`](#observetokenstatuschanged) under the wallet's Observers.
 
-```kotlin
-wallet.observeTokenStatusChanged { change ->
-    // change.tokenUniqueReference — which card (it fires for any stored card)
-    // change.status               — ACTIVE / SUSPENDED / EXPIRED / DEACTIVATED /
-    //                               PENDING_ACTIVATION / UNKNOWN
-    // change.rawStatus            — the literal as stored; log this one
-    // change.canPay               — whether the card can pay right now
-    // change.previousRawStatus    — what it held before, or null if this is its first status
-}
-```
+##### Card key state changed
 
-- **Branch on `canPay`, not on `status`.** It is the same check the SDK's own payment gates use, so a
-  status added after your build shipped is correctly reported as *not* payable.
-- **Register once, after each `initialize`** — not per card screen (a sign-out or customer switch
-  drops it).
-- **It does not replay.** Read `getTokens()` at start-up.
-- **Only genuine changes fire.** A sweep that re-applies the status a card already had wakes nothing.
-- **Last registration wins.** `stopObservingTokenStatusChanged()` stops it. Delivered on the main thread.
-
-The same channel exists with the same name on iOS (`VeyraWallet.shared.observeTokenStatusChanged { … }`)
-and React Native (`wallet.observeTokenStatusChanged(listener)`).
-
-##### `observeCardKeyStateChanged` — a card ran out of payment keys, or got them back
-
-```kotlin
-wallet.observeCardKeyStateChanged { state ->
-    // state.tokenUniqueReference, state.requiresOnline, state.deviceNotBound
-}
-// stopObservingCardKeyStateChanged() stops it
-```
-
-`requiresOnline` here is **the same value `getTokens()` reports**, so a callback can never contradict
-the list you are about to draw. `CardKeyState.deviceNotBound` mirrors `Token.deviceNotBound`: render
-it as "add this card again on this phone", not as a connect prompt.
-
-**Know its limit before you word your UI.** It fires when a payment uses a key and when a refresh
-delivers new ones. Payment keys *also* expire by clock, with no SDK code running — **nothing fires
-for that**, and such a card simply reads as `requiresOnline` on your next `getTokens()`. Keep reading
-the card list when a screen appears. There is deliberately no API to trigger a key refresh — the SDK
-owns when keys are replenished.
+See [`observeCardKeyStateChanged`](#observecardkeystatechanged) under the wallet's Observers.
 
 #### Merchant statuses
 
