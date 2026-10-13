@@ -159,7 +159,7 @@ dependencies {
 
 ### `VeyraSdk` (combined apps)
 
-Facade for a combined SoftPOS + Wallet app. It owns the exclusive mode and hands out the two member SDKs. Package `co.veyra.sdk`.
+Facade for a combined SoftPOS + Wallet app. One `initialize` sets up both member SDKs, owns the exclusive mode and hands out the two SDKs. Package `co.veyra.sdk`.
 
 ```kotlin
 val sdk = VeyraSdk.initialize(this, customerId, VeyraSdkConfig(softposConfig, walletConfig), provider)
@@ -171,10 +171,10 @@ val softpos = sdk.softpos   // VeyraSoftPOSSdk
 
 | Method | Parameters | Description |
 |--------|------------|-------------|
-| `initialize(activity, customerId, config, provider)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (the wallet sends it to Veyra on its card requests; see [Customers](#customers-signing-in-signing-out-switching)); `config` — `VeyraSdkConfig(softpos, wallet)`; `provider` — your `VeyraAssertionProvider` or `VeyraProxyProvider`, shared by both SDKs (see [Connecting to Veyra](#connecting-to-veyra)) | Initialises the facade and installs the exclusive-mode arbiter, and signs `customerId` in for both SDKs. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `VeyraSetupException` (`INVALID_CONFIGURATION`) when `customerId` is blank or the provider is unusable (naming the problem). |
+| `initialize(activity, customerId, config, provider)` | `activity` — an `AppCompatActivity`; `customerId` — the customer your app has authenticated (the wallet sends it to Veyra on its card requests; see [Customers](#customers-signing-in-signing-out-switching)); `config` — `VeyraSdkConfig(softpos, wallet)`; `provider` — your `VeyraAssertionProvider` or `VeyraProxyProvider`, shared by both SDKs (see [Connecting to Veyra](#connecting-to-veyra)) | Installs the exclusive-mode arbiter, **sets up both SDKs** (SoftPOS and wallet) and signs `customerId` in for both. Neither SDK's NFC binds to `activity` (typically Home): each screen that pays or gets paid still calls its own SDK's `initialize` with itself, and that SDK's NFC follows that screen. Idempotent process singleton; always starts inert (no mode active). Must be called before either member SDK is used in a combined app, **on every launch** — see [Customers](#customers-signing-in-signing-out-switching). Throws `VeyraSetupException` (`INVALID_CONFIGURATION`) when `customerId` is blank or the provider is unusable (naming the problem). |
 | `signOut()` (static) | — | The customer has logged out: stops everything both SDKs run for them and drops every observer registration. Their cards, keys, merchant and history stay on the device for when they sign in again. |
 | `getInstance()` | — | The current instance, or `null` if not yet initialised. |
-| `softpos` | — | The `VeyraSoftPOSSdk`. Throws `VeyraSetupException` (`NOT_CONFIGURED`) if that SDK has not been initialised yet (each of your screens initialises its own SDK — see the samples). |
+| `softpos` | — | The `VeyraSoftPOSSdk`, set up by `initialize`. Throws `VeyraSetupException` (`NOT_CONFIGURED`) before `initialize` has been called. |
 | `wallet` | — | The `VeyraWalletSdk`. Same behaviour. |
 | `currentMode()` | — | The current exclusive mode (`NfcMode.NONE` / `SOFTPOS` / `WALLET`). Read-only observation for UI state. |
 
@@ -353,7 +353,8 @@ val provider = MyAssertionProvider(bankApi)                // or MyProxyProvider
 val softposConfig = VeyraSoftPosSdkConfig.builder(Environment.TEST, paymentAppProviderId).build()
 val walletConfig = VeyraWalletSdkConfig.builder(Environment.TEST, paymentAppProviderId, tokenRequestorId).build()
 
-// A combined app: the facade first, then each SDK on its own screen — the same provider each time.
+// A combined app: the facade sets up both SDKs; each payment screen then initialises its own SDK
+// with itself, so that SDK's NFC follows it — the same provider each time.
 VeyraSdk.initialize(activity, customerId, VeyraSdkConfig(softposConfig, walletConfig), provider)
 VeyraSoftPOSSdk.initialize(activity, customerId, softposConfig, provider)
 VeyraWalletSdk.initialize(context, customerId, walletConfig, provider, activity)
@@ -773,6 +774,12 @@ softpos.updateMerchant(
 #### `tap.start`
 
 Arm the reader for one sale and wait for the customer's tap. Everything that happens arrives as a `TapEvent` on one closure, ending with exactly one `TapEvent.Result`. **Non-terminal events keep the reader armed** — mirror a physical terminal: an unsupported card or lost contact shows a transient hint on the same waiting screen; only the result (approved / declined / pending / failed / not sent) ends the payment.
+
+**The screen stays awake while a payment is live.** From the moment a tap payment starts until it
+ends or is cancelled (waiting for a card, reading it, and contacting the bank), the SDK keeps
+your get-paid screen on, because a phone whose screen has gone off cannot read a card. With no
+payment running, the screen sleeps as usual. If your activity already keeps its screen on, the SDK
+leaves that setting alone.
 
 ```kotlin
 val request = TapRequest(
