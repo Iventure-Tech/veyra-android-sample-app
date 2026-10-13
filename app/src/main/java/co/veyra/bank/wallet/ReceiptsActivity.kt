@@ -41,7 +41,7 @@ class ReceiptsActivity : AppCompatActivity() {
             return
         }
 
-        val receipts = sdk.tokenisationService.getLastReceipts(limit = 100)
+        val receipts = sdk.getReceipts(limit = 100)
 
         if (receipts.isEmpty()) {
             binding.emptyText.visibility = View.VISIBLE

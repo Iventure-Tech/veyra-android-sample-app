@@ -14,7 +14,8 @@ import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityActivationOtpBinding
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeStatus
-import co.veyra.wallet.sdk.ActivationCodeReason
+import co.veyra.wallet.sdk.ActivationMedium
+import co.veyra.wallet.sdk.ActivationReason
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import java.text.SimpleDateFormat
@@ -84,11 +85,10 @@ class ActivationOtpActivity : AppCompatActivity() {
         if (ref.isNullOrBlank()) return
         val sdk = VeyraWalletSdk.getInstance() ?: return
         binding.resendButton.visibility = View.GONE
-        sdk.tokenisationService.requestActivationCode(
+        sdk.requestActivationCode(
             tokenUniqueReference = ref,
-            selectedActivationMethod = method,
-            preferredActivationChannel = method,
-            reasonCode = ActivationCodeReason.ADD_CARD
+            medium = ActivationMedium.valueOf(method),
+            reason = ActivationReason.ADD_CARD,
         ) { response ->
             when (response.responseStatus) {
                 OutcomeStatus.APPROVED -> {
@@ -190,7 +190,7 @@ class ActivationOtpActivity : AppCompatActivity() {
             Toast.makeText(this, getString(R.string.error_occurred), Toast.LENGTH_SHORT).show()
             return
         }
-        sdk.tokenisationService.activate(
+        sdk.activate(
             tokenUniqueReference = ref,
             activationCode = code
         ) { response ->

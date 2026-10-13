@@ -200,10 +200,10 @@ class TransactionDetailActivity : AppCompatActivity() {
         binding.txDetailStatusCheckNote.visibility = View.VISIBLE
 
         lifecycleScope.launch {
-            val refresh = sdk.tokenisationService.refreshTransactionStatus(transactionHash)
+            val refresh = sdk.refreshTransactionStatus(transactionHash)
             // Whatever happened, show the row as it now stands — a check that could not be made
             // leaves it exactly as it was.
-            refresh.transaction?.let { fresh ->
+            refresh.value?.let { fresh ->
                 summary = fresh
                 bindSummary(fresh)
             }
@@ -219,7 +219,7 @@ class TransactionDetailActivity : AppCompatActivity() {
                     }
                     binding.btnCheckStatus.isEnabled = true
                 }
-                refresh.transaction?.authorizationStatus in
+                refresh.value?.authorizationStatus in
                     setOf(OutcomeStatus.APPROVED, OutcomeStatus.DECLINED, OutcomeStatus.FAILED) -> {
                     // bindSummary has already re-rendered the status line and hidden this button.
                     binding.txDetailStatusCheckNote.visibility = View.GONE
@@ -317,8 +317,8 @@ class TransactionDetailActivity : AppCompatActivity() {
         binding.txDetailCreditCheckNote.visibility = View.VISIBLE
 
         lifecycleScope.launch {
-            val refresh = sdk.tokenisationService.refreshCreditConfirmation(transactionHash)
-            refresh.transaction?.let { fresh ->
+            val refresh = sdk.refreshCreditConfirmation(transactionHash)
+            refresh.value?.let { fresh ->
                 summary = fresh
                 bindSummary(fresh)
             }
@@ -335,7 +335,7 @@ class TransactionDetailActivity : AppCompatActivity() {
                     binding.btnCheckMerchantCredit.isEnabled = true
                 }
                 // bindSummary has already re-rendered the credit line and hidden the button.
-                refresh.transaction?.creditConfirmationStatus == "RECEIVED" ->
+                refresh.value?.creditConfirmationStatus == "RECEIVED" ->
                     binding.txDetailCreditCheckNote.visibility = View.GONE
                 else -> {
                     // Not confirmed **yet** — the honest answer, never "not received".
@@ -356,7 +356,7 @@ class TransactionDetailActivity : AppCompatActivity() {
     private fun bindReceiptButtons(tx: TransactionSummary) {
         val hash = tx.transactionHash
         val sdk = VeyraWalletSdk.getInstance()
-        val linkedReceipt = if (hash != null) sdk?.tokenisationService?.getReceiptForTransaction(hash) else null
+        val linkedReceipt = if (hash != null) sdk?.getReceiptForTransaction(hash) else null
 
         if (linkedReceipt != null) {
             binding.btnViewReceipt.visibility = View.VISIBLE
@@ -398,7 +398,7 @@ class TransactionDetailActivity : AppCompatActivity() {
         binding.btnScanReceipt.isEnabled = false
         // This scan was launched FROM this transaction — the SDK must reject a receipt
         // belonging to any other transaction instead of silently linking it elsewhere.
-        sdk.tokenisationService.processReceipt(base64Payload, expectedTransactionHash = summary?.transactionHash) { result ->
+        sdk.processReceipt(base64Payload, expectedTransactionHash = summary?.transactionHash) { result ->
             binding.btnScanReceipt.isEnabled = true
             // An answer, never a throw: APPROVED with the stored receipt, or FAILED with the reason.
             val receipt = result.receipt

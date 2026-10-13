@@ -53,7 +53,7 @@ class ActivationInfoActivity : AppCompatActivity() {
         binding.pollingSpinner.visibility = View.VISIBLE
         binding.statusTextView.text = getString(R.string.activation_polling_checking)
 
-        sdk.tokenisationService.observeActivation(
+        sdk.observeActivation(
             tokenUniqueReference = tur,
             onActivated = {
                 binding.pollingSpinner.visibility = View.GONE
@@ -75,14 +75,14 @@ class ActivationInfoActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         tokenUniqueReference?.let {
-            VeyraWalletSdk.getInstance()?.tokenisationService?.pauseActivationObserver(it)
+            VeyraWalletSdk.getInstance()?.pauseActivationObserver(it)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         tokenUniqueReference?.let {
-            VeyraWalletSdk.getInstance()?.tokenisationService?.stopActivationObserver(it)
+            VeyraWalletSdk.getInstance()?.stopActivationObserver(it)
         }
     }
 

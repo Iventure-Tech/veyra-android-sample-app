@@ -18,10 +18,11 @@ import co.veyra.bank.databinding.ActivityAccountEligibilityBinding
 import co.veyra.wallet.sdk.AccountNumberSource
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.VeyraWalletSdk
-import co.veyra.wallet.sdk.TokenisationResponse
+import co.veyra.wallet.sdk.DigitiseParams
+import co.veyra.wallet.sdk.DigitiseResult
 import co.veyra.wallet.sdk.TokenizationRecommendation
 import co.veyra.wallet.sdk.TokenizationRecommendationReason
-import co.veyra.wallet.sdk.TokenizationRequestParams
+import co.veyra.wallet.sdk.ActivationMethod
 import co.veyra.wallet.sdk.TrustScore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -81,7 +82,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         val requestId = UUID.randomUUID().toString()
         digitiseRequestId = requestId
         val params = buildTokenizationParams(requestId)
-        sdk.tokenisationService.digitizeAccount(params) { response ->
+        sdk.digitise(params) { response ->
             lifecycleScope.launch(Dispatchers.Main) {
                 digitiseRequestId = null
                 handleDigitizeResponse(response)
@@ -100,7 +101,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
     private fun cancel() {
         val requestId = digitiseRequestId ?: return finish()
         val sdk = VeyraWalletSdk.getInstance() ?: return finish()
-        val answer = sdk.tokenisationService.cancelDigitise(requestId)
+        val answer = sdk.cancelDigitise(requestId)
         when (cancelAction(answer)) {
             CancelAction.AWAIT_CANCELLED_OUTCOME -> Unit
             CancelAction.KEEP_WAITING -> if (cancelRefusedTooLate(answer)) {
@@ -110,7 +111,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleDigitizeResponse(response: TokenisationResponse) {
+    private fun handleDigitizeResponse(response: DigitiseResult) {
         // Cancelled before the request left the phone: nothing was created — leave.
         if (response.responseStatusReason == OutcomeReason.CANCELLED) {
             finish()
@@ -126,7 +127,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
                     finish()
                 }
                 ActivationMethods.ResponseCode.APPROVE_REQUIRE_AUTH -> {
-                    val methods = response.activationMethods.orEmpty()
+                    val methods = response.activationMethods.map { ActivationMethod(it.medium, it.contact.orEmpty()) }
                     val tokenUniqueRef = response.tokenUniqueReference
                     if (tokenUniqueRef != null && methods.isNotEmpty()) {
                         startActivity(
@@ -154,30 +155,30 @@ class AccountEligibilityActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildTokenizationParams(clientRequestId: String): TokenizationRequestParams {
+    private fun buildTokenizationParams(clientRequestId: String): DigitiseParams {
         // Account number, bank, customer id, account name, BVN and email are what the user
         // entered on the previous screen. The customer id is also the consumer identifier: the
         // one id this app knows the customer by; the email is also the wallet account id. The
         // remaining contact details come from the shared sample source (res/values/sample_data.xml).
         val sample = co.veyra.bank.SampleData.active(this)
-        return TokenizationRequestParams.builder(
+        return DigitiseParams(
             accountNumber = accountNumber,
             institutionCode = institutionCode,
             accountHolderName = accountName,
-            walletProviderTokenizationRecommendation = TokenizationRecommendation.APPROVE,
+            walletAccountId = email,
+            emailAddress = email,
+            recommendation = TokenizationRecommendation.APPROVE,
             consumerIdentifier = customerId,
             bvn = bvn,
             accountHolderAddress = sample.fullAddress,
             mobileNumber = sample.mobileNumber,
-            walletAccountId = email,
-            emailAddress = email,
+            clientRequestId = clientRequestId,
+            accountNumberSource = AccountNumberSource.MANUAL,
+            deviceScore = TrustScore.TRUSTED,
+            accountScore = TrustScore.HIGHLY_TRUSTED,
+            recommendationReasons = listOf(TokenizationRecommendationReason.GOOD_ACTIVITY_HISTORY),
+            bankName = bankName.takeIf { it.isNotBlank() },
         )
-            .clientRequestId(clientRequestId)
-            .accountNumberSource(AccountNumberSource.MANUAL)
-            .walletProviderDeviceScore(TrustScore.TRUSTED)
-            .walletProviderAccountScore(TrustScore.HIGHLY_TRUSTED)
-            .walletProviderTokenizationRecommendationReasons(listOf(TokenizationRecommendationReason.GOOD_ACTIVITY_HISTORY))
-            .build()
     }
 
     private fun showError(message: String) {

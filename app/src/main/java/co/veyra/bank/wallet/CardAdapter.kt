@@ -205,7 +205,7 @@ class CardDiffCallback : DiffUtil.ItemCallback<CardItem>() {
     override fun areItemsTheSame(oldItem: CardItem, newItem: CardItem): Boolean {
         return when {
             oldItem is CardItem.Token && newItem is CardItem.Token ->
-                oldItem.token.tokenId == newItem.token.tokenId
+                oldItem.token.tokenUniqueReference == newItem.token.tokenUniqueReference
             oldItem is CardItem.Empty && newItem is CardItem.Empty -> true
             oldItem is CardItem.Default && newItem is CardItem.Default -> true
             else -> false
@@ -215,7 +215,7 @@ class CardDiffCallback : DiffUtil.ItemCallback<CardItem>() {
     override fun areContentsTheSame(oldItem: CardItem, newItem: CardItem): Boolean {
         return when {
             oldItem is CardItem.Token && newItem is CardItem.Token ->
-                oldItem.token.tokenId == newItem.token.tokenId &&
+                oldItem.token.tokenUniqueReference == newItem.token.tokenUniqueReference &&
                 oldItem.pendingActivation == newItem.pendingActivation &&
                 oldItem.token.isActive == newItem.token.isActive &&
                 oldItem.token.requiresOnline == newItem.token.requiresOnline
