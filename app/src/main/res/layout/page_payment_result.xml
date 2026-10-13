@@ -83,7 +83,7 @@
 
         <!-- Beneficiary credit confirmation: shown on an approved sale whose
              merchant bank supports confirmation — waits, then flips when the SDK's
-             onCreditConfirmation arrives -->
+             observeCreditConfirmation arrives -->
         <TextView
             android:id="@+id/creditConfirmationLine"
             android:layout_width="wrap_content"

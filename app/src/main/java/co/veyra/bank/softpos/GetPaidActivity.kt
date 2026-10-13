@@ -236,7 +236,7 @@ class GetPaidActivity : AppCompatActivity() {
 
     // The sale the result page is waiting on beneficiary credit confirmation for.
     // Set when an APPROVED response says the merchant's bank supports confirmation; cleared when
-    // the confirmation arrives. onCreditConfirmation events for any other reference (a sale from
+    // the confirmation arrives. observeCreditConfirmation events for any other reference (a sale from
     // an earlier session) fall back to the toast.
     private var awaitingCreditConfirmationRef: String? = null
     
@@ -425,7 +425,7 @@ class GetPaidActivity : AppCompatActivity() {
         sdk = VeyraSoftPOSSdk.initialize(this, co.veyra.bank.VeyraBank.customerId(this), co.veyra.bank.VeyraBank.softposConfig(this), co.veyra.bank.VeyraBank.provider())
         // The SDK confirms an approved sale's credit in the background — possibly minutes later,
         // possibly for a sale from an earlier session — and reports it here; match by reference.
-        sdk.onCreditConfirmation { showCreditConfirmation(it) }
+        sdk.observeCreditConfirmation { showCreditConfirmation(it) }
 
 
         container = findViewById(R.id.container)
@@ -1234,7 +1234,7 @@ class GetPaidActivity : AppCompatActivity() {
      * settle reconciler learns `isCreditConfirmationSupported` from the transaction-status rail
      * moments after the settle, and the background credit sweep then confirms the credit onto the
      * stored row. No callback says when the bank turns out to support confirmation (the SDK-wide
-     * `onCreditConfirmation` observer only brings the final answer), so the result page watches the
+     * `observeCreditConfirmation` observer only brings the final answer), so the result page watches the
      * SDK's own stored row: first for the supported flag (shows the waiting line), then for the
      * terminal confirmation state (flips it). Leaving the result page ends the watch — a later
      * confirmation still lands in history and as the SDK-wide toast/callback where registered.
@@ -1489,7 +1489,7 @@ class GetPaidActivity : AppCompatActivity() {
                 response.merchantTransactionReference?.let { lastOriginalTransactionReference = it }
                 // The approval said the merchant's bank supports credit confirmation —
                 // the SDK is now polling in the background, so the result page waits: show the
-                // confirming line and let onCreditConfirmation flip it when the answer arrives.
+                // confirming line and let observeCreditConfirmation flip it when the answer arrives.
                 // Setting awaitingCreditConfirmationRef is what suppresses the hold below, so the
                 // page cannot auto-return out from under the wait.
                 if (response.isCreditConfirmationSupported == true) {
