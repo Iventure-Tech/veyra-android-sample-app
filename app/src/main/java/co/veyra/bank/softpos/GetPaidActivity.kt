@@ -946,7 +946,7 @@ class GetPaidActivity : AppCompatActivity() {
             hideKeyboard()
             currentAmountMinorUnits = minorUnits
             saleOrderId = null // a new amount is a new sale
-            val storedMerchant = sdk.getStored()
+            val storedMerchant = sdk.getStoredMerchantData()
             currentPaymentCurrencyCode = storedMerchant?.currencyCode
                 ?: storedMerchant?.countryCode?.trim()?.padStart(4, '0')?.takeIf { it.length == 4 }
                 ?: "0566"
@@ -1750,7 +1750,7 @@ class GetPaidActivity : AppCompatActivity() {
     }
     
     private fun populateEditForm() {
-        val merchant = sdk.getStored() ?: return
+        val merchant = sdk.getStoredMerchantData() ?: return
         editMerchantNameEditText.setText(merchant.merchantName)
         editEmailEditText.setText(merchant.emailAddress)
         editPhoneEditText.setText(merchant.phoneNumber)
@@ -1795,7 +1795,7 @@ class GetPaidActivity : AppCompatActivity() {
         ) ?: return
 
         saveChangesButton.isEnabled = false
-        sdk.update(
+        sdk.updateMerchant(
             MerchantUpdate(
                 merchantName = merchantName,
                 emailAddress = email,
@@ -1844,7 +1844,7 @@ class GetPaidActivity : AppCompatActivity() {
         }
         bankLoadingProgress.visibility = View.VISIBLE
         bankDropdown.isEnabled = false
-        sdk.getSettlementBanks { result ->
+        sdk.getBanks { result ->
             bankLoadingProgress.visibility = View.GONE
             bankDropdown.isEnabled = true
             if (result.responseStatus == OutcomeStatus.APPROVED) {
@@ -1863,7 +1863,7 @@ class GetPaidActivity : AppCompatActivity() {
     }
 
     private fun loadBanksForEdit() {
-        val merchantCode = sdk.getStored()?.institutionCode
+        val merchantCode = sdk.getStoredMerchantData()?.institutionCode
         editSelectedBankCode = merchantCode ?: ""
         editBankDropdown.setText("", false)
         val banks = cachedBanks
@@ -1873,7 +1873,7 @@ class GetPaidActivity : AppCompatActivity() {
         }
         editBankLoadingProgress.visibility = View.VISIBLE
         editBankDropdown.isEnabled = false
-        sdk.getSettlementBanks { result ->
+        sdk.getBanks { result ->
             editBankLoadingProgress.visibility = View.GONE
             editBankDropdown.isEnabled = true
             if (result.responseStatus == OutcomeStatus.APPROVED) {

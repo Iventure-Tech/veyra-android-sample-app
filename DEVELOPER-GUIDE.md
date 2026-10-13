@@ -198,7 +198,7 @@ Every SoftPOS operation is called on this object — see [SoftPOS — accepting 
 |--------|------------|-------------|
 | `initialize(activity, customerId, config, provider)` | `activity` — `AppCompatActivity`; `customerId` — the customer your app has authenticated (SoftPOS never sends it off the device); `config` — `VeyraSoftPosSdkConfig`; `provider` — the same provider as the wallet's | Initialises (or re-binds) the singleton and signs `customerId` in. Idempotent; re-binds NFC reader + lifecycle to the new activity on every call. The same customer again changes nothing; a different customer stops the previous customer's work and opens the new customer's merchant and transactions. Throws `VeyraSetupException` (`INVALID_CONFIGURATION`) when the provider is unusable, a different kind of provider is already in use in this process, or `customerId` is blank; the message names the problem. |
 | `signOut()` (static) | — | The customer has logged out: stops every poll and watch the SDK runs for them and drops every observer registration. Their merchant and transactions stay on the device. Until the next `initialize` there is no merchant. |
-| `storedMerchant(context, customerId)` (static) | `context`; `customerId` | Init-free read of that customer's stored merchant — see [Merchant status](#merchant-status--isregistered--ismerchantactive--refreshstatus--activate--deactivate). |
+| `getStoredMerchantData(context, customerId)` (static) | `context`; `customerId` | Init-free read of that customer's stored merchant — see [Merchant status](#merchant-status--isregistered--ismerchantactive--refreshstatus--activate--deactivate). |
 | `isMerchantRegistered(context, customerId)` (static) | `context`; `customerId` | Init-free registration check for that customer. |
 | `getInstance()` | — | Current instance or `null`. |
 | `tap` | — | Card taps — [`tap.start`](#tapstart). |
@@ -244,7 +244,7 @@ Who is signed in is **your app's** to remember, not the SDK's. The SDK holds it 
 - **Sign out with `signOut()`** (`VeyraWalletSdk.signOut()`, `VeyraSoftPOSSdk.signOut()`, or `VeyraSdk.signOut()` in a combined app). It stops every loop, poll, worker and observer for the customer. Their cards, keys, history, merchant and transactions **stay on the device**: when they sign in again nothing is downloaded for a card that still has its keys, and a card without keys gets them in the background after sign-in.
 - **Register observers again after `initialize`.** A sign-out and a switch to another customer both drop every observer registration (`softpos.observeTransactionResolved`, `softpos.observeMerchantStatusChanged`, `onTransactionResolved` (wallet), `onTokenStatusChanged`, `onKeyStateChanged`, credit confirmations, refusal handlers). Register them right after each `initialize` call that signs a customer in.
 - **Nobody signed in means no data.** After `signOut()`, and in a fresh process where your app has not called `initialize` yet (the app was killed, the phone restarted), there are no cards and no merchant, and an NFC tap from a terminal is answered "application not found" — no payment is made. A wallet or SoftPOS call that needs the customer's data — cards, payments, the stored merchant, transactions — throws `VeyraSetupException` with `code = NOT_SIGNED_IN`; catch it to send the user to your sign-in. A request already on its way when the customer signs out still completes for that customer: its answer is kept with their data, and you hear about it when they sign in again. Initialise with the customer as soon as your app knows who they are.
-- **The init-free reads take the customer.** `VeyraSoftPOSSdk.storedMerchant(context, customerId)` and `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` read that customer's merchant without signing anyone in.
+- **The init-free reads take the customer.** `VeyraSoftPOSSdk.getStoredMerchantData(context, customerId)` and `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` read that customer's merchant without signing anyone in.
 - **Re-registering a merchant needs no clear.** A successful registration overwrites the customer's stored merchant.
 
 ```kotlin
@@ -551,12 +551,8 @@ val softposConfig = VeyraSoftPosSdkConfig.builder(
 | `environment` | **Mandatory** | `Environment.TEST` or `Environment.LIVE`. Determines the server host; set once, applies to all SDK calls. |
 | `paymentAppProviderId` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet config's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. Must not be blank. |
 | `enableNfc(Boolean)` | Optional | Arm the NFC reader capability at init. Default `true`. |
-| `merchantId(String)` | Optional | Merchant ID override (same note). |
-| `merchantNameAndLocation(String)` | Optional | Merchant name/location override for receipts and EMV data (same note). |
-| `merchantCategoryCode(String)` | Optional | 4-digit MCC override (same note). |
-| `countryCode(String)` | Optional | ISO 3166-1 numeric, 4-digit zero-padded (e.g. `"0566"` for Nigeria) override (same note). |
 
-After merchant registration the terminal/merchant values come from the stored merchant profile — a typical app sets none of the optional overrides. The acquirer id is learned from the gateway's registration/update/status responses (resolved from your payment app provider) and stored with the merchant; it is never app-supplied.
+That is the whole configuration. The merchant's identity — merchant id, name and location, category code, country code, terminal id — is not configurable: it comes from the merchant stored by [`register`](#register), so the terminal data always carries the merchant the gateway registered. The acquirer id is learned from the gateway's registration/update/status responses (resolved from your payment app provider) and stored with the merchant; it is never app-supplied.
 
 ### `VeyraWalletSdkConfig` (Wallet)
 
@@ -628,7 +624,7 @@ Every SoftPOS call is on the SoftPOS object — `softpos` below is the `VeyraSof
 
 | Area | Calls on `softpos` |
 |---|---|
-| Merchant | [`register`](#register), [`getSettlementBanks`](#getsettlementbanks), [`isRegistered` / `getStored` / `getStoredMerchantId` / `hasStoredMerchant` / `isMerchantActive` / `refreshStatus` / `activate` / `deactivate`](#merchant-status--isregistered--ismerchantactive--refreshstatus--activate--deactivate), [`update`](#update) |
+| Merchant | [`register`](#register), [`getBanks`](#getbanks), [`isRegistered` / `getStoredMerchantData` / `getStoredMerchantId` / `hasStoredMerchant` / `isMerchantActive` / `refreshStatus` / `activate` / `deactivate`](#merchant-status--isregistered--ismerchantactive--refreshstatus--activate--deactivate), [`updateMerchant`](#updatemerchant) |
 | Tap | [`tap.start`](#tapstart), `isTransactionInProgress()`, `isAwaitingCardTap()`, [`cancelPayment`](#cancelling-a-call) |
 | Merchant QR | [`createPaymentContext`](#createpaymentcontext), [`contextStatus`](#contextstatus), `cancelQrExpiry` |
 | Customer QR | [`inspectCustomerQr`](#inspectcustomerqr), [`chargeCustomerQr`](#chargecustomerqr) |
@@ -659,7 +655,7 @@ val registration = MerchantRegistration(
     city = "Lagos", state = "Lagos",
     countryCode = "0566",                  // ISO 3166-1 numeric, 4 digits
     accountNumber = "1234567890",          // settlement NUBAN account
-    institutionCode = "000000",            // from getSettlementBanks
+    institutionCode = "000000",            // from getBanks
     bvn = "12345678901",                   // optional for both merchant types
     cacNumber = null,                      // business merchants only
     walletAccountId = null                 // optional
@@ -691,7 +687,7 @@ softpos.register(registration) { response ->
 | `addressLine2` | Optional | Second address line. |
 | `countryCode` | **Mandatory** | ISO 3166-1 numeric, 4-digit zero-padded (`"0566"`). |
 | `accountNumber` | **Mandatory** | Settlement NUBAN account number. |
-| `institutionCode` | **Mandatory** | Settlement bank's institution code (from `getSettlementBanks`). |
+| `institutionCode` | **Mandatory** | Settlement bank's institution code (from `getBanks`). |
 | `bvn` | Optional (both types) | 11-digit BVN — send it when you have it, for a personal or a business merchant. |
 | `cacNumber` | Business only | CAC registration number. A business without one is refused `FAILED` / `CAC_NUMBER_REQUIRED` before anything is sent. |
 | `walletAccountId` | Optional | The merchant's wallet account id; stored verbatim by the gateway and echoed on responses. |
@@ -700,7 +696,7 @@ softpos.register(registration) { response ->
 
 ---
 
-#### `getSettlementBanks`
+#### `getBanks`
 
 Fetch the NUBAN settlement banks for the registration/update bank picker.
 
@@ -709,10 +705,10 @@ Fetch the NUBAN settlement banks for the registration/update bank picker.
 | `callback` | **Mandatory** | `(NubanBankListResponse) -> Unit` — `responseStatus` `APPROVED` with `banks`, or `FAILED` with `responseStatusReason` (`NO_NETWORK_CONNECTION`, …) and an empty list. A read, so never `PENDING`: retrying as is is always safe. Each `NubanBank` has `slug`, `name`, `institutionCode`. |
 
 ```kotlin
-softpos.getSettlementBanks { response ->
+softpos.getBanks { response ->
     if (response.responseStatus != OutcomeStatus.APPROVED) {
         showError(response.message ?: "Could not load banks (${response.responseStatusReason})")
-        return@getSettlementBanks
+        return@getBanks
     }
     showBankPicker(response.banks)   // pass the chosen bank's institutionCode to registration
 }
@@ -726,23 +722,23 @@ softpos.getSettlementBanks { response ->
 |---------|-------------|
 | `isRegistered(): Boolean` | `true` when a complete merchant (ID, terminal, name, acquirer, MCC, country) is stored on this device. |
 | **`VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)`** (static) | The same check for `customerId` **without initialising the SDK** — no lifecycle binding, no NFC arming, nobody signed in. Gate your Home screen's Get-paid entry on this (initialise the SDK only on payment screens). |
-| **`VeyraSoftPOSSdk.storedMerchant(context, customerId)`** (static) | Init-free form of `getStored()`: that customer's persisted `StoredMerchantData` (or `null`) — e.g. for pre-filling or merchant-type checks before any payment screen exists. |
+| **`VeyraSoftPOSSdk.getStoredMerchantData(context, customerId)`** (static) | Init-free form of `getStoredMerchantData()`: that customer's persisted `StoredMerchantData` (or `null`) — e.g. for pre-filling or merchant-type checks before any payment screen exists. |
 | `isMerchantActive(): Boolean` | `true` when the last known backend status is `ACTIVE` (a stored merchant with no status yet counts active; no merchant stored is `false`). Payments are refused for inactive merchants. |
 | `refreshStatus { response -> }` | Read the stored merchant's backend status now and answer it (the SDK also polls it periodically while your app is foregrounded). Call at the activation moment. The callback gets a `MerchantStatusResponse`: `APPROVED` with `merchantStatus` (also stored — a change fires [`observeMerchantStatusChanged`](#softpos-observers)); `FAILED` / `MISSING_MANDATORY_CONFIG` when no merchant is stored; otherwise why it could not be read (`NO_NETWORK_CONNECTION`, …). A read: never `PENDING`. |
 | `activate { response -> }` / `deactivate { response -> }` | Activate / deactivate the stored merchant on the backend. The callback always gets a `MerchantStatusResponse`: `APPROVED` with `merchantId` / `merchantStatus`; `FAILED` (e.g. `MERCHANT_NOT_FOUND`); `PENDING` (sent, no usable answer — read the status before trying again). Nothing sent is also `FAILED`, with the reason: `MISSING_MANDATORY_CONFIG` when no merchant is stored, `NO_NETWORK_CONNECTION` when offline. |
-| `getStored(): StoredMerchantData?` | The merchant persisted by the last successful registration (all profile fields + backend-assigned ones), or `null`. |
+| `getStoredMerchantData(): StoredMerchantData?` | The merchant persisted by the last successful registration (all profile fields + backend-assigned ones), or `null`. |
 | `getStoredMerchantId(): String?` / `hasStoredMerchant(): Boolean` | Convenience reads. |
 
 There is no call to clear the stored merchant: a successful registration overwrites it, and when the customer logs out call `VeyraSoftPOSSdk.signOut()` — see [Customers](#customers-signing-in-signing-out-switching).
 
 ---
 
-#### `update`
+#### `updateMerchant`
 
 Update the stored merchant's profile (terminal ID, MCC and the gateway-resolved acquirer id are preserved; the response re-states them and the SDK refreshes its stored copy). `MerchantUpdate` has the same fields as `MerchantRegistration` without `merchantType` and `cacNumber`; all are required except `addressLine2`, `walletAccountId` and `bvn`.
 
 ```kotlin
-softpos.update(
+softpos.updateMerchant(
     MerchantUpdate(
         merchantName = "Ada's Store", emailAddress = "ada@example.com",
         phoneNumber = "+2348012345678", addressLine1 = "12 Marina Road",
@@ -774,7 +770,7 @@ Arm the reader for one sale and wait for the customer's tap. Everything that hap
 val request = TapRequest(
     amountMinorUnits = 32500L,                         // MINOR units: ₦325.00
     merchantOrderId = "ORDER-42",                      // required: YOUR order id, never a key
-)                                                      // currency defaults to "566", txType to PURCHASE
+)                                                      // currency defaults to "566"; a tap is a purchase
 
 // The transaction reference is minted by the SDK — read it back off the result
 // (`result.merchantTransactionReference`) and key your receipts and lookups off that.
@@ -812,7 +808,6 @@ softpos.tap.start(request) { event ->                  // main thread
 | `amountMinorUnits` | **Mandatory** | **Minor units** (`Long`), e.g. ₦325.00 → `32500L`. Must be > 0, or the tap ends `NOT_SENT` / `INVALID_REQUEST`. |
 | `currency` | Optional | ISO 4217 numeric, 3–4 digits (`"566"` or `"0566"`). **Defaults to `"566"`.** |
 | `merchantOrderId` | **Mandatory** | **Your** order / basket / invoice id for this sale (`String`, non-blank, at most 255 characters). A blank one ends `NOT_SENT` / `INVALID_REQUEST`, before anything is sent. Stored and echoed by the gateway and shown on the transaction detail and receipt, on your side and on the paying wallet's. **One order id per sale, kept across all its attempts:** an order can have several attempts, and the same order id can be used again until the order is paid or possibly paid. The gateway refuses a new attempt — `94` / `FAILED` / `DUPLICATE_MERCHANT_ORDER_ID`, with the attempt holding the order in `originalPayment` — only while the order is `APPROVED` or `PENDING`. After `DECLINED`, `FAILED`, `RETRY` or `NOT_SENT`, retry under the **same** order id. See [The merchant order ID](#the-merchant-order-id). |
-| `txType` | Optional | `TxType.PURCHASE`, `REFUND`, `CASH_ADVANCE`, `RECURRING_PURCHASE`, `PRE_AUTH_COMPLETION`, `OTHER`. **Defaults to `PURCHASE`** — pass a value only for a non-purchase transaction. |
 
 Nothing is checked when a `TapRequest` is built; `tap.start` checks it and answers a bad one with a `NOT_SENT` result.
 
@@ -1109,7 +1104,7 @@ Three SDK-wide channels on the SoftPOS object. Each has **one listener — the l
 |---|---|---|
 | `softpos.observeTransactionResolved { resolution -> }` | `stopObservingTransactionResolved()` | A transaction left `PENDING` — on any rail, including one started in an earlier session. `TransactionResolution`: `reference`, `responseCode`, `status` (`APPROVED` / `DECLINED` / `FAILED`), `reason`. See [Holding a `PENDING` payment](#holding-a-pending-payment-and-being-told-when-it-settles). |
 | `softpos.observeCreditConfirmation { confirmation -> }` | `stopObservingCreditConfirmation()` | An approved sale's funds were confirmed in the merchant's bank (`status = "RECEIVED"`), or the SDK gave up after 30 days (`"UNABLE_TO_CONFIRM"` — never "not received"). `CreditConfirmation`: `reference` (match your sale), `creditTransactionId`, `status`, `amountMinorUnits`, `bankReference`, `creditedAt`. Only for sales whose bank supports confirmation, on every rail. |
-| `softpos.observeMerchantStatusChanged { change -> }` | `stopObservingMerchantStatus()` | The stored merchant's backend status changed. `MerchantStatusChange`: `merchantId`, `status`, `canAcceptPayments`, `previousStatus`. See [Merchant statuses](#merchant-statuses). |
+| `softpos.observeMerchantStatusChanged { change -> }` | `stopObservingMerchantStatusChanged()` | The stored merchant's backend status changed. `MerchantStatusChange`: `merchantId`, `status`, `canAcceptPayments`, `previousStatus`. See [Merchant statuses](#merchant-statuses). |
 
 ```kotlin
 softpos.observeCreditConfirmation { confirmation ->
@@ -1238,16 +1233,18 @@ except where the table says otherwise.
 
 | 3.0.0 | 3.0.1 |
 |---|---|
+| `VeyraSoftPosSdkConfig.builder(…).merchantId(…)` / `.merchantNameAndLocation(…)` / `.merchantCategoryCode(…)` / `.countryCode(…)` | Removed — the merchant's identity comes from registration only. The config is `(environment, paymentAppProviderId, enableNfc)` |
 | `merchantService.registerPersonalMerchant(data, cb)` / `registerBusinessMerchant(data, cb)` with `MerchantRegistrationData` | `softpos.register(MerchantRegistration(merchantType = MerchantType.PERSONAL / BUSINESS, …), cb)` |
-| `merchantService.getBanks(cb)` | `softpos.getSettlementBanks(cb)` |
+| `merchantService.getBanks(cb)` | `softpos.getBanks(cb)` |
 | `merchantService.isRegistered()` | `softpos.isRegistered()` |
-| `merchantService.getStoredMerchantData()` | `softpos.getStored()` |
+| `merchantService.getStoredMerchantData()` | `softpos.getStoredMerchantData()` |
+| `VeyraSoftPOSSdk.storedMerchant(context, customerId)` | `VeyraSoftPOSSdk.getStoredMerchantData(context, customerId)` — the same init-free read, under the instance read's name |
 | `merchantService.getStoredMerchantId()` / `hasStoredMerchant()` / `isMerchantActive()` | `softpos.getStoredMerchantId()` / `hasStoredMerchant()` / `isMerchantActive()` — `isMerchantActive()` is now `false` when no merchant is stored |
 | `merchantService.refreshStatus()` (returned nothing) | `softpos.refreshStatus { response -> }` — answers the `MerchantStatusResponse` |
 | `merchantService.activate(cb)` / `deactivate(cb)` | `softpos.activate(cb)` / `deactivate(cb)` |
-| `merchantService.updateMerchant(merchantName, emailAddress, …, cb)` (12 parameters) | `softpos.update(MerchantUpdate(merchantName = …, …), cb)` |
+| `merchantService.updateMerchant(merchantName, emailAddress, …, cb)` (12 parameters) | `softpos.updateMerchant(MerchantUpdate(merchantName = …, …), cb)` |
 | `cardPaymentService.makeCardPayment(request, callback, onCardDetected, onCardContactLost, onUnsupportedCard, onCardReadingComplete, onSendingRequestOnline, onReceivingOnlineResponse, onCreditConfirmation)` | `softpos.tap.start(request) { event -> }` — one `TapEvent` per step, ending with `TapEvent.Result` |
-| `TransactionRequest.Builder(amount, currency, merchantOrderId, txType).build()` | `TapRequest(amountMinorUnits, currency = "566", merchantOrderId, txType = PURCHASE)` — checked by `tap.start` (a bad one ends `NOT_SENT` / `INVALID_REQUEST`), not when built |
+| `TransactionRequest.Builder(amount, currency, merchantOrderId, txType).build()` | `TapRequest(amountMinorUnits, currency = "566", merchantOrderId)` — a purchase; there is no transaction type. Checked by `tap.start` (a bad one ends `NOT_SENT` / `INVALID_REQUEST`), not when built |
 | `TransactionRequest.amount` | `TapRequest.amountMinorUnits` |
 | `TransactionRequest.performed3ds` / `Builder.performed3ds(…)` | Removed |
 | `TransactionResponse` (the tap result) | `TapResult` — same fields |
@@ -1264,9 +1261,9 @@ except where the table says otherwise.
 | — (new) | `softpos.getCreditConfirmation(creditTransactionId, amountMinorUnits)` |
 | `TransactionResolvedObserver.onTransactionResolved { }` / `.clear()` | `softpos.observeTransactionResolved { }` / `softpos.stopObservingTransactionResolved()` |
 | `CreditConfirmationObserver.onCreditConfirmation { }` / `.clear()` | `softpos.observeCreditConfirmation { }` / `softpos.stopObservingCreditConfirmation()` |
-| `MerchantStatusObserver.onMerchantStatusChanged { }` / `.clear()` | `softpos.observeMerchantStatusChanged { }` / `softpos.stopObservingMerchantStatus()` |
+| `MerchantStatusObserver.onMerchantStatusChanged { }` / `.clear()` | `softpos.observeMerchantStatusChanged { }` / `softpos.stopObservingMerchantStatusChanged()` |
 
-`VeyraSoftPOSSdk.storedMerchant(context, customerId)`, `isMerchantRegistered(context, customerId)`,
+`VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)`,
 `signOut()` and `cancelPayment(merchantOrderId)` are unchanged.
 
 ---
@@ -2241,7 +2238,7 @@ The three fields have the same meaning everywhere. A few result types name them 
 | `softpos.register` | `MerchantRegistrationResponse` | — | `responseStatus` | `responseStatusReason` |
 | `softpos.refreshStatus` / `activate` / `deactivate` | `MerchantStatusResponse` | — | `responseStatus` | `responseStatusReason` |
 | `softpos.update` | `MerchantUpdateResponse` | — | `responseStatus` | `responseStatusReason` |
-| `softpos.getSettlementBanks` | `NubanBankListResponse` | — | `responseStatus` | `responseStatusReason` |
+| `softpos.getBanks` | `NubanBankListResponse` | — | `responseStatus` | `responseStatusReason` |
 | `softpos.getTransaction` / `getTransactions` | `TransactionInfo` | `responseCode` | `transactionStatus` | `responseStatusReason` |
 | `softpos.refreshTransactionStatus` / `refreshCreditConfirmation` | `TransactionRefreshResult` | (on `transaction`) | (on `transaction`) | `failureReason` when the check could not be made |
 | `softpos.getTransactionStatus` | `TransactionStatusResult` → `items` | `responseCode` | `responseStatus` | `failureReason` when the lookup could not be made |
@@ -2610,7 +2607,7 @@ code creation, a payment, ends `NOT_SENT` with the same reason).
 | Merchant registration (`register`) | `MERCHANT_TYPE_REQUIRED`, `MERCHANT_NAME_REQUIRED`, `EMAIL_ADDRESS_REQUIRED`, `PHONE_NUMBER_REQUIRED`, `ACCOUNT_NUMBER_REQUIRED`, `ADDRESS_LINE_1_REQUIRED`, `CITY_REQUIRED`, `BANK_INSTITUTION_CODE_REQUIRED`, `PAYMENT_APP_PROVIDER_ID_REQUIRED`, `CAC_NUMBER_REQUIRED` | Ask for the missing field |
 | Merchant update / status / activate / deactivate (`update`, `refreshStatus`, `activate`, `deactivate`) | `MERCHANT_ID_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST` (the change is not allowed from the current state) | Fix the request / check the merchant's state |
 | QR payment code creation (`createPaymentContext`) | `AMOUNT_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST`, `DUPLICATE_MERCHANT_ORDER_ID` (includes the original payment) | Fix the request and create it again with the same order ID. A duplicate means the order is already paid or still being confirmed — don't take another payment for it |
-| Bank lookup (`getSettlementBanks`) | `INVALID_ACCOUNT_NUMBER` | Check the account number |
+| Bank lookup (`getBanks`) | `INVALID_ACCOUNT_NUMBER` | Check the account number |
 
 #### Generic fallbacks (any Veyra service, any call)
 
@@ -2777,7 +2774,7 @@ checklist for code written against 2.x:
 
 | 2.x | 3.0.0 |
 |---|---|
-| `Result<…>` / `onError` / `null` on failure (`getBanks`, `checkAccountEligibility`, `requestActivationCode`, `activate`, `tokenStatus`, `deactivateToken`, merchant `getBanks` / `activate` / `deactivate` / `updateMerchant`, `createContextPayment` — today `getSettlementBanks`, `activate`, `deactivate`, `update`, `createPaymentContext`) | The callback (or return) is always an outcome type — `BankList`, `VerifyAccountResponse`, `ActivationCodeResponse`, `ActivateResponse`, `TokenStatusResult`, `TokenStatusUpdateResponse`, `NubanBankListResponse`, `MerchantStatusResponse`, `MerchantUpdateResponse`, `CreatedPaymentContext`. Branch on `responseStatus`. |
+| `Result<…>` / `onError` / `null` on failure (`getBanks`, `checkAccountEligibility`, `requestActivationCode`, `activate`, `tokenStatus`, `deactivateToken`, merchant `getBanks` / `activate` / `deactivate` / `updateMerchant`, `createContextPayment` — today `getBanks`, `activate`, `deactivate`, `update`, `createPaymentContext`) | The callback (or return) is always an outcome type — `BankList`, `VerifyAccountResponse`, `ActivationCodeResponse`, `ActivateResponse`, `TokenStatusResult`, `TokenStatusUpdateResponse`, `NubanBankListResponse`, `MerchantStatusResponse`, `MerchantUpdateResponse`, `CreatedPaymentContext`. Branch on `responseStatus`. |
 | `cardPaymentService.cancelPendingPayment()` | Removed: `softpos.cancelPayment(merchantOrderId)`, which answers a `CancelResult` — see [Cancelling a call](#cancelling-migrating-from-2x) |
 | `cpmCustomerQrService.inspect` threw `IllegalArgumentException` | `softpos.inspectCustomerQr` returns `CpmInspection`; not a payment QR is `FAILED` / `INVALID_REQUEST` |
 | `processReceipt` called back `Result<TransactionReceipt>` (failure on a refused receipt) | Calls back (or, `suspend`, returns) `ReceiptScanResult`: `APPROVED` with `receipt`, or `FAILED` with `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` / `SDK_INTERNAL_ERROR` |
@@ -2992,7 +2989,7 @@ catch the **activation** moment after registration without polling yourself. **B
 `canAcceptPayments`, not on `status`** — anything that is not `ACTIVE`, including a status newer than
 your build, is `false`. Only genuine changes fire, last registration wins (and it is dropped on
 sign-out or a customer switch — register again after `initialize`), there is no replay, and delivery
-is on the main thread; `softpos.stopObservingMerchantStatus()` stops it. Same channel on iOS
+is on the main thread; `softpos.stopObservingMerchantStatusChanged()` stops it. Same channel on iOS
 (`VeyraSoftPOS.shared.observeMerchantStatusChanged { … }`) and React Native
 (`softpos.observeMerchantStatusChanged(listener)`).
 
@@ -3230,7 +3227,7 @@ data class MerchantUpdate(                  // update — the stored merchant's 
     val addressLine2: String = "", val walletAccountId: String? = null, val bvn: String? = null
 )
 
-data class NubanBankListResponse(           // getSettlementBanks callback (a read: never PENDING)
+data class NubanBankListResponse(           // getBanks callback (a read: never PENDING)
     val banks: List<NubanBank>, val responseStatus: String?, val responseStatusReason: String?, val message: String?
 )
 
@@ -3270,8 +3267,7 @@ data class StoredMerchantData(
 data class TapRequest(
     val amountMinorUnits: Long,             // minor units
     val currency: String = "566",           // ISO 4217 numeric, 3 or 4 digits
-    val merchantOrderId: String,            // your order id — required, non-blank
-    val txType: TxType = TxType.PURCHASE
+    val merchantOrderId: String             // your order id — required, non-blank
 )
 
 sealed class TapEvent {                     // tap.start's events, in order; Result is the one final event
