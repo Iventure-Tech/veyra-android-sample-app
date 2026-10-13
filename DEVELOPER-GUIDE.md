@@ -223,6 +223,7 @@ val sdk = VeyraWalletSdk.initialize(context, customerId, walletConfig, provider,
 | `signOut()` (static) | — | The customer has logged out: stops every loop, poll, worker and observer the SDK runs for them. Their cards, keys, history and receipts stay on the device. Until the next `initialize` there are no cards and a tap is answered "application not found". |
 | `getInstance()` | — | Current instance or `null`. |
 | `tokenisationService` | — | The wallet service — every wallet operation hangs off it. |
+| `getTransactions(tokenUniqueReference, limit = 50)` | `tokenUniqueReference` — the card; `limit` — maximum rows | The card's transaction history, most recent first. Local read. See [`getTransactions`](#gettransactions). |
 | `getTokenRequestorId()` | — | The token requestor ID from config. |
 | `getPaymentApplicationInstanceId()` | — | This install's `payment_application_instance_id` — **SDK-generated** (`VYRA` + 32 hex chars), minted on first use, persisted install-scoped, never backed up, new on reinstall. Read-only; the app cannot set or regenerate it. |
 | `getAppVersion()` | — | The app version reported to the backend. |
@@ -1696,11 +1697,14 @@ throttled (`429`) by the gateway.
 
 #### `getTransactions`
 
-The card's full local history across every rail (tap, scanned QR, shown QR), most recent first. No network call.
+The card's full local history across every rail (tap, scanned QR, shown QR), most recent first. No network call. Empty when no card on this device has that reference, or the card has no payments yet. Called on the wallet SDK object (`VeyraSdk.wallet` in the combined SDK) — the same name and default (`limit = 50`) as on iOS and React Native.
 
 ```kotlin
-val transactions = sdk.tokenisationService.getTransactions(tokenUniqueReference, 50)
+val transactions = sdk.getTransactions(tokenUniqueReference)          // last 50
+val lastFive = sdk.getTransactions(tokenUniqueReference, limit = 5)
 ```
+
+`tokenisationService.getTransactions(...)` is **deprecated**: the same read, still working, under the old owner. Move to `sdk.getTransactions(...)`.
 
 `TransactionSummary` fields: `merchantName`, `amountInMinorUnit`, `transactionCurrencyCode` (4-digit ISO 4217, e.g. `"0566"`), `authorizationStatus` (`PENDING` / `APPROVED` / `DECLINED` / `FAILED` / `RETRY` — `RETRY`: the payment reached Veyra but was not sent to the bank, nothing was charged; `null` on legacy rows — treat as indeterminate), `responseCode` (the outcome's code, e.g. `"00"`, `"51"` — verbatim from the rail that resolved the row; `null` until resolved; quote this literal in support conversations), `responseStatusReason` (the outcome's stated cause, e.g. `"INSUFFICIENT_FUNDS"` — a plain string to display, never parse; `null` until resolved), `entryMethod` (`"TAP"`, `"QR_GENERATED"` — showed a QR, `"QR_SCANNED"` — scanned a merchant QR; `null` legacy — show nothing rather than guess), `merchantLocation`, `transactionHash` (join key to a receipt), `localTransactionDateTime` / `atEpochMillis`, `merchantTransactionReference`, `merchantId`, `merchantOrderId` (the merchant's own order/basket id for the sale — the id the merchant's systems know it by, so a customer can quote it at the counter; a scanned-QR row carries it from payment time, tap and generated-QR rows learn it from the status poll, so `null` on a still-open row means "not learned yet", not "no order id"; for display and reconciliation — receipts and status refreshes key off `transactionHash` / `merchantTransactionReference`), plus the five beneficiary-credit fields below.
 
