@@ -53,7 +53,7 @@ class TransactionHistoryActivity : AppCompatActivity() {
     private fun loadTransactions() {
         val tur = tokenUniqueReference ?: return
         val sdk = VeyraWalletSdk.getInstance() ?: return
-        val transactions = sdk.tokenisationService.getTransactions(tur, 50)
+        val transactions = sdk.getTransactions(tur, 50)
         if (transactions.isEmpty()) {
             binding.emptyText.visibility = View.VISIBLE
             binding.transactionsRecycler.visibility = View.GONE

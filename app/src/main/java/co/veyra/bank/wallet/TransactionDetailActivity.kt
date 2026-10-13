@@ -112,7 +112,7 @@ class TransactionDetailActivity : AppCompatActivity() {
         val tur = current.tokenUniqueReference ?: return
         val hash = current.transactionHash ?: return
         val sdk = VeyraWalletSdk.getInstance() ?: return
-        val fresh = sdk.tokenisationService.getTransactions(tur, 50)
+        val fresh = sdk.getTransactions(tur, 50)
             .firstOrNull { it.transactionHash == hash } ?: return
         summary = fresh
         bindSummary(fresh)
