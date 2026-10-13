@@ -222,6 +222,9 @@ val sdk = VeyraWalletSdk.initialize(context, customerId, walletConfig, provider,
 | `initialize(context, customerId, config, provider, activity?)` | `context` — app context; `customerId` — the customer your app has authenticated (sent to Veyra on the wallet's card requests; see [Customers](#customers-signing-in-signing-out-switching)); `config` — `VeyraWalletSdkConfig`; `provider` — the same provider as SoftPOS's; `activity` — optional, pass it for automatic NFC activation | Initialises the singleton and signs `customerId` in. Idempotent — a repeat call re-binds the NFC lifecycle to the new activity. The same customer again changes nothing and downloads nothing; a different customer stops the previous customer's work and opens the new customer's cards. Throws `VeyraSetupException` (`INVALID_CONFIGURATION`) when `customerId` is blank, the provider is unusable, or a different kind of provider is already in use in this process; the message names the problem. |
 | `signOut()` (static) | — | The customer has logged out: stops every loop, poll, worker and observer the SDK runs for them. Their cards, keys, history and receipts stay on the device. Until the next `initialize` there are no cards and a tap is answered "application not found". |
 | `getInstance()` | — | Current instance or `null`. |
+| `openPaySession(activity)` | `activity` — your pay screen | Arms tap-to-pay on the pay screen until `closePaySession`; returns a `PaySessionResult`. See [Arming and disarming tap-to-pay](#arming-and-disarming-tap-to-pay-pay-session). |
+| `closePaySession()` | — | Disarms tap-to-pay at once — on cancel, on your own timeout, or when a single-Activity app navigates away from the pay screen. Any thread. |
+| `isPaySessionOpen` | — | `true` while a session opened with `openPaySession` is open. |
 | `tokenisationService` | — | The wallet service — every wallet operation hangs off it. |
 | `getTransactions(tokenUniqueReference, limit = 50)` | `tokenUniqueReference` — the card; `limit` — maximum rows | The card's transaction history, most recent first. Local read. See [`getTransactions`](#gettransactions). |
 | `getTokenRequestorId()` | — | The token requestor ID from config. |
@@ -1484,7 +1487,7 @@ A deactivated card needs no rendering rule — the SDK removes it from the list 
 
 #### `setActiveToken`
 
-Select the card payments use (at most one card is active). Selecting the active card also arms it for tap-to-pay and registers the tap outcome callbacks. The selection happens on the phone — nothing is sent — and it returns a `CardSelection` instead of throwing (only a [setup error](#1-setup-errors-thrown) throws):
+Select the card payments use (at most one card is active). Selecting the active card also arms it for tap-to-pay (unless your app has [closed its pay session](#arming-and-disarming-tap-to-pay-pay-session)) and registers the tap outcome callbacks. The selection happens on the phone — nothing is sent — and it returns a `CardSelection` instead of throwing (only a [setup error](#1-setup-errors-thrown) throws):
 
 ```kotlin
 val selection: CardSelection = sdk.tokenisationService.setActiveToken(
@@ -1526,6 +1529,73 @@ if (!selection.selected) {
 | `FAILED` | `CARD_DATA_MISSING` | The card is listed but its payment data is not on this phone — remove it and add it again. `onActivationFailed` also fires with the same message |
 
 Tap callbacks arrive on an SDK thread — wrap UI updates in `runOnUiThread`. Guard with `hasProvisioningData(tokenId)` if you keep display records for cards whose material may be gone.
+
+#### Arming and disarming tap-to-pay (pay session)
+
+Tap-to-pay is armed only while your pay screen is in front. If your pay screen is **its own
+Activity** and you initialise the SDK from it (`activity = this`), the SDK follows that Activity
+on its own: it arms on resume and disarms on pause. You need nothing else.
+
+Use a **pay session** when that is not enough:
+
+- **Your app has one Activity** (Jetpack Compose navigation, fragments). Navigating between
+  destinations does not pause the Activity, so the SDK cannot tell that the user left the pay screen.
+- **You disarm while the pay screen stays up**: a Cancel button, or your own "hold near the
+  reader" countdown that expires.
+
+```kotlin
+// The pay screen is showing (onResume, or your navigation destination becoming visible):
+val session = VeyraWalletSdk.getInstance()!!.openPaySession(activity)
+if (!session.opened) {
+    when (session.responseStatusReason) {
+        PaySessionResult.NFC_DISABLED -> askToTurnOnNfc()
+        PaySessionResult.NFC_UNAVAILABLE -> offerQrOnly()
+        else -> showError(session.message ?: "Tap-to-pay is not available right now")
+    }
+}
+
+// Cancel pressed, your countdown expired, or the user navigated away from the pay screen:
+VeyraWalletSdk.getInstance()?.closePaySession()
+
+// "Try again" on the same screen re-arms it:
+VeyraWalletSdk.getInstance()!!.openPaySession(activity)
+```
+
+What each call does:
+
+- **`openPaySession(activity)`** claims tap-to-pay for that screen. While the session is open, the
+  SDK disarms when the screen goes to the background, re-arms when it comes back, and closes the
+  session if the activity is destroyed. It also **keeps the screen awake**, because a phone whose
+  screen has gone off cannot pay by tap. `closePaySession` lets the screen sleep again. If your
+  activity already keeps its screen on, the SDK leaves that setting alone. If you call it before the activity has resumed, it arms on
+  the resume. Calling it again on the same screen re-opens a closed session. Main thread only.
+- **`closePaySession()`** disarms at once. From the moment it returns, a terminal that taps the phone
+  gets "application not found". That holds **even if your app is the phone's default payment app**.
+  A tap that a terminal has already started is allowed to finish. The selected card stays selected.
+  You can call it from any thread, more than once, and with no session open.
+- **A closed session stays closed** when the same screen goes to the background and comes back. Only
+  `openPaySession` re-opens it, or another wallet screen that the SDK follows coming to the front.
+  Selecting a card with `setActiveToken` while the session is closed does not re-arm it.
+
+Nothing is sent. `openPaySession` returns a `PaySessionResult` instead of throwing:
+
+| `responseStatus` | `responseStatusReason` | Meaning | What to do |
+|---|---|---|---|
+| `APPROVED` | — | The session is open (`opened == true`) | Show "Hold near the reader" |
+| `FAILED` | `NFC_DISABLED` | NFC is switched off | Ask the user to turn NFC on, then call `openPaySession` again |
+| `FAILED` | `NFC_UNAVAILABLE` | The device has no NFC (or is an emulator) | Offer the QR rails instead |
+| `FAILED` | `MODE_REFUSED` | Combined apps: a SoftPOS payment is in progress | Let it finish, then call `openPaySession` again |
+| `FAILED` | `TAP_ROUTING_REFUSED` | The phone would not route taps to your screen, and your app is not the default payment app | Ask the user to make your app the default payment app |
+| `FAILED` | `SCREEN_NOT_ACTIVE` | The activity is finishing or destroyed | Call it from the live pay screen |
+
+On `FAILED`, nothing changed: a closed session stays closed.
+
+The same three calls exist with the same names on iOS (`VeyraWallet.shared`) and React Native
+(`wallet.openPaySession()` / `wallet.closePaySession()` / `wallet.isPaySessionOpen()`). iPhone cannot
+pay by tap, so there `openPaySession` always answers `FAILED` / `NFC_UNAVAILABLE`, and shared code
+handles it the same way as an Android phone without NFC.
+`openPaySession` throws `VeyraSetupException` (`INVALID_CONFIGURATION`) only for integration
+mistakes: `enableNfc = false` in `VeyraWalletSdkConfig`, or a call that is not on the main thread.
 
 #### `getActiveToken`
 
@@ -2331,6 +2401,7 @@ The remaining `NOT_SENT` rows are payment-only reasons.
 | `NOT_SENT` or `FAILED` | — | `SDK_INTERNAL_ERROR` | The SDK failed before sending | Report to support; retry is safe |
 | `FAILED` | — | `CARD_NOT_FOUND` | Card selection (`setActiveToken`): no card with that id is in this wallet | Refresh the card list |
 | `FAILED` | — | `CARD_DATA_MISSING` | Card selection (`setActiveToken`): the card's payment data is not on this phone | Remove the card and add it again |
+| `FAILED` | — | `NFC_DISABLED` / `NFC_UNAVAILABLE` / `MODE_REFUSED` / `TAP_ROUTING_REFUSED` / `SCREEN_NOT_ACTIVE` | Opening a pay session (`openPaySession`): tap-to-pay could not be armed — see [the pay session table](#arming-and-disarming-tap-to-pay-pay-session) | Per that table; nothing changed |
 | `FAILED` | — | `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `RECEIPT_FOR_ANOTHER_TRANSACTION` | Receipt scan (`processReceipt`): the receipt was refused — see [`processReceipt`](#processreceipt--getlastreceipts--getreceiptfortransaction) | Show the reason |
 | `FAILED` | — | `PAYMENT_NOT_CONFIRMED` | Receipt scan: the matching payment's outcome is not confirmed yet | Scan again shortly |
 | `PENDING` | `68` | `NO_RESPONSE_RECEIVED` | The request was sent but no answer came back (timeout, connection lost) | Wait; the SDK resolves it |
