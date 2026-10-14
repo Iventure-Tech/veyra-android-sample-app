@@ -81,15 +81,14 @@ private class ReceiptsAdapter(
         val receipt = receipts[position]
         holder.itemView.setOnClickListener { onItemClick(receipt) }
         holder.merchant.text = receipt.merchantName
-        val amountCents = receipt.totalAmount.toLongOrNull() ?: 0L
-        val currencyCode = receipt.currency?.filter { it.isDigit() }?.take(4)?.takeIf { it.length in 3..4 }
+        val amountCents = receipt.totalAmountMinorUnits
+        val currencyCode = receipt.currencyCode
         holder.amount.text = if (amountCents > 0) {
             CurrencyUtils.formatAmountWithCode(amountCents, currencyCode)
         } else {
-            receipt.totalAmountFormatted.ifBlank { receipt.totalAmount }
+            receipt.totalAmountFormatted.ifBlank { receipt.totalAmountMinorUnits.toString() }
         }
-        val storedAt = receipt.storedAtMs
-        holder.date.text = if (storedAt > 0) dateFormat.format(Date(storedAt)) else receipt.transactionTime
+        holder.date.text = receipt.transactionTime
         holder.status.text = receipt.transactionStatus.ifBlank { "—" }
     }
 

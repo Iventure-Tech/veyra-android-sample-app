@@ -1,7 +1,7 @@
 package co.veyra.bank
 
 import co.veyra.common.outcome.OutcomeReason
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.wallet.sdk.DigitiseResult
 
 /**
@@ -14,6 +14,6 @@ import co.veyra.wallet.sdk.DigitiseResult
  * token (`APPROVED`), so there is nothing to clean up.
  */
 fun shouldDeactivateLostDigitise(result: DigitiseResult): Boolean =
-    result.responseStatus == OutcomeStatus.FAILED &&
+    result.responseStatus == ResponseStatus.FAILED &&
         result.responseStatusReason in setOf(OutcomeReason.NO_RESPONSE_RECEIVED, OutcomeReason.UPSTREAM_ERROR) &&
         !result.clientRequestId.isNullOrBlank()

@@ -109,7 +109,7 @@ private class TransactionHistoryAdapter(
         holder.merchant.text = extractMerchantName(tx.merchantName)
         val dateMs = parseLocalTransactionDateMs(tx.localTransactionDateTime)
         holder.date.text = if (dateMs != null) dateFormat.format(Date(dateMs)) else ""
-        holder.amount.text = CurrencyUtils.formatAmount(tx.amountInMinorUnit, tx.transactionCurrencyCode)
+        holder.amount.text = CurrencyUtils.formatAmount(tx.amountMinorUnits, tx.currencyCode)
     }
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {

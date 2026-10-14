@@ -73,7 +73,7 @@ object VeyraBank {
 
     fun softposConfig(context: Context): VeyraSoftPosSdkConfig =
         VeyraSoftPosSdkConfig.builder(
-            co.veyra.common.Environment.TEST,
+            co.veyra.common.VeyraEnvironment.TEST,
             // The provider credential the gateway resolves the acquirer id and MCC from —
             // the same identifier the wallet config carries.
             paymentAppProviderId = requireNotNull(context.getString(R.string.payment_app_provider_id).takeIf { it.isNotBlank() }) {
@@ -95,12 +95,12 @@ object VeyraBank {
         }
         val resources = context.resources
         return VeyraWalletSdkConfig.builder(
-            co.veyra.common.Environment.TEST,
+            co.veyra.common.VeyraEnvironment.TEST,
             paymentAppProviderId,
             tokenRequestorId,
         )
             .appVersion(context.getString(R.string.app_version).takeIf { it.isNotBlank() })
-            .walletProviderTokenizationRecommendationStandardVersion(
+            .recommendationStandardVersion(
                 context.getString(R.string.wallet_provider_tokenization_recommendation_standard_version).takeIf { it.isNotBlank() }
             )
             .allowedAcquirerIds(resources.getStringArray(R.array.allowed_acquirer_ids).filter { it.isNotBlank() })

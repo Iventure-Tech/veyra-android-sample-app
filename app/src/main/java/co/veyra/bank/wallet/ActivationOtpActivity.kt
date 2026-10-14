@@ -13,7 +13,7 @@ import androidx.core.view.WindowInsetsCompat
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityActivationOtpBinding
 import co.veyra.bank.outcomeText
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.wallet.sdk.ActivationMedium
 import co.veyra.wallet.sdk.ActivationReason
 import co.veyra.wallet.sdk.ActivationMethods
@@ -91,12 +91,12 @@ class ActivationOtpActivity : AppCompatActivity() {
             reason = ActivationReason.ADD_CARD,
         ) { response ->
             when (response.responseStatus) {
-                OutcomeStatus.APPROVED -> {
+                ResponseStatus.APPROVED -> {
                     Toast.makeText(this, getString(R.string.activation_code_sent), Toast.LENGTH_SHORT).show()
                     response.expirationDateTime?.let { startCountdown(it) }
                 }
                 // The code may already be on its way — don't ask again.
-                OutcomeStatus.PENDING ->
+                ResponseStatus.PENDING ->
                     Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
                 // NOT_SENT or FAILED: say why, and offer Resend again.
                 else -> {
@@ -195,7 +195,7 @@ class ActivationOtpActivity : AppCompatActivity() {
             activationCode = code
         ) { response ->
             when (response.responseStatus) {
-                OutcomeStatus.APPROVED -> {
+                ResponseStatus.APPROVED -> {
                     Toast.makeText(this, response.message ?: getString(R.string.activation_code_submitted), Toast.LENGTH_SHORT).show()
                     startActivity(
                         Intent(this, PayActivity::class.java)
@@ -204,7 +204,7 @@ class ActivationOtpActivity : AppCompatActivity() {
                 }
                 // The code may have been accepted — don't submit it again; the wallet picks up the
                 // card's new state on its own.
-                OutcomeStatus.PENDING ->
+                ResponseStatus.PENDING ->
                     Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
                 // NOT_SENT (fix the reason, submit again) or FAILED (e.g. CODE_INVALID): say why.
                 else -> {

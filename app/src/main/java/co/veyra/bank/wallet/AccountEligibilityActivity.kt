@@ -14,7 +14,7 @@ import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.outcomeText
 import co.veyra.bank.shouldDeactivateLostDigitise
 import co.veyra.common.outcome.OutcomeReason
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.bank.databinding.ActivityAccountEligibilityBinding
 import co.veyra.wallet.sdk.AccountNumberSource
 import co.veyra.wallet.sdk.ActivationMethods
@@ -23,7 +23,7 @@ import co.veyra.wallet.sdk.DigitiseParams
 import co.veyra.wallet.sdk.DigitiseResult
 import co.veyra.wallet.sdk.TokenizationRecommendation
 import co.veyra.wallet.sdk.TokenizationRecommendationReason
-import co.veyra.wallet.sdk.ActivationMethod
+import co.veyra.wallet.sdk.ActivationMethodInfo
 import co.veyra.wallet.sdk.TrustScore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -121,14 +121,14 @@ class AccountEligibilityActivity : AppCompatActivity() {
         // Digitise is never PENDING: APPROVED (the response code says whether the card still needs
         // activating), or DECLINED / FAILED / NOT_SENT with the reason — a new attempt starts a new
         // digitisation.
-        if (response.responseStatus == OutcomeStatus.APPROVED) {
+        if (response.responseStatus == ResponseStatus.APPROVED) {
             when (response.responseCode?.uppercase()) {
                 ActivationMethods.ResponseCode.APPROVED -> {
                     Toast.makeText(this, getString(R.string.tokenization_request_success), Toast.LENGTH_SHORT).show()
                     finish()
                 }
                 ActivationMethods.ResponseCode.APPROVE_REQUIRE_AUTH -> {
-                    val methods = response.activationMethods.map { ActivationMethod(it.medium, it.contact.orEmpty()) }
+                    val methods = response.activationMethods.map { ActivationMethodInfo(it.medium, it.contact.orEmpty()) }
                     val tokenUniqueRef = response.tokenUniqueReference
                     if (tokenUniqueRef != null && methods.isNotEmpty()) {
                         startActivity(

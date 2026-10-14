@@ -11,10 +11,10 @@ import androidx.lifecycle.lifecycleScope
 import co.veyra.bank.R
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.bank.databinding.ActivityTokenizationRequestBinding
 import co.veyra.wallet.sdk.AccountNumberSource
-import co.veyra.wallet.sdk.Bank
+import co.veyra.common.Bank
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.VerifyAccountParams
 import kotlinx.coroutines.Dispatchers
@@ -116,7 +116,7 @@ class TokenizationRequestActivity : AppCompatActivity() {
         selectedBank = null
         sdk.getBanks(accountNumber) { result ->
             lifecycleScope.launch(Dispatchers.Main) {
-                if (result.responseStatus != OutcomeStatus.APPROVED) {
+                if (result.responseStatus != ResponseStatus.APPROVED) {
                     // A read, so never PENDING: NOT_SENT (offline…) or FAILED. Say why, instead of
                     // claiming the account has no banks.
                     binding.bankAutoComplete.setText(
@@ -232,7 +232,7 @@ class TokenizationRequestActivity : AppCompatActivity() {
 
         sdk.verifyAccount(params) { response ->
             lifecycleScope.launch(Dispatchers.Main) {
-                if (response.responseStatus == OutcomeStatus.APPROVED) {
+                if (response.responseStatus == ResponseStatus.APPROVED) {
                     startActivity(
                         AccountEligibilityActivity.intent(
                             this@TokenizationRequestActivity,

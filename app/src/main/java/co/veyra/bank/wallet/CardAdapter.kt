@@ -101,12 +101,12 @@ class CardAdapter : ListAdapter<CardItem, RecyclerView.ViewHolder>(CardDiffCallb
             // "AFRIGO ****1234" — so it is already short and safe to render as-is. Blank only on
             // cards digitised before the SDK supplied it.
             binding.cardHolderNameTextView.text = token.cardHolderName.ifBlank { "CARDHOLDER" }
-            binding.cardNumberTextView.text = token.getMaskedPAN()
+            binding.cardNumberTextView.text = token.maskedPan
             // Expiry: show month and year only (MM/YY)
-            val expiryDateDisplay = formatExpiryMonthYear(token.expiryDate)
+            val expiryDateDisplay = formatExpiryMonthYear(token.expiry)
             binding.expiryDateTextView.text = expiryDateDisplay
             binding.expiryDateTextView.visibility = View.VISIBLE
-            binding.lastFourDigitsTextView.text = token.getLastFourDigits()
+            binding.lastFourDigitsTextView.text = token.panLastFour
             binding.lastFourDigitsTextView.visibility = View.VISIBLE
 
             binding.pendingActivationBadge?.let { badge ->

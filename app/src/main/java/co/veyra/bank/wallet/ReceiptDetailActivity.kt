@@ -56,16 +56,16 @@ class ReceiptDetailActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.receiptType).text = r.transactionType
 
         // Amount
-        val amountCents = r.totalAmount.toLongOrNull() ?: 0L
-        val currencyCode = r.currency?.filter { it.isDigit() }?.take(4)?.takeIf { it.length in 3..4 }
+        val amountCents = r.totalAmountMinorUnits
+        val currencyCode = r.currencyCode
         findViewById<TextView>(R.id.receiptAmount).text = if (amountCents > 0) {
             CurrencyUtils.formatAmountWithCode(amountCents, currencyCode)
         } else {
-            r.totalAmountFormatted.ifBlank { r.totalAmount }
+            r.totalAmountFormatted.ifBlank { r.totalAmountMinorUnits.toString() }
         }
 
         // Currency label
-        r.currency?.takeIf { it.isNotBlank() }?.let {
+        r.currencyCode?.takeIf { it.isNotBlank() }?.let {
             val tv = findViewById<TextView>(R.id.receiptCurrency)
             tv.text = it
             tv.visibility = View.VISIBLE

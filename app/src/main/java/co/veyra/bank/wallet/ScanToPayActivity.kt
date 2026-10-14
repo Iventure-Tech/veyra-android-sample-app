@@ -15,11 +15,12 @@ import co.veyra.bank.cancelAction
 import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.softpos.payment.sdk.CurrencyUtils
 import co.veyra.wallet.sdk.VeyraWalletSdk
-import co.veyra.wallet.sdk.api.mpm.MpmScanResult
-import co.veyra.wallet.sdk.api.mpm.VerifiedPaymentContext
+import co.veyra.wallet.sdk.api.mpm.ScanInspection
+import co.veyra.wallet.sdk.api.mpm.ScanRejectionReason
+import co.veyra.wallet.sdk.api.mpm.VerifiedPayment
 import com.google.android.material.button.MaterialButton
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -33,7 +34,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 class ScanToPayActivity : AppCompatActivity() {
 
     private lateinit var sdk: VeyraWalletSdk
-    private var verified: VerifiedPaymentContext? = null
+    private var verified: VerifiedPayment? = null
 
     /** True from Pay until the payment's outcome arrives. */
     private var paying = false
@@ -70,20 +71,20 @@ class ScanToPayActivity : AppCompatActivity() {
 
     private fun handleScan(payload: String) {
         when (val scan = sdk.inspectScannedQr(payload)) {
-            is MpmScanResult.Verified -> showConfirm(scan.context)
-            is MpmScanResult.Rejected -> showResult(
+            is ScanInspection.Verified -> showConfirm(scan.context)
+            is ScanInspection.Rejected -> showResult(
                 // Refused on-device before anything was sent — no payment exists to be pending.
                 state = ResultState.REFUSED,
                 title = getString(R.string.declined),
                 message = when (scan.reason) {
-                    MpmScanResult.Reason.EXPIRED -> getString(R.string.scan_expired)
+                    ScanRejectionReason.EXPIRED -> getString(R.string.scan_expired)
                     else -> getString(R.string.scan_rejected)
                 },
             )
         }
     }
 
-    private fun showConfirm(context: VerifiedPaymentContext) {
+    private fun showConfirm(context: VerifiedPayment) {
         verified = context
         findViewById<TextView>(R.id.scanStatusText).visibility = View.GONE
         findViewById<View>(R.id.resultGroup).visibility = View.GONE
@@ -91,7 +92,7 @@ class ScanToPayActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.merchantName).text = context.merchantName
         findViewById<TextView>(R.id.merchantCity).text = context.merchantCity ?: ""
         findViewById<TextView>(R.id.payAmount).text =
-            CurrencyUtils.formatAmount(context.amountMinorUnits, context.currencyNumeric)
+            CurrencyUtils.formatAmount(context.amountMinorUnits, context.currencyCode)
     }
 
     private fun pay() {
@@ -121,7 +122,7 @@ class ScanToPayActivity : AppCompatActivity() {
         }
     }
 
-    private fun setPaying(value: Boolean, context: VerifiedPaymentContext) {
+    private fun setPaying(value: Boolean, context: VerifiedPayment) {
         paying = value
         val payButton = findViewById<MaterialButton>(R.id.payButton)
         payButton.isEnabled = !value
@@ -131,11 +132,11 @@ class ScanToPayActivity : AppCompatActivity() {
             !value || !context.merchantOrderId.isNullOrBlank()
     }
 
-    private fun pushPayment(context: VerifiedPaymentContext) {
+    private fun pushPayment(context: VerifiedPayment) {
         setPaying(true, context)
         sdk.payScannedContext(context) { result ->
             setPaying(false, context)
-            // The Result fails only on a setup mistake (VeyraSetupException) — a bug in this app's
+            // The Result fails only on a setup mistake (VeyraError) — a bug in this app's
             // integration, found in development. Every refusal is an outcome.
             val outcome = result.getOrElse { setupError ->
                 showReason(setupError.message ?: getString(R.string.error_occurred))
@@ -146,7 +147,7 @@ class ScanToPayActivity : AppCompatActivity() {
                 finish()
                 return@payScannedContext
             }
-            if (outcome.responseStatus == OutcomeStatus.NOT_SENT) {
+            if (outcome.responseStatus == ResponseStatus.NOT_SENT) {
                 // Nothing reached the gateway, so nothing was charged: stay on the confirm screen
                 // and say what to fix (AUTH_CANCELLED, ONLINE_REQUIRED, NO_NETWORK_CONNECTION…).
                 // Paying again pays this same QR.
@@ -201,8 +202,8 @@ class ScanToPayActivity : AppCompatActivity() {
 
     private fun paymentState(responseStatus: String?): ResultState =
         when (responseStatus?.trim()?.uppercase()) {
-            OutcomeStatus.APPROVED -> ResultState.APPROVED
-            OutcomeStatus.DECLINED, OutcomeStatus.FAILED -> ResultState.REFUSED
+            ResponseStatus.APPROVED -> ResultState.APPROVED
+            ResponseStatus.DECLINED, ResponseStatus.FAILED -> ResultState.REFUSED
             else -> ResultState.PENDING
         }
 
