@@ -554,6 +554,7 @@ val softposConfig = VeyraSoftPosSdkConfig.builder(
 | `environment` | **Mandatory** | `Environment.TEST` or `Environment.LIVE`. Determines the server host; set once, applies to all SDK calls. |
 | `paymentAppProviderId` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet config's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. Must not be blank. |
 | `enableNfc(Boolean)` | Optional | Arm the NFC reader capability at init. Default `true`. |
+| `requestTimeoutSeconds(Int?)` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). Unset keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
 
 That is the whole configuration. The merchant's identity — merchant id, name and location, category code, country code, terminal id — is not configurable: it comes from the merchant stored by [`register`](#register), so the terminal data always carries the merchant the gateway registered. The acquirer id is learned from the gateway's registration/update/status responses (resolved from your payment app provider) and stored with the merchant; it is never app-supplied.
 
@@ -585,8 +586,37 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `walletProviderTokenizationRecommendationStandardVersion(String)` | **Required before digitising** | Standard version for the tokenisation recommendation (e.g. `"1.0"`). Digitise throws if unset. |
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
+| `requestTimeoutSeconds(Int?)` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). Unset keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
 
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
+
+### Request timeout
+
+Both configs take an optional `requestTimeoutSeconds`: the longest the SDK waits for one call to
+the Veyra backend, start to finish (connecting, sending and waiting for the answer). Each SDK
+uses its own value, so a combined app can give SoftPOS and the wallet different timeouts.
+
+```kotlin
+val softposConfig = VeyraSoftPosSdkConfig.builder(Environment.TEST, paymentAppProviderId)
+    .requestTimeoutSeconds(20)
+    .build()
+val walletConfig = VeyraWalletSdkConfig.builder(Environment.TEST, paymentAppProviderId, tokenRequestorId)
+    .requestTimeoutSeconds(30)
+    .build()
+```
+
+- **Allowed values: 5 to 60.** Anything else makes `initialize` throw a `VeyraSetupException`
+  with `INVALID_CONFIGURATION`, naming the value and the range. The SDK never adjusts the value.
+- **Not set:** the SDK keeps its own timeouts, which differ by call (up to about 40 s for most
+  SoftPOS lookups and up to about 90 s for payments and wallet calls).
+- **It applies to every backend call the SDK makes,** including the token request and calls
+  through a `VeyraProxyProvider` (your backend's relay is given the same time limit). It does not
+  change the NFC tap timeouts or the card-activation wait.
+- **A payment that runs out of time is pending, not failed.** The request may already have
+  reached the server, so the payment ends `PENDING` (`68` / `NO_RESPONSE_RECEIVED`) and the SDK
+  checks the result later. A shorter timeout gives the user an answer sooner, but more payments
+  will be pending rather than final. A longer one gets more final answers on a slow network,
+  but the user waits longer.
 
 ### `Environment`
 
@@ -2429,7 +2459,7 @@ used on iOS and React Native.
 |---|---|---|
 | `NOT_CONFIGURED` | Any call before `initialize` — including `VeyraSdk.softpos` / `VeyraSdk.wallet` before that member SDK's `initialize`, and a cold process the app has not initialised yet | Initialise the SDK first, at app start, and use the instance `initialize` returns. |
 | `NOT_SIGNED_IN` | No customer is signed in: a call that needs the customer's data (cards, payments, the stored merchant, transactions) after `signOut()`, or before `initialize` named a customer | Call `initialize` with the customer before using the SDK. See [Customers](#customers-signing-in-signing-out-switching). |
-| `INVALID_CONFIGURATION` | An unusable provider (none, one that implements both kinds, a `providerType` that doesn't match the interface, a blank `clientId`); a provider of a different kind from an earlier `initialize`; a blank `customerId`; missing required config (environment, payment app provider ID, token requestor ID, recommendation standard version); both SDKs initialised without the `VeyraSdk` facade | Fix the configuration. The message names the exact problem. See [Choosing a provider](#choosing-a-provider) and [Exclusive mode](#exclusive-mode-combined-apps). |
+| `INVALID_CONFIGURATION` | An unusable provider (none, one that implements both kinds, a `providerType` that doesn't match the interface, a blank `clientId`); a provider of a different kind from an earlier `initialize`; a blank `customerId`; missing required config (environment, payment app provider ID, token requestor ID, recommendation standard version); a `requestTimeoutSeconds` outside 5–60; both SDKs initialised without the `VeyraSdk` facade | Fix the configuration. The message names the exact problem. See [Choosing a provider](#choosing-a-provider) and [Exclusive mode](#exclusive-mode-combined-apps). |
 | `SESSION_REQUIRED` | A payment call made without its screen session | Declared on Android for parity; in practice only React Native raises it. The native SDK follows the screen lifecycle itself. |
 | `UNSUPPORTED_ON_PLATFORM` | A method this platform can't perform | Declared on Android for parity; it is raised only for a method a platform cannot perform (for example wallet tap-to-pay on iOS). |
 
