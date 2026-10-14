@@ -1416,7 +1416,7 @@ class GetPaidActivity : AppCompatActivity() {
         } else {
             getString(R.string.credit_could_not_be_confirmed)
         }
-        val waitedOn = confirmation.reference == awaitingCreditConfirmationRef
+        val waitedOn = confirmation.merchantTransactionReference == awaitingCreditConfirmationRef
         if (waitedOn && currentPage == PAGE_PAYMENT_RESULT) {
             awaitingCreditConfirmationRef = null
             creditConfirmationLine.text = message
