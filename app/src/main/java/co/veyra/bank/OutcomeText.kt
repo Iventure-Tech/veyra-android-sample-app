@@ -27,8 +27,7 @@ const val DUPLICATE_MERCHANT_ORDER_ID = "DUPLICATE_MERCHANT_ORDER_ID"
  * payment's status: already paid, or still being confirmed. Never "try again".
  */
 fun duplicateOrderText(original: co.veyra.softpos.payment.sdk.payment.OriginalPayment?): String =
-    co.veyra.softpos.payment.sdk.payment.PaymentOutcomeMessage.of(
-        co.veyra.softpos.payment.sdk.payment.StatedStatus.FAILED,
-        reason = DUPLICATE_MERCHANT_ORDER_ID,
-        originalStatus = original?.responseStatus,
-    )
+    if (original?.responseStatus == co.veyra.common.outcome.ResponseStatus.PENDING)
+        "A payment for this order is still being confirmed - do not take another payment"
+    else
+        "This order is already paid - do not take another payment"
