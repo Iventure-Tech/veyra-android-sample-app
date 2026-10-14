@@ -12,6 +12,7 @@ import co.veyra.bank.R
 import co.veyra.bank.cancelAction
 import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.outcomeText
+import co.veyra.bank.shouldDeactivateLostDigitise
 import co.veyra.common.outcome.OutcomeReason
 import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.bank.databinding.ActivityAccountEligibilityBinding
@@ -149,9 +150,21 @@ class AccountEligibilityActivity : AppCompatActivity() {
                 }
             }
         } else {
-            showError(outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred)))
+            val outcome = outcomeText(response.responseStatusReason, response.message, getString(R.string.error_occurred))
+            showError(outcome)
             binding.addToWalletButton.isEnabled = true
             binding.addToWalletButton.text = getString(R.string.add_to_wallet)
+            // Sent, but no usable answer: the server may have created a card this phone never
+            // received. Switch it off by this attempt's id; the next "Add" is a new attempt.
+            if (shouldDeactivateLostDigitise(response)) deactivateLostDigitise(response.clientRequestId!!, outcome)
+        }
+    }
+
+    private fun deactivateLostDigitise(clientRequestId: String, outcome: String) {
+        val sdk = VeyraWalletSdk.getInstance() ?: return
+        sdk.deactivateDigitise(clientRequestId) { r ->
+            val answer = listOfNotNull(r.responseStatus, r.responseStatusReason).joinToString(" / ")
+            showError(outcome + "\n" + getString(R.string.digitise_cleanup_result, answer))
         }
     }
 
