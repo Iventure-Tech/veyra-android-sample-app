@@ -12,7 +12,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityActivationMethodSelectionBinding
-import co.veyra.wallet.sdk.ActivationMethod
+import co.veyra.wallet.sdk.ActivationMethodInfo
 import co.veyra.wallet.sdk.ActivationMethods
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -21,7 +21,7 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityActivationMethodSelectionBinding
     private lateinit var tokenId: String
-    private lateinit var methods: List<ActivationMethod>
+    private lateinit var methods: List<ActivationMethodInfo>
     private var tokenUniqueReference: String? = null
     private lateinit var adapter: ActivationMethodAdapter
 
@@ -32,7 +32,7 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
 
         tokenId = intent.getStringExtra(EXTRA_TOKEN_ID) ?: run { finish(); return }
         val json = intent.getStringExtra(EXTRA_ACTIVATION_METHODS)
-        val type = object : TypeToken<List<ActivationMethod>>() {}.type
+        val type = object : TypeToken<List<ActivationMethodInfo>>() {}.type
         methods = if (json != null) Gson().fromJson(json, type) ?: emptyList() else emptyList()
         tokenUniqueReference = intent.getStringExtra(EXTRA_TOKEN_UNIQUE_REFERENCE)
 
@@ -47,7 +47,7 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
         binding.backButton.setOnClickListener { finish() }
     }
 
-    private fun setupSingleMethodMode(method: ActivationMethod) {
+    private fun setupSingleMethodMode(method: ActivationMethodInfo) {
         binding.titleTextView.text = getString(R.string.activation_verify_identity)
         binding.subtitleTextView.text = when (method.medium) {
             ActivationMethods.MASKED_EMAIL -> getString(R.string.activation_single_email_message)
@@ -76,7 +76,7 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
         else -> medium
     }
 
-    private fun onMethodSelected(method: ActivationMethod) {
+    private fun onMethodSelected(method: ActivationMethodInfo) {
         when (method.medium) {
             ActivationMethods.MASKED_EMAIL, ActivationMethods.MASKED_MOBILE_PHONE ->
                 startActivity(
@@ -94,7 +94,7 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
     }
 
     private fun openActivationScreenForMethod(
-        method: ActivationMethod,
+        method: ActivationMethodInfo,
         expirationDateTime: String?,
         message: String?
     ) {
@@ -111,15 +111,15 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
                     activationMethodContact = method.contact
                 )
             ActivationMethods.CALL_CENTER_PHONE ->
-                ActivationInfoActivity.intentCallCenter(this, tokenId, method.contact, tokenUniqueReference)
+                ActivationInfoActivity.intentCallCenter(this, tokenId, method.contact.orEmpty(), tokenUniqueReference)
             ActivationMethods.AUTOMATED_CALL_CENTER_PHONE ->
-                ActivationInfoActivity.intentAutomatedCallCenter(this, tokenId, method.contact, tokenUniqueReference)
+                ActivationInfoActivity.intentAutomatedCallCenter(this, tokenId, method.contact.orEmpty(), tokenUniqueReference)
             ActivationMethods.WEBSITE ->
-                ActivationInfoActivity.intentWebsite(this, tokenId, method.contact, tokenUniqueReference)
+                ActivationInfoActivity.intentWebsite(this, tokenId, method.contact.orEmpty(), tokenUniqueReference)
             ActivationMethods.MOBILE_APPLICATION ->
-                ActivationInfoActivity.intentIssuerApp(this, tokenId, method.contact, tokenUniqueReference)
+                ActivationInfoActivity.intentIssuerApp(this, tokenId, method.contact.orEmpty(), tokenUniqueReference)
             else ->
-                ActivationInfoActivity.intentGeneric(this, tokenId, method.medium, method.contact)
+                ActivationInfoActivity.intentGeneric(this, tokenId, method.medium, method.contact.orEmpty())
         }
         startActivity(intent)
     }
@@ -132,7 +132,7 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
         fun intent(
             context: Context,
             tokenId: String,
-            activationMethods: List<ActivationMethod>,
+            activationMethods: List<ActivationMethodInfo>,
             tokenUniqueReference: String? = null
         ): Intent {
             return Intent(context, ActivationMethodSelectionActivity::class.java).apply {
@@ -144,10 +144,10 @@ class ActivationMethodSelectionActivity : AppCompatActivity() {
     }
 }
 
-private data class ActivationMethodItem(val method: ActivationMethod, val label: String)
+private data class ActivationMethodItem(val method: ActivationMethodInfo, val label: String)
 
 private class ActivationMethodAdapter(
-    private val onSelect: (ActivationMethod) -> Unit
+    private val onSelect: (ActivationMethodInfo) -> Unit
 ) : RecyclerView.Adapter<ActivationMethodAdapter.ViewHolder>() {
 
     private var items: List<ActivationMethodItem> = emptyList()

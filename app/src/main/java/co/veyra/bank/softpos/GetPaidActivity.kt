@@ -1389,7 +1389,7 @@ class GetPaidActivity : AppCompatActivity() {
                     else -> Unit
                 }
             }
-        } catch (e: co.veyra.common.VeyraSetupException) {
+        } catch (e: co.veyra.common.VeyraError) {
             // A mistake in this app's integration (not signed in, both SDKs used without the
             // VeyraSdk facade…) — found in development, never a payment outcome.
             Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()

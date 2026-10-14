@@ -119,7 +119,7 @@ class TransactionDetailActivity : AppCompatActivity() {
     }
 
     private fun bindSummary(tx: TransactionSummary) {
-        binding.txDetailAmount.text = CurrencyUtils.formatAmount(tx.amountInMinorUnit, tx.transactionCurrencyCode)
+        binding.txDetailAmount.text = CurrencyUtils.formatAmount(tx.amountMinorUnits, tx.currencyCode)
         binding.txDetailMerchant.text = extractMerchantName(tx.merchantName)
 
         val address = tx.merchantName?.substringAfter('*', "")?.trim().orEmpty()
@@ -136,7 +136,7 @@ class TransactionDetailActivity : AppCompatActivity() {
         binding.txDetailDate.text = datePart
         binding.txDetailTime.text = timePart
 
-        tx.transactionCurrencyCode?.takeIf { it.isNotBlank() }?.let {
+        tx.currencyCode?.takeIf { it.isNotBlank() }?.let {
             binding.rowCurrency.visibility = View.VISIBLE
             binding.dividerCurrency.visibility = View.VISIBLE
             binding.txDetailCurrency.text = it

@@ -22,7 +22,7 @@ import co.veyra.wallet.sdk.DigitiseParams
 import co.veyra.wallet.sdk.DigitiseResult
 import co.veyra.wallet.sdk.TokenizationRecommendation
 import co.veyra.wallet.sdk.TokenizationRecommendationReason
-import co.veyra.wallet.sdk.ActivationMethod
+import co.veyra.wallet.sdk.ActivationMethodInfo
 import co.veyra.wallet.sdk.TrustScore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -127,7 +127,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
                     finish()
                 }
                 ActivationMethods.ResponseCode.APPROVE_REQUIRE_AUTH -> {
-                    val methods = response.activationMethods.map { ActivationMethod(it.medium, it.contact.orEmpty()) }
+                    val methods = response.activationMethods.map { ActivationMethodInfo(it.medium, it.contact.orEmpty()) }
                     val tokenUniqueRef = response.tokenUniqueReference
                     if (tokenUniqueRef != null && methods.isNotEmpty()) {
                         startActivity(

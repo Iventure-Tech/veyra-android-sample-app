@@ -20,10 +20,10 @@ import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityPayBinding
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.ResponseStatus
-import co.veyra.wallet.sdk.ActivationMethod
+import co.veyra.wallet.sdk.ActivationMethodInfo
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.WalletTapEvent
-import co.veyra.wallet.sdk.Environment
+import co.veyra.common.VeyraEnvironment
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.TransactionSummary
 import co.veyra.wallet.sdk.VeyraWalletSdkConfig
@@ -97,7 +97,7 @@ class PayActivity : AppCompatActivity() {
             }
         }
         // The keys ran out (or came back) — redraw so the card's requires-online state is current.
-        sdk.observeCardKeyStateChanged { state ->
+        sdk.observeTokenKeyStateChanged { state ->
             Log.d(TAG, "card ${state.tokenUniqueReference} requiresOnline=${state.requiresOnline}")
             loadCards()
         }
@@ -251,7 +251,7 @@ class PayActivity : AppCompatActivity() {
             amountMinorUnits,
             onExpired = { onQrExpired?.invoke() },
         ) { result ->
-            // The Result fails only on a setup mistake (VeyraSetupException) — a bug in this app's
+            // The Result fails only on a setup mistake (VeyraError) — a bug in this app's
             // integration, found in development. Every refusal is an outcome on the QR itself.
             val qr = result.getOrElse { setupError ->
                 Log.e(TAG, "showQrToPay: setup error", setupError)
@@ -273,7 +273,7 @@ class PayActivity : AppCompatActivity() {
         }
     }
 
-    private fun showPaymentQrDialog(qr: co.veyra.wallet.sdk.CpmPaymentQr, amountText: String) {
+    private fun showPaymentQrDialog(qr: co.veyra.wallet.sdk.PaymentQr, amountText: String) {
         // An APPROVED render always carries these three.
         val payload = checkNotNull(qr.payload)
         val tokenUniqueReference = checkNotNull(qr.tokenUniqueReference)
@@ -414,14 +414,14 @@ class PayActivity : AppCompatActivity() {
                     binding.noCardsText.visibility = View.VISIBLE
                     binding.activitySection.visibility = View.GONE
                 } else {
-                    Log.d(TAG, "loadCards: ${tokens.size} token(s); recent tx per card = " +
-                        tokens.joinToString { "${it.tokenUniqueReference?.takeLast(4) ?: "?"}:${it.transactions.size}" })
+                    Log.d(TAG, "loadCards: ${tokens.size} token(s): " +
+                        tokens.joinToString { it.tokenUniqueReference.takeLast(4) })
                     val cardItems = tokens.map { token ->
-                        CardItem.Token(token, !token.isActive && !token.activationMethods.isNullOrEmpty())
+                        CardItem.Token(token, token.requiresActivation && !token.activationMethods.isNullOrEmpty())
                     }
                     // No pay affordance while the active card must go online first —
                     // both rails (scan-to-pay and show-QR) are disabled; the card renders frozen.
-                    val activeRequiresOnline = tokens.firstOrNull { it.isActive }?.requiresOnline == true
+                    val activeRequiresOnline = tokens.firstOrNull { it.isSelected }?.requiresOnline == true
                     binding.scanToPayFab.isEnabled = !activeRequiresOnline
                     binding.scanToPayFab.alpha = if (activeRequiresOnline) 0.4f else 1f
                     binding.showQrFab.isEnabled = !activeRequiresOnline
@@ -466,9 +466,9 @@ class PayActivity : AppCompatActivity() {
         val token = item.token
         binding.activitySection.visibility = View.VISIBLE
 
-        val transactions = token.transactions.take(3)
-        Log.d(TAG, "activity: card ${token.tokenUniqueReference?.takeLast(4)} at page $currentPage → " +
-            "${token.transactions.size} recent tx, showing ${transactions.size}")
+        val transactions = sdk.getTransactions(token.tokenUniqueReference, 3)
+        Log.d(TAG, "activity: card ${token.tokenUniqueReference.takeLast(4)} at page $currentPage → " +
+            "showing ${transactions.size} recent tx")
         binding.activityTransactionsList.removeAllViews()
         if (transactions.isEmpty()) {
             binding.activityNoTransactionsText.visibility = View.VISIBLE
@@ -487,7 +487,7 @@ class PayActivity : AppCompatActivity() {
                 row.findViewById<TextView>(R.id.transactionDate).text =
                     if (txDateMs != null) activityDateFormat.format(Date(txDateMs)) else ""
                 row.findViewById<TextView>(R.id.transactionAmount).text =
-                    CurrencyUtils.formatAmount(tx.amountInMinorUnit, tx.transactionCurrencyCode)
+                    CurrencyUtils.formatAmount(tx.amountMinorUnits, tx.currencyCode)
                 row.setOnClickListener {
                     startActivity(TransactionDetailActivity.intent(this, tx))
                 }
@@ -510,7 +510,7 @@ class PayActivity : AppCompatActivity() {
 
     private fun handleTokenClick(token: Token) {
         val methods = token.activationMethods.orEmpty()
-        if (!token.isActive && methods.isNotEmpty()) {
+        if (token.requiresActivation && methods.isNotEmpty()) {
             val ref = token.tokenUniqueReference
             if (methods.size == 1) {
                 startSingleMethodActivation(token.tokenUniqueReference.orEmpty(), methods.single(), ref)
@@ -521,19 +521,19 @@ class PayActivity : AppCompatActivity() {
         // No expand — NFC is activated automatically when the card is swiped into focus
     }
 
-    private fun startSingleMethodActivation(tokenId: String, method: ActivationMethod, tokenUniqueReference: String? = null) {
+    private fun startSingleMethodActivation(tokenId: String, method: ActivationMethodInfo, tokenUniqueReference: String? = null) {
         when (method.medium) {
             ActivationMethods.MASKED_EMAIL,
             ActivationMethods.MASKED_MOBILE_PHONE ->
-                startActivity(ActivationOtpActivity.intent(this, tokenId, method.medium, tokenUniqueReference, activationMethodContact = method.contact))
+                startActivity(ActivationOtpActivity.intent(this, tokenId, method.medium, tokenUniqueReference, activationMethodContact = method.contact.orEmpty()))
             ActivationMethods.CALL_CENTER_PHONE ->
-                startActivity(ActivationInfoActivity.intentCallCenter(this, tokenId, method.contact))
+                startActivity(ActivationInfoActivity.intentCallCenter(this, tokenId, method.contact.orEmpty()))
             ActivationMethods.AUTOMATED_CALL_CENTER_PHONE ->
-                startActivity(ActivationInfoActivity.intentAutomatedCallCenter(this, tokenId, method.contact))
+                startActivity(ActivationInfoActivity.intentAutomatedCallCenter(this, tokenId, method.contact.orEmpty()))
             ActivationMethods.WEBSITE ->
-                startActivity(ActivationInfoActivity.intentWebsite(this, tokenId, method.contact))
+                startActivity(ActivationInfoActivity.intentWebsite(this, tokenId, method.contact.orEmpty()))
             ActivationMethods.MOBILE_APPLICATION ->
-                startActivity(ActivationInfoActivity.intentIssuerApp(this, tokenId, method.contact))
+                startActivity(ActivationInfoActivity.intentIssuerApp(this, tokenId, method.contact.orEmpty()))
             else ->
                 startActivity(ActivationMethodSelectionActivity.intent(this, tokenId, listOf(method), tokenUniqueReference))
         }
@@ -654,12 +654,12 @@ class PayActivity : AppCompatActivity() {
 
     private fun startObserversForPendingTokens(tokens: List<Token>) {
         val allRefs = tokens.mapNotNull { it.tokenUniqueReference }.toSet()
-        val activeRefs = tokens.filter { it.isActive }.mapNotNull { it.tokenUniqueReference }.toSet()
+        val activeRefs = tokens.filter { !it.requiresActivation }.mapNotNull { it.tokenUniqueReference }.toSet()
         pendingObserverRefs.filter { it in activeRefs || it !in allRefs }.forEach { ref ->
             sdk.stopActivationObserver(ref)
             pendingObserverRefs.remove(ref)
         }
-        tokens.filter { !it.isActive && !it.activationMethods.isNullOrEmpty() }
+        tokens.filter { it.requiresActivation && !it.activationMethods.isNullOrEmpty() }
             .mapNotNull { it.tokenUniqueReference }
             .filter { it !in pendingObserverRefs || !sdk.hasActivationObserver(it) }
             .forEach { ref ->
@@ -700,7 +700,7 @@ class PayActivity : AppCompatActivity() {
         // single-listener ("last registration wins"), so a recreated Activity replaces rather than
         // stacks — but a destroyed one must not be called back into.
         sdk.stopObservingTokenStatusChanged()
-        sdk.stopObservingCardKeyStateChanged()
+        sdk.stopObservingTokenKeyStateChanged()
         sdk.stopObservingTapEvents()
         observedRefusalRef?.let { sdk.stopObservingPaymentRefusals(it) }
         observedRefusalRef = null
