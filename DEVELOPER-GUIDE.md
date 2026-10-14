@@ -633,7 +633,7 @@ The calls fall into five groups, each opening with a table of its calls:
 - [Transactions and receipts](#transactions-and-receipts), then [Retrying a payment safely](#retrying-a-payment-safely) and [Looking up a payment](#looking-up-a-payment)
 - [Observers](#observers)
 
-With no merchant stored, every operation that needs one answers with the reason `MISSING_MANDATORY_CONFIG` and never throws for it: a payment (`tap.start`, `chargeCustomerQr`, `createPaymentContext`) ends `NOT_SENT` (nothing was sent; the order id is unused); `refreshStatus`, `activate`, `deactivate` and `update` end `FAILED`; the lookups `getTransactionStatus` and `getCreditConfirmation` carry it as `failureReason`.
+With no merchant stored, every operation that needs one answers with the reason `MISSING_MANDATORY_CONFIG` and never throws for it: a payment (`tap.start`, `chargeCustomerQr`, `createPaymentContext`) ends `NOT_SENT` (nothing was sent; the order id is unused); `refreshStatus`, `activate`, `deactivate` and `updateMerchant` end `FAILED`; the lookups `getTransactionStatus` and `getCreditConfirmation` carry it as `failureReason`.
 
 Moving from 3.0.0? See [Migrating from 3.0.0 (SoftPOS)](#migrating-from-300-softpos).
 
@@ -2474,7 +2474,7 @@ The three fields have the same meaning everywhere. A few result types name them 
 | `softpos.contextStatus(txRef)` (merchant QR) | `PaymentContextStatusResult` → `status` (`PaymentContextStatus`) | `responseCode` | `responseStatus` | `responseStatusReason` |
 | `softpos.register` | `MerchantRegistrationResponse` | — | `responseStatus` | `responseStatusReason` |
 | `softpos.refreshStatus` / `activate` / `deactivate` | `MerchantStatusResponse` | — | `responseStatus` | `responseStatusReason` |
-| `softpos.update` | `MerchantUpdateResponse` | — | `responseStatus` | `responseStatusReason` |
+| `softpos.updateMerchant` | `MerchantUpdateResponse` | — | `responseStatus` | `responseStatusReason` |
 | `softpos.getBanks` | `NubanBankListResponse` | — | `responseStatus` | `responseStatusReason` |
 | `softpos.getTransaction` / `getTransactions` | `TransactionInfo` | `responseCode` | `transactionStatus` | `responseStatusReason` |
 | `softpos.refreshTransactionStatus` / `refreshCreditConfirmation` | `TransactionRefreshResult` | (on `transaction`) | (on `transaction`) | `failureReason` when the check could not be made |
@@ -2834,7 +2834,7 @@ is never refreshed — add it again.
 
 SoftPOS SDK only. No `responseCode`. A refusal by the gateway is `FAILED`; the same field checks made
 on the phone before sending (a blank merchant name, a missing CAC number for a business, …) also end
-`FAILED`, with the same reason name — these calls are not payments, so they never answer `NOT_SENT`. A state change (`activate`, `deactivate`, `update`,
+`FAILED`, with the same reason name — these calls are not payments, so they never answer `NOT_SENT`. A state change (`activate`, `deactivate`, `updateMerchant`,
 registration) that was sent but got no usable answer ends `PENDING` — read the merchant's status
 before trying again. A merchant call with no stored merchant ends `FAILED` / `MISSING_MANDATORY_CONFIG` (the QR
 code creation, a payment, ends `NOT_SENT` with the same reason).
@@ -2842,7 +2842,7 @@ code creation, a payment, ends `NOT_SENT` with the same reason).
 | Call | Reasons | What your app does |
 |---|---|---|
 | Merchant registration (`register`) | `MERCHANT_TYPE_REQUIRED`, `MERCHANT_NAME_REQUIRED`, `EMAIL_ADDRESS_REQUIRED`, `PHONE_NUMBER_REQUIRED`, `ACCOUNT_NUMBER_REQUIRED`, `ADDRESS_LINE_1_REQUIRED`, `CITY_REQUIRED`, `BANK_INSTITUTION_CODE_REQUIRED`, `PAYMENT_APP_PROVIDER_ID_REQUIRED`, `CAC_NUMBER_REQUIRED` | Ask for the missing field |
-| Merchant update / status / activate / deactivate (`update`, `refreshStatus`, `activate`, `deactivate`) | `MERCHANT_ID_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST` (the change is not allowed from the current state) | Fix the request / check the merchant's state |
+| Merchant update / status / activate / deactivate (`updateMerchant`, `refreshStatus`, `activate`, `deactivate`) | `MERCHANT_ID_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST` (the change is not allowed from the current state) | Fix the request / check the merchant's state |
 | QR payment code creation (`createPaymentContext`) | `AMOUNT_REQUIRED`, `MERCHANT_NOT_FOUND`, `INVALID_REQUEST`, `DUPLICATE_MERCHANT_ORDER_ID` (includes the original payment) | Fix the request and create it again with the same order ID. A duplicate means the order is already paid or still being confirmed — don't take another payment for it |
 | Bank lookup (`getBanks`) | `INVALID_ACCOUNT_NUMBER` | Check the account number |
 
@@ -3000,7 +3000,7 @@ maps them to the current calls.)
 
 | 2.x | 3.0.0 |
 |---|---|
-| `Result<…>` / `onError` / `null` on failure (`getBanks`, `checkAccountEligibility`, `requestActivationCode`, `activate`, `tokenStatus`, `deactivateToken`, merchant `getBanks` / `activate` / `deactivate` / `updateMerchant`, `createContextPayment` — today `getBanks`, `activate`, `deactivate`, `update`, `createPaymentContext`) | The callback (or return) is always an outcome type — `BankList`, `VerifyAccountResponse`, `ActivationCodeResponse`, `ActivateResponse`, `TokenStatusResult`, `TokenStatusUpdateResponse`, `NubanBankListResponse`, `MerchantStatusResponse`, `MerchantUpdateResponse`, `CreatedPaymentContext`. Branch on `responseStatus`. |
+| `Result<…>` / `onError` / `null` on failure (`getBanks`, `checkAccountEligibility`, `requestActivationCode`, `activate`, `tokenStatus`, `deactivateToken`, merchant `getBanks` / `activate` / `deactivate` / `updateMerchant`, `createContextPayment` — today `getBanks`, `activate`, `deactivate`, `updateMerchant`, `createPaymentContext`) | The callback (or return) is always an outcome type — `BankList`, `VerifyAccountResponse`, `ActivationCodeResponse`, `ActivateResponse`, `TokenStatusResult`, `TokenStatusUpdateResponse`, `NubanBankListResponse`, `MerchantStatusResponse`, `MerchantUpdateResponse`, `CreatedPaymentContext`. Branch on `responseStatus`. |
 | `cardPaymentService.cancelPendingPayment()` | Removed: `softpos.cancelPayment(merchantOrderId)`, which answers a `CancelResult` — see [Cancelling a call](#cancelling-migrating-from-2x) |
 | `cpmCustomerQrService.inspect` threw `IllegalArgumentException` | `softpos.inspectCustomerQr` returns `CpmInspection`; not a payment QR is `FAILED` / `INVALID_REQUEST` |
 | `processReceipt` called back `Result<TransactionReceipt>` (failure on a refused receipt) | Calls back (or, `suspend`, returns) `ReceiptScanResult`: `APPROVED` with `receipt`, or `FAILED` with `INVALID_RECEIPT` / `RECEIPT_NOT_FROM_THIS_WALLET` / `RECEIPT_MISMATCH` / `PAYMENT_NOT_CONFIRMED` / `RECEIPT_FOR_ANOTHER_TRANSACTION` / `SDK_INTERNAL_ERROR` |
