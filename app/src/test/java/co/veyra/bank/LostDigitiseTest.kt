@@ -7,7 +7,7 @@ import org.junit.Test
 
 class LostDigitiseTest {
 
-    private fun result(status: String?, reason: String?, clientRequestId: String? = "crid-1") = DigitiseResult(
+    private fun result(status: String, reason: String?, clientRequestId: String? = "crid-1") = DigitiseResult(
         tokenUniqueReference = null, responseCode = null, message = null,
         responseStatus = status, responseStatusReason = reason,
         activationMethods = emptyList(), tokenStored = false, clientRequestId = clientRequestId,

@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import co.veyra.bank.CancelAction
+import co.veyra.bank.CardRequestIds
 import co.veyra.bank.R
 import co.veyra.bank.cancelAction
 import co.veyra.bank.cancelRefusedTooLate
@@ -123,6 +124,8 @@ class AccountEligibilityActivity : AppCompatActivity() {
         // activating), or DECLINED / FAILED / NOT_SENT with the reason — a new attempt starts a new
         // digitisation.
         if (response.responseStatus == ResponseStatus.APPROVED) {
+            // "Remove card" later names this add-card attempt by its id.
+            CardRequestIds.record(this, response)
             when (response.responseCode?.uppercase()) {
                 ActivationMethods.ResponseCode.APPROVED -> {
                     Toast.makeText(this, getString(R.string.tokenization_request_success), Toast.LENGTH_SHORT).show()

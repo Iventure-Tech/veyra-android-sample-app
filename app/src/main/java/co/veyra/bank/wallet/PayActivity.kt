@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import co.veyra.bank.CardRequestIds
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityPayBinding
 import co.veyra.bank.outcomeText
@@ -28,6 +29,7 @@ import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.TransactionSummary
 import co.veyra.wallet.sdk.VeyraWalletSdkConfig
 import co.veyra.wallet.sdk.Token
+import co.veyra.wallet.sdk.TokenStatusUpdateResponse
 import co.veyra.wallet.sdk.TransactionResponse
 import co.veyra.wallet.sdk.util.CurrencyUtils
 import kotlinx.coroutines.Dispatchers
@@ -186,9 +188,13 @@ class PayActivity : AppCompatActivity() {
     }
 
     private fun removeToken(tokenUniqueReference: String) {
-        sdk.deactivateToken(tokenUniqueReference) { response ->
+        // Remove names the add-card attempt that created the card; on APPROVED the SDK removes the
+        // card from this phone. A card with no recorded id is removed by its token reference.
+        val clientRequestId = CardRequestIds.get(this, tokenUniqueReference)
+        val onAnswer: (TokenStatusUpdateResponse) -> Unit = { response ->
             when (response.responseStatus) {
                 ResponseStatus.APPROVED -> {
+                    CardRequestIds.forget(this, tokenUniqueReference)
                     Toast.makeText(this, "Card removed", Toast.LENGTH_SHORT).show()
                     loadCards()
                 }
@@ -203,6 +209,8 @@ class PayActivity : AppCompatActivity() {
                 ).show()
             }
         }
+        if (clientRequestId != null) sdk.deactivateDigitise(clientRequestId, onAnswer)
+        else sdk.deactivateToken(tokenUniqueReference, onAnswer)
     }
 
     // ── FAB ───────────────────────────────────────────────────────────────────
