@@ -28,7 +28,7 @@ const val DUPLICATE_MERCHANT_ORDER_ID = "DUPLICATE_MERCHANT_ORDER_ID"
  */
 fun duplicateOrderText(original: co.veyra.softpos.payment.sdk.payment.OriginalPayment?): String =
     co.veyra.softpos.payment.sdk.payment.PaymentOutcomeMessage.of(
-        co.veyra.softpos.payment.sdk.payment.ResponseStatus.FAILED,
+        co.veyra.softpos.payment.sdk.payment.StatedStatus.FAILED,
         reason = DUPLICATE_MERCHANT_ORDER_ID,
         originalStatus = original?.responseStatus,
     )

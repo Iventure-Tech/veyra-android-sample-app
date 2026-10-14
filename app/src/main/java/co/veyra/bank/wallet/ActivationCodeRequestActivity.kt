@@ -8,7 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityActivationCodeRequestBinding
 import co.veyra.bank.outcomeText
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.wallet.sdk.ActivationMedium
 import co.veyra.wallet.sdk.ActivationReason
 import co.veyra.wallet.sdk.ActivationMethods
@@ -69,9 +69,9 @@ class ActivationCodeRequestActivity : AppCompatActivity() {
             reason = ActivationReason.ADD_CARD,
         ) { response ->
             when (response.responseStatus) {
-                OutcomeStatus.APPROVED -> navigateToOtp(expirationDateTime = response.expirationDateTime)
+                ResponseStatus.APPROVED -> navigateToOtp(expirationDateTime = response.expirationDateTime)
                 // The code may already be on its way: go to code entry rather than asking again.
-                OutcomeStatus.PENDING -> navigateToOtp(expirationDateTime = null)
+                ResponseStatus.PENDING -> navigateToOtp(expirationDateTime = null)
                 // NOT_SENT (fix the reason, then send again) or FAILED: say why and stay here.
                 else -> {
                     setLoading(false)

@@ -13,7 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import co.veyra.bank.R
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -220,7 +220,7 @@ class TransactionDetailActivity : AppCompatActivity() {
                     binding.btnCheckStatus.isEnabled = true
                 }
                 refresh.value?.authorizationStatus in
-                    setOf(OutcomeStatus.APPROVED, OutcomeStatus.DECLINED, OutcomeStatus.FAILED) -> {
+                    setOf(ResponseStatus.APPROVED, ResponseStatus.DECLINED, ResponseStatus.FAILED) -> {
                     // bindSummary has already re-rendered the status line and hidden this button.
                     binding.txDetailStatusCheckNote.visibility = View.GONE
                 }

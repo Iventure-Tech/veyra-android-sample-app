@@ -19,7 +19,7 @@ import androidx.viewpager2.widget.ViewPager2
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityPayBinding
 import co.veyra.bank.outcomeText
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.wallet.sdk.ActivationMethod
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.WalletTapEvent
@@ -188,12 +188,12 @@ class PayActivity : AppCompatActivity() {
     private fun removeToken(tokenUniqueReference: String) {
         sdk.deactivateToken(tokenUniqueReference) { response ->
             when (response.responseStatus) {
-                OutcomeStatus.APPROVED -> {
+                ResponseStatus.APPROVED -> {
                     Toast.makeText(this, "Card removed", Toast.LENGTH_SHORT).show()
                     loadCards()
                 }
                 // The removal may have gone through — don't send it again.
-                OutcomeStatus.PENDING ->
+                ResponseStatus.PENDING ->
                     Toast.makeText(this, getString(R.string.outcome_processing), Toast.LENGTH_LONG).show()
                 // NOT_SENT or FAILED: the card is still there; say why.
                 else -> Toast.makeText(
@@ -259,7 +259,7 @@ class PayActivity : AppCompatActivity() {
                 return@showQrToPay
             }
             when {
-                qr.responseStatus == OutcomeStatus.APPROVED -> showPaymentQrDialog(qr, amountText)
+                qr.responseStatus == ResponseStatus.APPROVED -> showPaymentQrDialog(qr, amountText)
                 // NOT_SENT: no QR was made (AUTH_CANCELLED, ONLINE_REQUIRED…). A device-not-bound
                 // refusal has already been shown by the onDeviceNotBound callback registered when
                 // this card was armed; don't say it twice.

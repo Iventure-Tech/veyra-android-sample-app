@@ -7,12 +7,12 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import co.veyra.softpos.payment.sdk.CurrencyUtils
-import co.veyra.softpos.payment.sdk.TransactionInfo
-import co.veyra.softpos.payment.sdk.TransactionStatus
+import co.veyra.softpos.payment.sdk.MerchantTransaction
+import co.veyra.common.outcome.ResponseStatus
 
 class TransactionAdapter(
-    private val items: List<TransactionInfo>,
-    private val onItemClick: (TransactionInfo) -> Unit
+    private val items: List<MerchantTransaction>,
+    private val onItemClick: (MerchantTransaction) -> Unit
 ) : RecyclerView.Adapter<TransactionAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -31,18 +31,18 @@ class TransactionAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = items[position]
-        holder.amountText.text = CurrencyUtils.formatAmount(item.amount, item.currencyCode)
+        holder.amountText.text = CurrencyUtils.formatAmount(item.amountMinorUnits, item.currencyCode)
         holder.refText.text = item.merchantTransactionReference
         // Which rail took the payment — the SDK derives the wording, so Tap/QR/Scan read the
         // same here as on iOS and React Native.
         holder.railText.text = item.railLabel
         holder.timeText.text = item.transactionTime ?: "—"
-        holder.statusText.text = item.transactionStatus.name
+        holder.statusText.text = item.status
         holder.statusText.setTextColor(
-            when (item.transactionStatus) {
-                TransactionStatus.APPROVED -> holder.itemView.context.getColor(R.color.success_green)
-                TransactionStatus.DECLINED, TransactionStatus.FAILED, TransactionStatus.RETRY -> holder.itemView.context.getColor(R.color.error_red)
-                TransactionStatus.PENDING -> holder.itemView.context.getColor(android.R.color.holo_orange_dark)
+            when (item.status) {
+                ResponseStatus.APPROVED -> holder.itemView.context.getColor(R.color.success_green)
+                ResponseStatus.DECLINED, ResponseStatus.FAILED, ResponseStatus.RETRY -> holder.itemView.context.getColor(R.color.error_red)
+                else -> holder.itemView.context.getColor(android.R.color.holo_orange_dark)
             }
         )
         holder.itemView.setOnClickListener { onItemClick(item) }

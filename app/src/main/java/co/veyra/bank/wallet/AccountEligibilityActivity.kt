@@ -13,7 +13,7 @@ import co.veyra.bank.cancelAction
 import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.bank.databinding.ActivityAccountEligibilityBinding
 import co.veyra.wallet.sdk.AccountNumberSource
 import co.veyra.wallet.sdk.ActivationMethods
@@ -120,7 +120,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         // Digitise is never PENDING: APPROVED (the response code says whether the card still needs
         // activating), or DECLINED / FAILED / NOT_SENT with the reason — a new attempt starts a new
         // digitisation.
-        if (response.responseStatus == OutcomeStatus.APPROVED) {
+        if (response.responseStatus == ResponseStatus.APPROVED) {
             when (response.responseCode?.uppercase()) {
                 ActivationMethods.ResponseCode.APPROVED -> {
                     Toast.makeText(this, getString(R.string.tokenization_request_success), Toast.LENGTH_SHORT).show()

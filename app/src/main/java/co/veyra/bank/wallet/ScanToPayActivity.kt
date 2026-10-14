@@ -15,7 +15,7 @@ import co.veyra.bank.cancelAction
 import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeReason
-import co.veyra.common.outcome.OutcomeStatus
+import co.veyra.common.outcome.ResponseStatus
 import co.veyra.softpos.payment.sdk.CurrencyUtils
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.api.mpm.MpmScanResult
@@ -146,7 +146,7 @@ class ScanToPayActivity : AppCompatActivity() {
                 finish()
                 return@payScannedContext
             }
-            if (outcome.responseStatus == OutcomeStatus.NOT_SENT) {
+            if (outcome.responseStatus == ResponseStatus.NOT_SENT) {
                 // Nothing reached the gateway, so nothing was charged: stay on the confirm screen
                 // and say what to fix (AUTH_CANCELLED, ONLINE_REQUIRED, NO_NETWORK_CONNECTION…).
                 // Paying again pays this same QR.
@@ -201,8 +201,8 @@ class ScanToPayActivity : AppCompatActivity() {
 
     private fun paymentState(responseStatus: String?): ResultState =
         when (responseStatus?.trim()?.uppercase()) {
-            OutcomeStatus.APPROVED -> ResultState.APPROVED
-            OutcomeStatus.DECLINED, OutcomeStatus.FAILED -> ResultState.REFUSED
+            ResponseStatus.APPROVED -> ResultState.APPROVED
+            ResponseStatus.DECLINED, ResponseStatus.FAILED -> ResultState.REFUSED
             else -> ResultState.PENDING
         }
 
