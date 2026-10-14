@@ -10,11 +10,10 @@
     <string name="bank_hint">Select Bank</string>
     <string name="customer_id_hint">Customer ID</string>
     <string name="account_name_hint">Account Name</string>
-    <string name="bvn_hint">BVN</string>
+    <string name="bvn_hint">BVN (optional)</string>
     <string name="email_hint">Email</string>
     <string name="customer_id_required">Enter the customer ID</string>
     <string name="account_name_required">Enter the account name</string>
-    <string name="bvn_required">Enter the BVN</string>
     <string name="email_required">Enter a valid email</string>
     <string name="loading_banks">Loading banks…</string>
     <string name="no_banks_found">No banks found for this account</string>

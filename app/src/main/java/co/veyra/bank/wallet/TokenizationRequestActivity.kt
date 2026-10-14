@@ -194,12 +194,13 @@ class TokenizationRequestActivity : AppCompatActivity() {
 
         val customerId = binding.customerIdEditText.text?.toString()?.trim().orEmpty()
         val accountName = binding.accountNameEditText.text?.toString()?.trim().orEmpty()
-        val bvn = binding.bvnEditText.text?.toString()?.trim().orEmpty()
+        // Optional: an issuer's own app may leave it out (the backend refuses a non-issuer app
+        // with BVN_REQUIRED). An empty field is sent as no BVN at all, never as "".
+        val bvn = binding.bvnEditText.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
         val email = binding.emailEditText.text?.toString()?.trim().orEmpty()
         when {
             customerId.isEmpty() -> { showError(getString(R.string.customer_id_required), binding.customerIdInputLayout); return }
             accountName.isEmpty() -> { showError(getString(R.string.account_name_required), binding.accountNameInputLayout); return }
-            bvn.isEmpty() -> { showError(getString(R.string.bvn_required), binding.bvnInputLayout); return }
             !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
                 showError(getString(R.string.email_required), binding.emailInputLayout); return
             }

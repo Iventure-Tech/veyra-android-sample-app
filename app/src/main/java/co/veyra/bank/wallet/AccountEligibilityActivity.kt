@@ -37,7 +37,8 @@ class AccountEligibilityActivity : AppCompatActivity() {
     private lateinit var bankName: String
     private lateinit var customerId: String
     private lateinit var accountName: String
-    private lateinit var bvn: String
+    /** Null when the user left the optional BVN field empty: the digitise then carries no BVN. */
+    private var bvn: String? = null
     private lateinit var email: String
 
     /**
@@ -56,7 +57,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
         bankName = intent.getStringExtra(EXTRA_BANK_NAME) ?: ""
         customerId = intent.getStringExtra(EXTRA_CUSTOMER_ID) ?: run { finish(); return }
         accountName = intent.getStringExtra(EXTRA_ACCOUNT_NAME) ?: run { finish(); return }
-        bvn = intent.getStringExtra(EXTRA_BVN) ?: run { finish(); return }
+        bvn = intent.getStringExtra(EXTRA_BVN)?.takeIf { it.isNotBlank() }
         email = intent.getStringExtra(EXTRA_EMAIL) ?: run { finish(); return }
 
         bindAccountDetails()
@@ -215,7 +216,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
             bankName: String,
             customerId: String,
             accountName: String,
-            bvn: String,
+            bvn: String?,
             email: String,
         ): Intent =
             Intent(context, AccountEligibilityActivity::class.java).apply {
@@ -224,7 +225,7 @@ class AccountEligibilityActivity : AppCompatActivity() {
                 putExtra(EXTRA_BANK_NAME, bankName)
                 putExtra(EXTRA_CUSTOMER_ID, customerId)
                 putExtra(EXTRA_ACCOUNT_NAME, accountName)
-                putExtra(EXTRA_BVN, bvn)
+                bvn?.let { putExtra(EXTRA_BVN, it) }
                 putExtra(EXTRA_EMAIL, email)
             }
     }
