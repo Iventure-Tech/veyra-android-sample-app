@@ -80,7 +80,7 @@ class HomeActivity : AppCompatActivity() {
      * Merchant management, moved here from the Get paid amount screen. If no merchant is
      * registered yet, the gear jumps straight to registration; once registered it offers
      * Edit / Activate / Deactivate. Each routes to [GetPaidActivity] (which holds the
-     * initialised SoftPOS SDK and its `merchantService`).
+     * initialised SoftPOS SDK, whose merchant calls these are).
      */
     private fun showMerchantMenu(anchor: android.view.View) {
         if (!VeyraBank.isSignedIn(this)) return // merchant settings are a signed-in customer's
