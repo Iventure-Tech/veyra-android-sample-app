@@ -1695,7 +1695,8 @@ class GetPaidActivity : AppCompatActivity() {
             countryCode = countryCode,
         ) ?: return
 
-        // The BVN is optional for every merchant type; only a business needs its CAC number.
+        // The app never requires the BVN: the gateway refuses BVN_REQUIRED when the payment app
+        // provider is not registered as the account issuer. Only a business needs its CAC number.
         if (!merchantTypeIsPersonal && cacNumber.isBlank()) {
             toast("CAC number is required for business merchants"); return
         }
