@@ -51,8 +51,7 @@ import co.veyra.common.outcome.OutcomeReason
 import co.veyra.common.outcome.ResponseStatus
 import co.veyra.softpos.payment.sdk.TapEvent
 import co.veyra.softpos.payment.sdk.TapResult
-import co.veyra.common.outcome.ResponseStatus
-import co.veyra.softpos.payment.sdk.merchant.NubanBank
+import co.veyra.common.Bank
 import co.veyra.softpos.payment.sdk.VeyraSoftPOSSdk
 import co.veyra.softpos.payment.sdk.VeyraSoftPosSdkConfig
 import co.veyra.softpos.payment.sdk.CurrencyUtils
@@ -152,7 +151,7 @@ class GetPaidActivity : AppCompatActivity() {
     private lateinit var saveChangesButton: MaterialButton
 
     // Bank list state
-    private var cachedBanks: List<NubanBank>? = null
+    private var cachedBanks: List<Bank>? = null
     private var selectedRegistrationBankCode: String = ""
     private var editSelectedBankCode: String = ""
     
@@ -1891,7 +1890,7 @@ class GetPaidActivity : AppCompatActivity() {
 
     private fun setupBankDropdown(
         dropdown: AutoCompleteTextView,
-        banks: List<NubanBank>,
+        banks: List<Bank>,
         preselectCode: String?,
         onSelected: (String) -> Unit
     ) {

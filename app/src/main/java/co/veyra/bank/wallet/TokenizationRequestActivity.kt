@@ -14,7 +14,7 @@ import co.veyra.common.outcome.OutcomeReason
 import co.veyra.common.outcome.ResponseStatus
 import co.veyra.bank.databinding.ActivityTokenizationRequestBinding
 import co.veyra.wallet.sdk.AccountNumberSource
-import co.veyra.wallet.sdk.Bank
+import co.veyra.common.Bank
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.VerifyAccountParams
 import kotlinx.coroutines.Dispatchers
