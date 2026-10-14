@@ -69,7 +69,7 @@ class ScanToPayActivity : AppCompatActivity() {
     }
 
     private fun handleScan(payload: String) {
-        when (val scan = sdk.tokenisationService.inspectScannedQr(payload)) {
+        when (val scan = sdk.inspectScannedQr(payload)) {
             is MpmScanResult.Verified -> showConfirm(scan.context)
             is MpmScanResult.Rejected -> showResult(
                 // Refused on-device before anything was sent — no payment exists to be pending.
@@ -113,7 +113,7 @@ class ScanToPayActivity : AppCompatActivity() {
     private fun cancel() {
         val orderId = verified?.merchantOrderId
         if (!paying || orderId.isNullOrBlank()) return finish()
-        val answer = sdk.tokenisationService.cancelPayment(orderId)
+        val answer = sdk.cancelPayment(orderId)
         when (cancelAction(answer)) {
             CancelAction.AWAIT_CANCELLED_OUTCOME -> Unit
             CancelAction.KEEP_WAITING -> if (cancelRefusedTooLate(answer)) showReason(getString(R.string.cancel_too_late))
@@ -133,7 +133,7 @@ class ScanToPayActivity : AppCompatActivity() {
 
     private fun pushPayment(context: VerifiedPaymentContext) {
         setPaying(true, context)
-        sdk.tokenisationService.payScannedContext(context) { result ->
+        sdk.payScannedContext(context) { result ->
             setPaying(false, context)
             // The Result fails only on a setup mistake (VeyraSetupException) — a bug in this app's
             // integration, found in development. Every refusal is an outcome.

@@ -114,7 +114,7 @@ class TokenizationRequestActivity : AppCompatActivity() {
         binding.bankInputLayout.visibility = View.VISIBLE
         binding.bankAutoComplete.setText(getString(R.string.loading_banks), false)
         selectedBank = null
-        sdk.tokenisationService.getBanks(accountNumber) { result ->
+        sdk.getBanks(accountNumber) { result ->
             lifecycleScope.launch(Dispatchers.Main) {
                 if (result.responseStatus != OutcomeStatus.APPROVED) {
                     // A read, so never PENDING: NOT_SENT (offline…) or FAILED. Say why, instead of
@@ -230,7 +230,7 @@ class TokenizationRequestActivity : AppCompatActivity() {
             .accountNumberSource(AccountNumberSource.MANUAL)
             .build()
 
-        sdk.tokenisationService.checkAccountEligibility(params) { response ->
+        sdk.verifyAccount(params) { response ->
             lifecycleScope.launch(Dispatchers.Main) {
                 if (response.responseStatus == OutcomeStatus.APPROVED) {
                     startActivity(

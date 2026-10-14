@@ -22,6 +22,7 @@ import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeStatus
 import co.veyra.wallet.sdk.ActivationMethod
 import co.veyra.wallet.sdk.ActivationMethods
+import co.veyra.wallet.sdk.WalletTapEvent
 import co.veyra.wallet.sdk.Environment
 import co.veyra.wallet.sdk.VeyraWalletSdk
 import co.veyra.wallet.sdk.TransactionSummary
@@ -83,7 +84,7 @@ class PayActivity : AppCompatActivity() {
      * it from the store on the way back in.
      */
     private fun observeCardState() {
-        co.veyra.wallet.sdk.api.TokenLifecycleObserver.onTokenStatusChanged { change ->
+        sdk.observeTokenStatusChanged { change ->
             // Already on the main thread (the SDK hops for us), so touching views is safe here.
             Log.d(TAG, "card ${change.tokenUniqueReference} -> ${change.rawStatus} (canPay=${change.canPay})")
             loadCards()
@@ -96,9 +97,17 @@ class PayActivity : AppCompatActivity() {
             }
         }
         // The keys ran out (or came back) — redraw so the card's requires-online state is current.
-        co.veyra.wallet.sdk.api.WalletKeyStateObserver.onKeyStateChanged { state ->
+        sdk.observeCardKeyStateChanged { state ->
             Log.d(TAG, "card ${state.tokenUniqueReference} requiresOnline=${state.requiresOnline}")
             loadCards()
+        }
+        // Tap-to-pay at a terminal, for whichever card is active. Main thread.
+        sdk.observeTapEvents { event ->
+            when (event) {
+                is WalletTapEvent.TransactionStarted ->
+                    Log.i(TAG, "Transaction started for token: ${event.tokenUniqueReference}")
+                is WalletTapEvent.TransactionCompleted -> handleTransactionResponse(event.response)
+            }
         }
     }
 
@@ -177,7 +186,7 @@ class PayActivity : AppCompatActivity() {
     }
 
     private fun removeToken(tokenUniqueReference: String) {
-        sdk.tokenisationService.deactivateToken(tokenUniqueReference) { response ->
+        sdk.deactivateToken(tokenUniqueReference) { response ->
             when (response.responseStatus) {
                 OutcomeStatus.APPROVED -> {
                     Toast.makeText(this, "Card removed", Toast.LENGTH_SHORT).show()
@@ -238,7 +247,7 @@ class PayActivity : AppCompatActivity() {
         // No authentication call — showQrToPay raises the OS sheet itself, once per render (a
         // regenerate after expiry asks again). The SDK owns the expiry timer and fires onExpired
         // when the QR lapses.
-        sdk.tokenisationService.showQrToPay(
+        sdk.showQrToPay(
             amountMinorUnits,
             onExpired = { onQrExpired?.invoke() },
         ) { result ->
@@ -323,7 +332,7 @@ class PayActivity : AppCompatActivity() {
         val settlePoll = startCpmSettlePolling(transactionHash) { approved, merchant ->
             // Settled — stop the expiry watch so it can't later overwrite the outcome with "Expired".
             onQrExpired = null
-            sdk.tokenisationService.cancelQrExpiry()
+            sdk.cancelQrExpiry()
             countdown.visibility = android.view.View.GONE
             outcome.visibility = android.view.View.VISIBLE
             outcome.text = if (approved) "Paid" + (merchant?.let { " — $it" } ?: "") else "Declined"
@@ -335,7 +344,7 @@ class PayActivity : AppCompatActivity() {
             settlePoll.cancel()
             // Stop the SDK expiry watch so its callback can't fire into a dismissed dialog.
             onQrExpired = null
-            sdk.tokenisationService.cancelQrExpiry()
+            sdk.cancelQrExpiry()
         }
     }
 
@@ -355,7 +364,7 @@ class PayActivity : AppCompatActivity() {
         while (isActive) {
             kotlinx.coroutines.delay(3000)
             // A check that could not be made carries a failureReason; this loop just asks again.
-            val row = sdk.tokenisationService.refreshTransactionStatus(transactionHash).transaction
+            val row = sdk.refreshTransactionStatus(transactionHash).value
             // The row stays PENDING until the merchant charges — only a final status
             // settles the display; anything else keeps the QR up and polling.
             if (row != null && row.authorizationStatus?.uppercase() in setOf("APPROVED", "DECLINED", "FAILED")) {
@@ -397,7 +406,7 @@ class PayActivity : AppCompatActivity() {
                 // getTokens() does synchronous DataStore + Android-Keystore reads (per-token
                 // provisioning-bundle checks); keep it off the UI thread so a load that overlaps a
                 // background storage write can't stall the main thread into an ANR.
-                val tokens = withContext(Dispatchers.IO) { sdk.tokenisationService.getTokens() }
+                val tokens = withContext(Dispatchers.IO) { sdk.getTokens() }
                 startObserversForPendingTokens(tokens)
                 if (tokens.isEmpty()) {
                     cardAdapter.submitList(emptyList())
@@ -504,9 +513,9 @@ class PayActivity : AppCompatActivity() {
         if (!token.isActive && methods.isNotEmpty()) {
             val ref = token.tokenUniqueReference
             if (methods.size == 1) {
-                startSingleMethodActivation(token.tokenId, methods.single(), ref)
+                startSingleMethodActivation(token.tokenUniqueReference.orEmpty(), methods.single(), ref)
             } else {
-                startActivity(ActivationMethodSelectionActivity.intent(this, token.tokenId, methods, ref))
+                startActivity(ActivationMethodSelectionActivity.intent(this, token.tokenUniqueReference.orEmpty(), methods, ref))
             }
         }
         // No expand — NFC is activated automatically when the card is swiped into focus
@@ -537,74 +546,67 @@ class PayActivity : AppCompatActivity() {
         activateNFCForToken(item.token)
     }
 
+    /** The card whose refusals this screen is observing — the active one. */
+    private var observedRefusalRef: String? = null
+
     private fun activateNFCForToken(token: Token) {
+        val ref = token.tokenUniqueReference ?: return
         try {
-            val selection = sdk.tokenisationService.setActiveToken(
-                tokenId = token.tokenId,
-                activity = this,
-                onTransactionStarted = { tokenId ->
-                    Log.i(TAG, "Transaction started for token: $tokenId")
-                },
-                onTransactionCompleted = { response ->
-                    runOnUiThread { handleTransactionResponse(response) }
-                },
-                onActivationFailed = { message ->
-                    runOnUiThread {
-                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-                        loadCards()
-                    }
-                },
-                // A tap the card could not carry. Without these the terminal shows a decline and
-                // the wallet says nothing, so the payer has no idea whether waiting, retrying or
-                // using another card would help.
-                onRequireOnline = { event ->
-                    runOnUiThread {
-                        Toast.makeText(
-                            this,
-                            "Connect to the internet to pay ${formatMinor(event.amountMinorUnits)}",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
-                },
-                onAmountExceedCardLimit = { event ->
-                    runOnUiThread {
-                        // Deliberately NOT "go online": a refreshed key carries the same cap, so
-                        // that advice would send the payer round a loop that cannot succeed.
-                        val limit = event.cardLimitMinorUnits
-                        Toast.makeText(
-                            this,
-                            if (limit != null) {
-                                "${formatMinor(event.amountMinorUnits)} is over this card's " +
-                                    "${formatMinor(limit)} payment limit — try a smaller amount or another card"
-                            } else {
-                                "This amount is too large for this card — try a smaller amount or another card"
-                            },
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
-                },
-                // The card was added on another device, or before this app was reinstalled, and
-                // will never be given payment keys here. Neither going online nor a smaller amount
-                // helps — only removing the card and adding it again on this phone. Fires for the
-                // tap and for both QR rails while this card is the active one.
-                onDeviceNotBound = {
-                    runOnUiThread {
-                        Toast.makeText(this, R.string.device_not_bound_refusal, Toast.LENGTH_LONG).show()
-                        loadCards()
-                    }
-                }
-            )
-            // The selection answers synchronously. CARD_DATA_MISSING is already shown by
-            // onActivationFailed above; anything else (CARD_NOT_FOUND) is said here.
-            if (!selection.selected &&
-                selection.responseStatusReason != co.veyra.wallet.sdk.CardSelection.CARD_DATA_MISSING
-            ) {
+            observeRefusals(ref)
+            val selection = sdk.setActiveToken(ref)
+            // The selection answers synchronously: CARD_DATA_MISSING (remove the card and add it
+            // again) or CARD_NOT_FOUND.
+            if (!selection.selected) {
                 Toast.makeText(this, selection.message ?: "This card can't be selected", Toast.LENGTH_LONG).show()
                 loadCards()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error activating NFC for card", e)
         }
+    }
+
+    /**
+     * Payments the active card could not carry, refused before anything was sent. Without these the
+     * terminal shows a decline and the wallet says nothing, so the payer has no idea whether
+     * waiting, retrying or using another card would help. Callbacks arrive on the main thread.
+     */
+    private fun observeRefusals(ref: String) {
+        if (observedRefusalRef == ref) return
+        observedRefusalRef?.let { sdk.stopObservingPaymentRefusals(it) }
+        observedRefusalRef = ref
+        sdk.observePaymentRefusals(
+            tokenUniqueReference = ref,
+            onRequireOnline = { event ->
+                Toast.makeText(
+                    this,
+                    "Connect to the internet to pay ${formatMinor(event.amountMinorUnits)}",
+                    Toast.LENGTH_LONG,
+                ).show()
+            },
+            onAmountExceedCardLimit = { event ->
+                // Deliberately NOT "go online": a refreshed key carries the same cap, so that
+                // advice would send the payer round a loop that cannot succeed.
+                val limit = event.cardLimitMinorUnits
+                Toast.makeText(
+                    this,
+                    if (limit != null) {
+                        "${formatMinor(event.amountMinorUnits)} is over this card's " +
+                            "${formatMinor(limit)} payment limit — try a smaller amount or another card"
+                    } else {
+                        "This amount is too large for this card — try a smaller amount or another card"
+                    },
+                    Toast.LENGTH_LONG,
+                ).show()
+            },
+            // The card was added on another device, or before this app was reinstalled, and will
+            // never be given payment keys here. Neither going online nor a smaller amount helps —
+            // only removing the card and adding it again on this phone. Fires for the tap and for
+            // both QR rails while this card is the active one.
+            onDeviceNotBound = {
+                Toast.makeText(this, R.string.device_not_bound_refusal, Toast.LENGTH_LONG).show()
+                loadCards()
+            },
+        )
     }
 
     /** Minor units → display amount, for the refusal messages above. */
@@ -654,15 +656,15 @@ class PayActivity : AppCompatActivity() {
         val allRefs = tokens.mapNotNull { it.tokenUniqueReference }.toSet()
         val activeRefs = tokens.filter { it.isActive }.mapNotNull { it.tokenUniqueReference }.toSet()
         pendingObserverRefs.filter { it in activeRefs || it !in allRefs }.forEach { ref ->
-            sdk.tokenisationService.stopActivationObserver(ref)
+            sdk.stopActivationObserver(ref)
             pendingObserverRefs.remove(ref)
         }
         tokens.filter { !it.isActive && !it.activationMethods.isNullOrEmpty() }
             .mapNotNull { it.tokenUniqueReference }
-            .filter { it !in pendingObserverRefs || !sdk.tokenisationService.hasActivationObserver(it) }
+            .filter { it !in pendingObserverRefs || !sdk.hasActivationObserver(it) }
             .forEach { ref ->
                 pendingObserverRefs.add(ref)
-                sdk.tokenisationService.observeActivation(
+                sdk.observeActivation(
                     tokenUniqueReference = ref,
                     onActivated = {
                         pendingObserverRefs.remove(ref)
@@ -677,7 +679,7 @@ class PayActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        pendingObserverRefs.forEach { sdk.tokenisationService.resumeActivationObserver(it) }
+        pendingObserverRefs.forEach { sdk.resumeActivationObserver(it) }
         if (::cardAdapter.isInitialized) loadCards()
         // NFC activation is handled by loadCards() commit callback and onPageSelected.
         // Do NOT call activateNFCIfCardAvailable() here — it always activates tokens.first()
@@ -687,18 +689,21 @@ class PayActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        pendingObserverRefs.forEach { sdk.tokenisationService.pauseActivationObserver(it) }
+        pendingObserverRefs.forEach { sdk.pauseActivationObserver(it) }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        pendingObserverRefs.forEach { sdk.tokenisationService.stopActivationObserver(it) }
+        pendingObserverRefs.forEach { sdk.stopActivationObserver(it) }
         pendingObserverRefs.clear()
         // These hold a reference to this Activity, so clear them with it. Registration is
         // single-listener ("last registration wins"), so a recreated Activity replaces rather than
         // stacks — but a destroyed one must not be called back into.
-        co.veyra.wallet.sdk.api.TokenLifecycleObserver.clear()
-        co.veyra.wallet.sdk.api.WalletKeyStateObserver.clear()
+        sdk.stopObservingTokenStatusChanged()
+        sdk.stopObservingCardKeyStateChanged()
+        sdk.stopObservingTapEvents()
+        observedRefusalRef?.let { sdk.stopObservingPaymentRefusals(it) }
+        observedRefusalRef = null
     }
 
     private fun navigateToTokenizationRequest() {

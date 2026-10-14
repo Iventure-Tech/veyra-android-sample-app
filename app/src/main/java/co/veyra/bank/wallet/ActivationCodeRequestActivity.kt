@@ -9,7 +9,8 @@ import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityActivationCodeRequestBinding
 import co.veyra.bank.outcomeText
 import co.veyra.common.outcome.OutcomeStatus
-import co.veyra.wallet.sdk.ActivationCodeReason
+import co.veyra.wallet.sdk.ActivationMedium
+import co.veyra.wallet.sdk.ActivationReason
 import co.veyra.wallet.sdk.ActivationMethods
 import co.veyra.wallet.sdk.VeyraWalletSdk
 
@@ -62,11 +63,10 @@ class ActivationCodeRequestActivity : AppCompatActivity() {
 
         setLoading(true)
 
-        sdk.tokenisationService.requestActivationCode(
+        sdk.requestActivationCode(
             tokenUniqueReference = ref,
-            selectedActivationMethod = method,
-            preferredActivationChannel = method,
-            reasonCode = ActivationCodeReason.ADD_CARD
+            medium = ActivationMedium.valueOf(method),
+            reason = ActivationReason.ADD_CARD,
         ) { response ->
             when (response.responseStatus) {
                 OutcomeStatus.APPROVED -> navigateToOtp(expirationDateTime = response.expirationDateTime)
