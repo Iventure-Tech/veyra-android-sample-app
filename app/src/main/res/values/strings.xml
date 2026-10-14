@@ -126,6 +126,7 @@
     <string name="clear">Clear</string>
     <string name="cancel">Cancel</string>
     <string name="cancel_too_late">This can no longer be cancelled</string>
+    <string name="digitise_cleanup_result">Any card this attempt created was switched off: %1$s</string>
     <string name="new_transaction">New Transaction</string>
     <string name="new_payment">New Payment</string>
     <string name="done">Done</string>
