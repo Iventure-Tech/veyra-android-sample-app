@@ -29,10 +29,11 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 
 | Requirement | SoftPOS / Combined | Wallet only |
 |---|---|---|
-| `minSdk` | **28** (Android 9) | **24** (Android 7.0) |
+| `minSdk` | **28** (Android 9) | **28** (Android 9) |
 | `compileSdk` | 34 | 34 |
 | NFC hardware | Required for tap acceptance | Required for tap-to-pay (QR rails work without) |
 | Google Play services | Not required — the SoftPOS SDK performs no Play Integrity calls | Required for attested operations (add card, key refresh) |
+| Screen lock | — | Required on the customer's phone to add a card — see [Screen lock and the card's payment keys](#screen-lock-and-the-cards-payment-keys) |
 | Permissions | `INTERNET`, `NFC`, location (merged from the SDK manifests; location is a *runtime* permission — request it before opening your tap screen) | `INTERNET`, `NFC` (merged) |
 
 The SDK manifests merge everything they need into your app (permissions, the NFC feature flag, the wallet HCE service, backup-exclusion rules). Your app must add on `<application>`:
@@ -584,6 +585,7 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
 | `requestTimeoutSeconds(Int?)` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). Unset keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
+| `requireAdditionalQrAuthenticationPrompt(Boolean)` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
 
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
@@ -1353,6 +1355,19 @@ Every operation is called on the wallet object (`val wallet = VeyraWalletSdk.ini
 
 Flow: `getBanks` → `verifyAccount` → `digitise`. On success the SDK receives, decrypts and stores the payment material on-device — the card can pay immediately (`APPROVED`) or after activation (`APPROVE_REQUIRE_AUTH`).
 
+#### Screen lock and the card's payment keys
+
+The card's payment keys on the phone are protected by the phone's secure hardware, which ties them
+to the screen lock:
+
+- **No screen lock, no card.** A phone with no PIN, pattern or password cannot hold payment keys,
+  so adding a card fails there. Ask the customer to set a screen lock first.
+- **Removing the screen lock deletes the protecting keys.** Android deletes them, and the SDK then
+  discards the cards' payment keys. Once a screen lock is set again, the SDK downloads new keys
+  online — the card must go online before it can pay.
+- **Existing installs migrate silently.** On the first launch after updating the SDK, cards already
+  on the phone are moved to the hardware-protected keys — no prompt and no network.
+
 #### `getBanks`
 
 Fetch the supported NUBAN banks, optionally filtered by account number. Call as soon as the user finishes entering their account number so the list is ready for the bank picker.
@@ -2000,9 +2015,35 @@ VeyraWalletSdkConfig.builder(/* … */)
     .build()
 ```
 
-> **Tap-to-pay is different.** A contactless tap derives CDCVM from the device already being
-> unlocked with a secure lock screen — there is no moment to show a sheet while the phone is held
-> against the reader. This section is about the two QR rails only.
+##### Skipping the sheet after a recent unlock
+
+By default the SDK shows the sheet before **every** QR payment. Set
+`requireAdditionalQrAuthenticationPrompt(false)` to skip it when the customer has just unlocked the phone:
+
+```kotlin
+VeyraWalletSdkConfig.builder(/* … */)
+    .requireAdditionalQrAuthenticationPrompt(false)   // default true: always ask
+    .build()
+```
+
+| Setting | Phone state | What the customer sees |
+|---|---|---|
+| `true` (default) | Any | One sheet |
+| `false` | Unlocked with a strong biometric or the device PIN/pattern/password in the last 5 minutes, and unlocked now | No sheet |
+| `false` | No such recent unlock (or it cannot be confirmed) | One sheet |
+
+The check is made by the phone's secure hardware (the TEE, through the Android Keystore), not by
+the SDK or your app. If the hardware cannot confirm the unlock, the sheet is shown — once. A payment
+never shows more than one sheet. The outcomes are unchanged: `AUTH_CANCELLED`, `AUTH_FAILED` and
+`AUTH_UNAVAILABLE`, all `NOT_SENT`.
+
+> **Tap-to-pay is different.** A contactless tap never asks before paying, whatever this setting —
+> there is no moment to show a sheet while the phone is held against the reader. Instead the tap
+> needs the phone unlocked now, with a strong biometric or the screen lock used in the last
+> 5 minutes; the TEE checks this. A tap without it is refused (the phone buzzes twice), and the SDK
+> then shows the device authentication sheet ("Unlock to pay — Then hold your phone to the reader
+> again"). Once the customer authenticates, they **tap again** to pay; the refused tap is not
+> completed. This section is about the two QR rails only.
 
 #### `payScannedContext`
 
