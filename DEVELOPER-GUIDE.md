@@ -2037,11 +2037,13 @@ the SDK or your app. If the hardware cannot confirm the unlock, the sheet is sho
 never shows more than one sheet. The outcomes are unchanged: `AUTH_CANCELLED`, `AUTH_FAILED` and
 `AUTH_UNAVAILABLE`, all `NOT_SENT`.
 
-> **Tap-to-pay is different.** A contactless tap never shows a sheet, whatever this setting — there
-> is no moment to show one while the phone is held against the reader. Instead the tap needs the
-> phone unlocked now, with a strong biometric or the screen lock used in the last 5 minutes; the
-> TEE checks this. A tap without it is refused: the customer unlocks the phone and taps again.
-> This section is about the two QR rails only.
+> **Tap-to-pay is different.** A contactless tap never asks before paying, whatever this setting —
+> there is no moment to show a sheet while the phone is held against the reader. Instead the tap
+> needs the phone unlocked now, with a strong biometric or the screen lock used in the last
+> 5 minutes; the TEE checks this. A tap without it is refused (the phone buzzes twice), and the SDK
+> then shows the device authentication sheet ("Unlock to pay — Then hold your phone to the reader
+> again"). Once the customer authenticates, they **tap again** to pay; the refused tap is not
+> completed. This section is about the two QR rails only.
 
 #### `payScannedContext`
 
