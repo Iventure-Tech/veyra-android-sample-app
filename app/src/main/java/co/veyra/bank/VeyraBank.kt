@@ -111,7 +111,7 @@ object VeyraBank {
             // .requestTimeoutSeconds(30)
             // Optional: skip the authentication sheet before a QR payment when the customer
             // unlocked the phone in the last 5 minutes (the phone's secure hardware checks). Default true: always ask.
-            // .requireQrAuthenticationPrompt(false)
+            // .requireAdditionalQrAuthenticationPrompt(false)
             .build()
     }
 }

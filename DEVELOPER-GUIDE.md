@@ -585,7 +585,7 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
 | `requestTimeoutSeconds(Int?)` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). Unset keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
-| `requireQrAuthenticationPrompt(Boolean)` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
+| `requireAdditionalQrAuthenticationPrompt(Boolean)` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
 
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
 
@@ -2018,11 +2018,11 @@ VeyraWalletSdkConfig.builder(/* … */)
 ##### Skipping the sheet after a recent unlock
 
 By default the SDK shows the sheet before **every** QR payment. Set
-`requireQrAuthenticationPrompt(false)` to skip it when the customer has just unlocked the phone:
+`requireAdditionalQrAuthenticationPrompt(false)` to skip it when the customer has just unlocked the phone:
 
 ```kotlin
 VeyraWalletSdkConfig.builder(/* … */)
-    .requireQrAuthenticationPrompt(false)   // default true: always ask
+    .requireAdditionalQrAuthenticationPrompt(false)   // default true: always ask
     .build()
 ```
 
