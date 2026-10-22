@@ -552,7 +552,7 @@ val softposConfig = VeyraSoftPosSdkConfig.builder(
 | `environment` | **Mandatory** | `VeyraEnvironment.TEST` or `VeyraEnvironment.LIVE`. Determines the server host; set once, applies to all SDK calls. |
 | `paymentAppProviderId` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet config's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. Must not be blank. |
 | `enableNfc(Boolean)` | Optional | Arm the NFC reader capability at init. Default `true`. |
-| `requestTimeoutSeconds(Int?)` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). Unset keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
+| `requestTimeoutSeconds(Int?)` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). Unset means 60 s. See [Request timeout](#request-timeout). |
 
 That is the whole configuration. The merchant's identity — merchant id, name and location, category code, country code, terminal id — is not configurable: it comes from the merchant stored by [`register`](#register), so the terminal data always carries the merchant the gateway registered. The acquirer id is learned from the gateway's registration/update/status responses (resolved from your payment app provider) and stored with the merchant; it is never app-supplied.
 
@@ -584,7 +584,7 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `recommendationStandardVersion(String)` | **Required before digitising** | Standard version for the tokenisation recommendation (e.g. `"1.0"`). Digitise throws if unset. |
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
-| `requestTimeoutSeconds(Int?)` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). Unset keeps the SDK's own timeouts. See [Request timeout](#request-timeout). |
+| `requestTimeoutSeconds(Int?)` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). Unset means 60 s. See [Request timeout](#request-timeout). |
 | `requireAdditionalQrAuthenticationPrompt(Boolean)` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
 
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
@@ -606,8 +606,9 @@ val walletConfig = VeyraWalletSdkConfig.builder(VeyraEnvironment.TEST, paymentAp
 
 - **Allowed values: 5 to 60.** Anything else makes `initialize` throw a `VeyraError`
   with `INVALID_CONFIGURATION`, naming the value and the range. The SDK never adjusts the value.
-- **Not set:** the SDK keeps its own timeouts, which differ by call (up to about 40 s for most
-  SoftPOS lookups and up to about 90 s for payments and wallet calls).
+- **Not set:** 60 seconds, for every call.
+- **It is the limit for the whole call.** Connecting, sending and waiting for the answer all
+  count towards the same limit, so a call never takes longer than the value you set.
 - **It applies to every backend call the SDK makes,** including the token request and calls
   through a `VeyraProxyProvider` (your backend's relay is given the same time limit). It does not
   change the NFC tap timeouts or the card-activation wait.
