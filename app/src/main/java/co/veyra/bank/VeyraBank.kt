@@ -81,8 +81,8 @@ object VeyraBank {
             }
         )
             .enableNfc(true)
-            // Optional: the longest the SDK waits for one backend call, 5–60 s. Unset keeps the
-            // SDK's own timeouts; a payment that runs out of time ends PENDING, not failed.
+            // Optional: the longest the SDK waits for one backend call, 5–60 s. Unset means 60 s;
+            // a payment that runs out of time ends PENDING, not failed.
             // .requestTimeoutSeconds(30)
             .build()
 
@@ -106,8 +106,8 @@ object VeyraBank {
             .allowedAcquirerIds(resources.getStringArray(R.array.allowed_acquirer_ids).filter { it.isNotBlank() })
             .allowedMerchantIds(resources.getStringArray(R.array.allowed_merchant_ids).filter { it.isNotBlank() })
             .enableNfc(true)
-            // Optional: the longest the SDK waits for one backend call, 5–60 s. Unset keeps the
-            // SDK's own timeouts; a payment that runs out of time ends PENDING, not failed.
+            // Optional: the longest the SDK waits for one backend call, 5–60 s. Unset means 60 s;
+            // a payment that runs out of time ends PENDING, not failed.
             // .requestTimeoutSeconds(30)
             // Optional: skip the authentication sheet before a QR payment when the customer
             // unlocked the phone in the last 5 minutes (the phone's secure hardware checks). Default true: always ask.
