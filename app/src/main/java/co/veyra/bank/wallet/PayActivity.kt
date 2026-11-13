@@ -337,7 +337,20 @@ class PayActivity : AppCompatActivity() {
         // Check this payment's status every 3s while the QR is up, so the outcome lands within
         // seconds of the merchant charging — not on the SDK's backoff schedule. Stops on settle or
         // when the dialog is dismissed.
-        val settlePoll = startCpmSettlePolling(transactionHash) { approved, merchant ->
+        val settlePoll = startCpmSettlePolling(
+            transactionHash,
+            onAccepted = {
+                // The merchant charged this QR and the bank accepted it: debited, credit queued.
+                // Not final, but the QR is used, so it comes down while the wait continues.
+                onQrExpired = null
+                sdk.cancelQrExpiry()
+                countdown.visibility = android.view.View.GONE
+                outcome.visibility = android.view.View.VISIBLE
+                outcome.text = getString(R.string.payment_accepted_wallet_message)
+                outcome.setTextColor(android.graphics.Color.parseColor("#E65100"))
+                blankQr()
+            },
+        ) { approved, merchant ->
             // Settled — stop the expiry watch so it can't later overwrite the outcome with "Expired".
             onQrExpired = null
             sdk.cancelQrExpiry()
@@ -367,8 +380,10 @@ class PayActivity : AppCompatActivity() {
      */
     private fun startCpmSettlePolling(
         transactionHash: String,
+        onAccepted: () -> Unit,
         onSettled: (approved: Boolean, merchantName: String?) -> Unit,
     ): kotlinx.coroutines.Job = lifecycleScope.launch {
+        var accepted = false
         while (isActive) {
             kotlinx.coroutines.delay(3000)
             // A check that could not be made carries a failureReason; this loop just asks again.
@@ -379,6 +394,11 @@ class PayActivity : AppCompatActivity() {
                 val name = row.merchantName?.takeIf { it != "QR payment" }
                 onSettled(row.authorizationStatus == "APPROVED", name)
                 return@launch
+            }
+            // ACCEPTED is not final: say so once, and keep asking until the final status.
+            if (!accepted && row?.authorizationStatus?.uppercase() == ResponseStatus.ACCEPTED) {
+                accepted = true
+                onAccepted()
             }
         }
     }

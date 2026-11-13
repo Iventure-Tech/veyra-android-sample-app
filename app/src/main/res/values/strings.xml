@@ -135,6 +135,21 @@
     <string name="pending">Pending</string>
     <string name="payment_pending">Payment Pending</string>
     <string name="payment_pending_message">Status unknown. The issuer may have approved. Check transactions for updates.</string>
+    <!--
+      ACCEPTED: the customer was debited and the credit to the merchant's bank is queued. It is
+      not final. The SDK keeps checking and the payment later becomes APPROVED, or FAILED with
+      CREDIT_FAILED (the credit failed and the debit was reversed). No receipt and no credit
+      confirmation until it is APPROVED, and never another payment for the same order.
+    -->
+    <string name="accepted">Accepted</string>
+    <string name="payment_accepted">Payment Accepted</string>
+    <string name="payment_accepted_merchant_message">Payment accepted - customer debited. Wait for approval before releasing goods</string>
+    <string name="payment_accepted_merchant_detail">Not final yet. Do not release goods until this payment is approved. The app keeps checking and will show the result here.</string>
+    <string name="payment_accepted_wallet_message">Payment accepted - waiting for credit approval</string>
+    <string name="payment_accepted_wallet_detail">You have been debited and the merchant\'s bank is being credited. Don\'t pay again - the result will show in your transactions.</string>
+    <string name="payment_approved_after_accepted">Transaction approved</string>
+    <string name="payment_credit_failed_message">The credit to the merchant\'s bank failed and the customer\'s debit was reversed</string>
+    <string name="status_check_still_accepted">Accepted - still waiting for credit approval. The app will keep checking.</string>
     <string name="transaction_timed_out">Transaction timed out.</string>
     <string name="want_receipt">Would you like a receipt?</string>
     <string name="view_receipt">View Receipt</string>

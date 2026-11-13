@@ -171,14 +171,20 @@ class ScanToPayActivity : AppCompatActivity() {
                     when (state) {
                         ResultState.APPROVED -> R.string.payment_successful
                         ResultState.PENDING -> R.string.payment_pending
+                        ResultState.ACCEPTED -> R.string.payment_accepted
                         ResultState.REFUSED -> R.string.declined
                     },
                 ),
                 message = listOf(
                     "Ref: ${context.txRef}",
                     "Response: ${outcome.responseCode ?: "-"}",
-                    outcomeText(outcome.responseStatusReason, outcome.message, ""),
+                    if (state == ResultState.ACCEPTED) {
+                        outcome.message?.takeIf { it.isNotBlank() } ?: getString(R.string.payment_accepted_wallet_message)
+                    } else {
+                        outcomeText(outcome.responseStatusReason, outcome.message, "")
+                    },
                     if (state == ResultState.PENDING) getString(R.string.payment_pending_message) else "",
+                    if (state == ResultState.ACCEPTED) getString(R.string.payment_accepted_wallet_detail) else "",
                 ).filter { it.isNotBlank() }.joinToString("\n"),
             )
         }
@@ -198,12 +204,15 @@ class ScanToPayActivity : AppCompatActivity() {
      * is neither of the first two. Anything not stated final is PENDING, which is also exactly what
      * the SDK stored and keeps polling.
      */
-    private enum class ResultState { APPROVED, PENDING, REFUSED }
+    private enum class ResultState { APPROVED, PENDING, ACCEPTED, REFUSED }
 
     private fun paymentState(responseStatus: String?): ResultState =
         when (responseStatus?.trim()?.uppercase()) {
             ResponseStatus.APPROVED -> ResultState.APPROVED
             ResponseStatus.DECLINED, ResponseStatus.FAILED -> ResultState.REFUSED
+            // The customer was debited and the credit to the merchant's bank is queued. Not final:
+            // the SDK keeps checking and the row becomes APPROVED, or FAILED when the credit fails.
+            ResponseStatus.ACCEPTED -> ResultState.ACCEPTED
             else -> ResultState.PENDING
         }
 
@@ -214,7 +223,7 @@ class ScanToPayActivity : AppCompatActivity() {
         findViewById<ImageView>(R.id.resultIcon).setImageResource(
             when (state) {
                 ResultState.APPROVED -> R.drawable.success_tick_only
-                ResultState.PENDING -> R.drawable.pending_clock_only
+                ResultState.PENDING, ResultState.ACCEPTED -> R.drawable.pending_clock_only
                 ResultState.REFUSED -> R.drawable.error_x_only
             },
         )
@@ -223,7 +232,7 @@ class ScanToPayActivity : AppCompatActivity() {
             setTextColor(getColor(
                 when (state) {
                     ResultState.APPROVED -> R.color.success_green
-                    ResultState.PENDING -> R.color.warning_orange
+                    ResultState.PENDING, ResultState.ACCEPTED -> R.color.warning_orange
                     ResultState.REFUSED -> R.color.error_red
                 },
             ))
