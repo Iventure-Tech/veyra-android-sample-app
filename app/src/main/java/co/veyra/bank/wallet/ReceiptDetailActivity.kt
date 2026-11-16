@@ -133,7 +133,7 @@ class ReceiptDetailActivity : AppCompatActivity() {
     private fun statusColor(status: String): Int = when (status.uppercase()) {
         "APPROVED" -> Color.parseColor("#2E7D32")
         "DECLINED", "FAILED" -> Color.parseColor("#C62828")
-        "PENDING" -> Color.parseColor("#E65100")
+        "PENDING", "ACCEPTED" -> Color.parseColor("#E65100")
         else -> Color.parseColor("#444444")
     }
 

@@ -190,6 +190,11 @@ class TransactionDetailActivity : AppCompatActivity() {
         binding.btnCheckStatus.visibility = View.VISIBLE
         binding.btnCheckStatus.isEnabled = true
         binding.btnCheckStatus.setOnClickListener { checkStatus(hash) }
+        // An accepted row says where it stands: debited, waiting for the credit to be approved.
+        if (tx.authorizationStatus?.trim()?.uppercase() == ResponseStatus.ACCEPTED) {
+            binding.txDetailStatusCheckNote.text = getString(R.string.payment_accepted_wallet_message)
+            binding.txDetailStatusCheckNote.visibility = View.VISIBLE
+        }
     }
 
     private fun checkStatus(transactionHash: String) {
@@ -226,7 +231,13 @@ class TransactionDetailActivity : AppCompatActivity() {
                 }
                 else -> {
                     // Still unsettled — the honest answer, never a failure.
-                    binding.txDetailStatusCheckNote.text = getString(R.string.status_check_still_pending)
+                    binding.txDetailStatusCheckNote.text = getString(
+                        if (refresh.value?.authorizationStatus?.trim()?.uppercase() == ResponseStatus.ACCEPTED) {
+                            R.string.status_check_still_accepted
+                        } else {
+                            R.string.status_check_still_pending
+                        },
+                    )
                     binding.btnCheckStatus.isEnabled = true
                 }
             }
@@ -433,7 +444,7 @@ class TransactionDetailActivity : AppCompatActivity() {
     private fun statusColor(status: String): Int = when (status.uppercase()) {
         "APPROVED" -> Color.parseColor("#4CAF50")
         "DECLINED", "FAILED" -> Color.parseColor("#EF5350")
-        "PENDING" -> Color.parseColor("#FFA726")
+        "PENDING", "ACCEPTED" -> Color.parseColor("#FFA726")
         else -> Color.parseColor("#AAAAAA")
     }
 

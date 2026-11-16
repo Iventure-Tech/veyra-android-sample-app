@@ -164,6 +164,9 @@ class GetPaidActivity : AppCompatActivity() {
     private var qrPaymentJob: Job? = null
     // The MPM result page's credit-confirmation watch (see watchCreditConfirmationForQr).
     private var creditWatchJob: Job? = null
+    // The result page's wait on an ACCEPTED sale (see showAcceptedResult). While it is set the page
+    // does not auto-return: the merchant is waiting for the approval before releasing goods.
+    private var acceptedWatchJob: Job? = null
 
     // Transactions flow
     private lateinit var pageTransactionsList: View
@@ -200,7 +203,7 @@ class GetPaidActivity : AppCompatActivity() {
         saleOrderId ?: "ORDER-${System.currentTimeMillis()}".also { saleOrderId = it }
 
     private fun attemptEnded(responseStatus: String?) {
-        // Keep the order id for the retry unless the order is paid or may be (APPROVED / PENDING,
+        // Keep the order id for the retry unless the order is paid or may be (APPROVED / ACCEPTED / PENDING,
         // or a status this build does not know — unresolved is treated as pending).
         if (responseStatus !in REUSABLE_ORDER_STATUSES) saleOrderId = null
     }
@@ -225,6 +228,15 @@ class GetPaidActivity : AppCompatActivity() {
     }
 
     /** Outcomes after which no money moved, so the same order id may be paid again. */
+    /** The statuses a payment ends on. PENDING and ACCEPTED are not among them: both are still open. */
+    private val FINAL_STATUSES = setOf(
+        ResponseStatus.APPROVED, ResponseStatus.DECLINED, ResponseStatus.FAILED, ResponseStatus.RETRY,
+    )
+
+    /** An accepted payment whose credit failed: the customer's debit was reversed. */
+    private val CREDIT_FAILED = "CREDIT_FAILED"
+
+    // ACCEPTED is not here: the customer was debited, so the order ID is held like a PENDING one.
     private val REUSABLE_ORDER_STATUSES = setOf(
         ResponseStatus.NOT_SENT, ResponseStatus.RETRY, ResponseStatus.DECLINED, ResponseStatus.FAILED,
     )
@@ -325,6 +337,12 @@ class GetPaidActivity : AppCompatActivity() {
                     details = if (response.responseStatusReason == DUPLICATE_MERCHANT_ORDER_ID)
                         duplicateOrderText(response.originalPayment) else reason,
                 )
+                // Accepted: the customer was debited and the credit is queued. Not final.
+                ResponseStatus.ACCEPTED -> showAcceptedResult(
+                    reference = lastOriginalTransactionReference,
+                    message = response.message,
+                    amountMinorUnits = scanned.amountMinorUnits,
+                )
                 ResponseStatus.NOT_SENT, ResponseStatus.RETRY -> showPaymentResult(
                     // Nothing was charged (never reached the gateway, or the gateway did not send it
                     // on): fix the reason, charge the same QR again.
@@ -351,7 +369,8 @@ class GetPaidActivity : AppCompatActivity() {
             // PENDING has no receipt until it resolves.
             viewReceiptButton.visibility =
                 if (status == ResponseStatus.APPROVED || status == ResponseStatus.DECLINED || status == ResponseStatus.FAILED) View.VISIBLE else View.GONE
-            scheduleAutoNavigate()
+            // An accepted sale holds the page until its final status arrives.
+            if (acceptedWatchJob == null) scheduleAutoNavigate()
             // An approved CPM sale can wait on beneficiary credit confirmation just like tap and
             // MPM — the same stored-row watch, which cancels the hold above if the merchant's bank
             // turns out to support it.
@@ -748,7 +767,7 @@ class GetPaidActivity : AppCompatActivity() {
         pageTransactionDetail.findViewById<TextView>(R.id.detailCardholderValue).text = tx.cardholderName ?: "—"
         // Only show View Receipt for final statuses (approved, declined, failed) - not for pending
         pageTransactionDetail.findViewById<MaterialButton>(R.id.viewReceiptButtonDetail)?.visibility =
-            if (tx.status == ResponseStatus.PENDING) View.GONE else View.VISIBLE
+            if (tx.status == ResponseStatus.PENDING || tx.status == ResponseStatus.ACCEPTED) View.GONE else View.VISIBLE
         bindStatusCheckButton(tx)
         bindCreditCheckButton(tx)
     }
@@ -770,9 +789,16 @@ class GetPaidActivity : AppCompatActivity() {
         val note = pageTransactionDetail.findViewById<TextView>(R.id.detailStatusCheckNote)
         note.visibility = View.GONE
 
-        if (tx.status != ResponseStatus.PENDING) {
+        // Open rows only: PENDING (outcome unknown) and ACCEPTED (customer debited, credit queued).
+        val accepted = tx.status == ResponseStatus.ACCEPTED
+        if (tx.status != ResponseStatus.PENDING && !accepted) {
             button.visibility = View.GONE
             return
+        }
+        // An accepted row says what the merchant must do with it: wait for the approval.
+        if (accepted) {
+            note.text = getString(R.string.payment_accepted_merchant_message)
+            note.visibility = View.VISIBLE
         }
         button.visibility = View.VISIBLE
         button.isEnabled = true
@@ -796,7 +822,8 @@ class GetPaidActivity : AppCompatActivity() {
                         }
                         button.isEnabled = true
                     }
-                    fresh != null && fresh.status != ResponseStatus.PENDING -> {
+                    // The row moved on: PENDING to ACCEPTED, or either of them to a final status.
+                    fresh != null && fresh.status != tx.status -> {
                         // Re-render the detail and the list so the status, this button and the
                         // receipt affordance all agree.
                         loadTransactionDetail(tx.merchantTransactionReference)
@@ -804,7 +831,9 @@ class GetPaidActivity : AppCompatActivity() {
                     }
                     else -> {
                         // Still unsettled — the honest answer, not a failure.
-                        note.text = getString(R.string.status_check_still_pending)
+                        note.text = getString(
+                            if (accepted) R.string.status_check_still_accepted else R.string.status_check_still_pending,
+                        )
                         button.isEnabled = true
                     }
                 }
@@ -1119,6 +1148,19 @@ class GetPaidActivity : AppCompatActivity() {
                 // A poll that could not be made carries a reason and no state: just ask again.
                 val status = sdk.contextStatus(txRef).value ?: continue
                 when {
+                    // The customer's bank accepted the push: debited, credit queued. The context
+                    // is not settled, so take the QR down and wait on the result page, which
+                    // reads the SDK's stored row until the final status arrives.
+                    status.responseStatus?.trim()?.uppercase() == ResponseStatus.ACCEPTED ||
+                        sdk.getTransaction(txRef)?.status == ResponseStatus.ACCEPTED -> {
+                        showPage(PAGE_PAYMENT_RESULT)
+                        showAcceptedResult(
+                            reference = txRef,
+                            message = null,
+                            amountMinorUnits = currentAmountMinorUnits,
+                        )
+                        break
+                    }
                     status.isSettled -> {
                         showPage(PAGE_PAYMENT_RESULT)
                         showPaymentResult(
@@ -1179,6 +1221,7 @@ class GetPaidActivity : AppCompatActivity() {
                         when (order.responseStatus) {
                             ResponseStatus.APPROVED -> "Paid — do not take another payment for this order."
                             ResponseStatus.PENDING -> "A payment may still be going through — do not take another payment yet."
+                            ResponseStatus.ACCEPTED -> "A payment is accepted and waiting for approval — do not take another payment, and do not release goods yet."
                             else -> "Not paid (${order.responseStatus}${order.responseStatusReason?.let { " · $it" } ?: ""}) — you can take a payment with the same order id."
                         },
                     )
@@ -1278,6 +1321,76 @@ class GetPaidActivity : AppCompatActivity() {
                 delay(CREDIT_WATCH_INTERVAL_MS)
             }
         }
+    }
+
+    /**
+     * ACCEPTED, on every rail: the customer was debited and the credit to the merchant's bank is
+     * queued. It is not final. The page says so, tells the merchant to wait for the approval before
+     * releasing goods, and offers no receipt, no credit confirmation and no retry (the order ID is
+     * held, so never take another payment for it).
+     *
+     * The SDK keeps checking the payment whatever screen is up. This page only renders its stored
+     * row: it stays up (no auto-return) and shows the final status the moment the row has one.
+     */
+    private fun showAcceptedResult(reference: String?, message: String?, amountMinorUnits: Long) {
+        lastSuccessfulResponse = null
+        showPaymentResult(
+            isSuccess = null,
+            accepted = true,
+            title = getString(R.string.payment_accepted),
+            message = message?.takeIf { it.isNotBlank() } ?: getString(R.string.payment_accepted_merchant_message),
+            amountMinorUnits = amountMinorUnits,
+            details = buildString {
+                append(getString(R.string.payment_accepted_merchant_detail))
+                reference?.takeIf { it.isNotBlank() }?.let { append("\nReference: $it") }
+            },
+        )
+        viewReceiptButton.visibility = View.GONE
+        cancelAutoNavigate()
+        val ref = reference?.takeIf { it.isNotBlank() } ?: return
+        acceptedWatchJob = lifecycleScope.launch {
+            while (currentPage == PAGE_PAYMENT_RESULT) {
+                delay(CREDIT_WATCH_INTERVAL_MS)
+                val row = sdk.getTransaction(ref) ?: continue
+                // Still accepted (or a status this build does not know): keep waiting.
+                if (row.status !in FINAL_STATUSES) continue
+                if (currentPage != PAGE_PAYMENT_RESULT) break
+                acceptedWatchJob = null
+                showAcceptedPaymentSettled(row, amountMinorUnits)
+                return@launch
+            }
+            acceptedWatchJob = null
+        }
+    }
+
+    /**
+     * The accepted sale on the result page reached its final status: APPROVED (the credit went
+     * through; receipt and credit confirmation are now available) or FAILED / CREDIT_FAILED (the
+     * credit failed and the debit was reversed). Shown in place, with a fresh hold.
+     */
+    private fun showAcceptedPaymentSettled(row: MerchantTransaction, amountMinorUnits: Long) {
+        val approved = row.status == ResponseStatus.APPROVED
+        val reason = row.responseStatusReason
+        lastOriginalTransactionReference = row.merchantTransactionReference
+        showPaymentResult(
+            isSuccess = approved,
+            title = getString(if (approved) R.string.payment_successful else R.string.payment_failed),
+            message = if (approved) {
+                getString(R.string.payment_approved_after_accepted)
+            } else {
+                outcomeText(
+                    reason,
+                    if (reason == CREDIT_FAILED) getString(R.string.payment_credit_failed_message) else null,
+                    getString(R.string.error_occurred),
+                )
+            },
+            amountMinorUnits = amountMinorUnits,
+            details = "Reference: ${row.merchantTransactionReference}\nResponse: ${row.responseCode ?: "-"}",
+        )
+        // A final status has a receipt; an approved sale may now wait on credit confirmation.
+        showViewReceiptButton()
+        scheduleAutoNavigate()
+        if (approved) watchCreditConfirmationForQr(row.merchantTransactionReference)
     }
 
     private fun stopQrContextPayment() {
@@ -1528,6 +1641,13 @@ class GetPaidActivity : AppCompatActivity() {
                 )
                 showViewReceiptButton()
             }
+            // Accepted: the customer was debited and the credit to the merchant's bank is queued.
+            // Not final: no receipt, no credit confirmation, no retry. Wait for the approval.
+            ResponseStatus.ACCEPTED -> showAcceptedResult(
+                reference = response.merchantTransactionReference ?: lastOriginalTransactionReference,
+                message = response.message,
+                amountMinorUnits = currentAmountMinorUnits,
+            )
             ResponseStatus.NOT_SENT, ResponseStatus.RETRY -> {
                 lastSuccessfulResponse = null
                 // RETRY: the gateway received it and did not send it to the bank — the
@@ -1563,7 +1683,8 @@ class GetPaidActivity : AppCompatActivity() {
         // throughout). The single exception is a sale waiting on beneficiary credit confirmation:
         // that page must not vanish mid-wait, so it holds indefinitely and showCreditConfirmation()
         // starts a fresh hold once the answer is on screen.
-        if (awaitingCreditConfirmationRef == null) scheduleAutoNavigate()
+        // An accepted sale holds the page too, until its final status arrives.
+        if (awaitingCreditConfirmationRef == null && acceptedWatchJob == null) scheduleAutoNavigate()
     }
     
     private fun showPaymentResult(
@@ -1574,7 +1695,11 @@ class GetPaidActivity : AppCompatActivity() {
         details: String,
         /** "Try again" — only for a NOT_SENT or FAILED outcome; never for PENDING. */
         retry: (() -> Unit)? = null,
+        /** With `isSuccess = null`: the payment is ACCEPTED (customer debited, credit queued), not unknown. */
+        accepted: Boolean = false,
     ) {
+        acceptedWatchJob?.cancel()
+        acceptedWatchJob = null
         retryAction = retry
         retryButton.visibility = if (retry != null) View.VISIBLE else View.GONE
         // A new result supersedes any credit-confirmation wait from the previous sale —
@@ -1599,7 +1724,7 @@ class GetPaidActivity : AppCompatActivity() {
             }
             null -> {
                 resultIcon.setImageResource(R.drawable.pending_clock_only)
-                resultText.text = getString(R.string.pending)
+                resultText.text = getString(if (accepted) R.string.accepted else R.string.pending)
                 resultText.setTextColor(getColor(R.color.warning_orange))
                 animateCircle(getColor(R.color.warning_orange))
             }

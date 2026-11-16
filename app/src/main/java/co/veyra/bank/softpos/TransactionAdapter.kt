@@ -42,6 +42,9 @@ class TransactionAdapter(
             when (item.status) {
                 ResponseStatus.APPROVED -> holder.itemView.context.getColor(R.color.success_green)
                 ResponseStatus.DECLINED, ResponseStatus.FAILED, ResponseStatus.RETRY -> holder.itemView.context.getColor(R.color.error_red)
+                // Not final: PENDING (outcome unknown) and ACCEPTED (customer debited, credit
+                // queued) read as "still open", like any status this build does not know.
+                ResponseStatus.PENDING, ResponseStatus.ACCEPTED -> holder.itemView.context.getColor(android.R.color.holo_orange_dark)
                 else -> holder.itemView.context.getColor(android.R.color.holo_orange_dark)
             }
         )
