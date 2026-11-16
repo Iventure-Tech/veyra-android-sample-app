@@ -95,6 +95,12 @@ class ReceiptDetailActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.receiptTxnId).text = it
         }
 
+        // Credit transaction ID (the merchant's credit), when known
+        r.creditTransactionId?.takeIf { it.isNotBlank() }?.let {
+            findViewById<LinearLayout>(R.id.rowCreditTxnId).visibility = View.VISIBLE
+            findViewById<TextView>(R.id.receiptCreditTxnId).text = it
+        }
+
         // CDCVM
         val cdcvmApproved = r.cdcvmApprovedByWallet
         val cdcvmOutcome = r.cdcvmOutcome?.takeIf { it.isNotBlank() }
