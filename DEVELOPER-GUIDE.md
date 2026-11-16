@@ -2101,6 +2101,8 @@ a `CancelResult`. A QR that carries no order ID cannot be cancelled. See
 | `getReceipts(limit = 100)` | The stored receipts, most recent first | `List<TransactionReceipt>` |
 | `getReceiptForTransaction(transactionHash)` | The receipt for one payment | `TransactionReceipt?` |
 
+A `TransactionReceipt` carries `creditTransactionId`: the merchant's credit identifier (NIP session id inter-bank, batch reference intra-bank), when known. The SDK takes it from the wallet's own record of the payment and, failing that, from the merchant's receipt QR; it is `null` when neither knows it. A receipt whose credit id disagrees with the wallet's record is refused `RECEIPT_MISMATCH`.
+
 #### `getTransactions`
 
 The card's full local history across every rail (tap, scanned QR, shown QR), most recent first. No network call. Empty when no card on this device has that reference, or the card has no payments yet. The same name and default (`limit = 50`) as on iOS and React Native.
@@ -2247,7 +2249,7 @@ val receipt  = wallet.getReceiptForTransaction(hash)         // by transactionHa
 | `APPROVED` | — | The receipt belongs to a payment this wallet made, agrees with it, and is stored in `receipt` (`stored == true`) |
 | `FAILED` | `INVALID_RECEIPT` | Not a Veyra receipt QR, or one with a missing or unreadable field |
 | `FAILED` | `RECEIPT_NOT_FROM_THIS_WALLET` | No payment made by this wallet matches it |
-| `FAILED` | `RECEIPT_MISMATCH` | It matches a payment, but its amount, currency, date, merchant or reference disagree with this wallet's record |
+| `FAILED` | `RECEIPT_MISMATCH` | It matches a payment, but its amount, currency, date, merchant, reference or credit transaction id disagree with this wallet's record |
 | `FAILED` | `PAYMENT_NOT_CONFIRMED` | The matching payment's outcome is not confirmed yet — scan again shortly |
 | `FAILED` | `RECEIPT_FOR_ANOTHER_TRANSACTION` | Scoped scan (`expectedTransactionHash`): the receipt is for a different transaction |
 | `FAILED` | `SDK_INTERNAL_ERROR` | The SDK failed inside itself |
