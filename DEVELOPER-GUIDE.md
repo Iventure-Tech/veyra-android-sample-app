@@ -938,6 +938,38 @@ while (isActive) {
 // teardown (screen leave): softpos.cancelQrExpiry()
 ```
 
+#### If the same QR is scanned again
+
+A merchant QR pays **once**. The first scan that reaches the gateway claims the QR, and every later
+scan of it is answered from that first payment. **A later scan never charges again.** What it gets
+depends on how the first payment ended:
+
+| First payment ended | The QR afterwards (`softpos.contextStatus(txRef)`) | A later scan of the same QR |
+|---|---|---|
+| `APPROVED` | `APPROVED`: paid | Answered with the first payment's approval and transaction id. Nothing new is sent to the bank. |
+| `DECLINED` or `FAILED` | `DECLINED`: used | Answered with the first payment's refusal (same code and reason). Nothing is sent to the bank. To try again, show a **new QR** for the same order id. |
+| `RETRY` (the gateway never sent it to the bank) | Back to `PENDING` while unexpired; `EXPIRED` after | A new payment, as if the first had not happened. Once the QR has expired: `RETRY` / `12` / `QR_EXPIRED`. |
+| `NOT_SENT` (refused on the phone) | Unchanged: `PENDING` | A new payment. The gateway never saw the first one. |
+| `PENDING` (outcome not known yet) or `ACCEPTED` (debited, credit queued) | `IN_FLIGHT`: locked | Answered with the first payment's current status (`PENDING` until it resolves) and transaction id. It is **not** paid again. |
+
+**When a `PENDING` payment resolves**, the gateway updates the QR. Approved becomes
+`APPROVED`; declined or failed becomes `DECLINED`. If it turns out the payment was never
+sent to the bank, the QR goes back to `PENDING` (or `EXPIRED`) and can be paid again. Until
+then the QR stays locked, so an unknown outcome can never lead to a second debit.
+
+What this means for your app:
+
+- **Merchant (`softpos.contextStatus(txRef)`).** Keep polling while the state is `PENDING` or `IN_FLIGHT`.
+  `IN_FLIGHT` can go back to `PENDING` when a payment ended `RETRY`, because the QR is
+  payable again, so keep it on screen. On `DECLINED`, take the QR down: it can't be paid again.
+  Create a new QR with `createPaymentContext` for the same order id. That is allowed after a decline,
+  failure or retry; it is refused with `94` / `DUPLICATE_MERCHANT_ORDER_ID` only while the order
+  is `APPROVED`, `ACCEPTED` or `PENDING`.
+- **Wallet (`wallet.payScannedContext`).** Most `RETRY` answers leave the QR payable, so the customer can pay
+  it again. Three mean that **this QR can't be paid as presented**; ask the merchant for a new code
+  instead: `12` / `QR_EXPIRED` (the QR expired), `13` / `AMOUNT_MISMATCH`, and `30` /
+  `INVALID_REQUEST` (the QR was already used, or its payload was not valid).
+
 ---
 
 #### Charge a customer QR (consumer-presented)
@@ -2059,7 +2091,7 @@ never shows more than one sheet. The outcomes are unchanged: `AUTH_CANCELLED`, `
 Pay the verified context with the wallet's **active card**. The SDK raises the authentication sheet
 itself first (above). Whatever the gateway states — approved, declined, failed or still pending — also lands in the card's history.
 
-**Branch on `responseStatus`, not on `approved` or the response code.** The callback's `Result` fails only on a [setup error](#1-setup-errors-thrown); every refusal, including those made on the phone before sending (`AUTH_CANCELLED`, `ONLINE_REQUIRED`, `DEVICE_NOT_BOUND`, `NO_NETWORK_CONNECTION`, …), is a `NOT_SENT` outcome — nothing was pushed, so the customer can pay the **same** QR again once the reason is fixed. `RETRY` is handled the same way: the gateway received the push but did not send it to the bank (for example the merchant's account check failed), nothing was charged, and the merchant's QR is live again until it expires, so the customer can pay it again. The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one. `ACCEPTED` is not a refusal either: the customer was debited and the credit to the merchant's bank is queued. Show "Payment accepted - waiting for credit approval" (the outcome's `message`) and don't pay again; `approved` is `false`, and the final status (`APPROVED`, or `FAILED` / `CREDIT_FAILED` when the credit fails and the debit is reversed) arrives on the history row and through `observeTransactionResolved`.
+**Branch on `responseStatus`, not on `approved` or the response code.** The callback's `Result` fails only on a [setup error](#1-setup-errors-thrown); every refusal, including those made on the phone before sending (`AUTH_CANCELLED`, `ONLINE_REQUIRED`, `DEVICE_NOT_BOUND`, `NO_NETWORK_CONNECTION`, …), is a `NOT_SENT` outcome — nothing was pushed, so the customer can pay the **same** QR again once the reason is fixed. `RETRY` is handled the same way: the gateway received the push but did not send it to the bank (for example the merchant's account check failed), nothing was charged, and the merchant's QR is live again until it expires, so the customer can pay it again. A merchant QR pays only once, though, and three `RETRY` reasons (`QR_EXPIRED`, `AMOUNT_MISMATCH`, `INVALID_REQUEST`) mean this QR can't be paid as presented: ask the merchant for a new code. See [If the same QR is scanned again](#if-the-same-qr-is-scanned-again). The push is a synchronous call, but its *outcome* can still be unknown: the gateway answers `PENDING` when a hop below it timed out (`68`), errored (`06`/`96`) or is still settling (`09`). That is not a refusal — the SDK records the payment as unresolved and keeps polling it until the gateway states a final outcome, which then shows on the history row. `approved` is a convenience for the happy path only (`responseStatus == "APPROVED"`); it is `false` for a pending payment as well as a declined one. `ACCEPTED` is not a refusal either: the customer was debited and the credit to the merchant's bank is queued. Show "Payment accepted - waiting for credit approval" (the outcome's `message`) and don't pay again; `approved` is `false`, and the final status (`APPROVED`, or `FAILED` / `CREDIT_FAILED` when the credit fails and the debit is reversed) arrives on the history row and through `observeTransactionResolved`.
 
 ```kotlin
 wallet.payScannedContext(ctx) { result ->
