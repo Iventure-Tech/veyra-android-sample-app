@@ -1797,6 +1797,16 @@ Synchronous, and a read of stored state rather than a network call. It returns `
 card has ever been selected and when the selected card has since been removed, so treat `null` as
 "prompt the customer to choose" rather than as an error.
 
+The selection is stored on the phone for the signed-in customer. It survives repeated `initialize`
+calls, a new activity and an app restart, and a read straight after `setActiveToken` sees it: no
+delay is needed. The first card added to an empty wallet is selected for you, and a card is fully
+stored before `digitise` delivers its result (`DigitiseResult.tokenStored` says so).
+
+With nobody signed in (after `signOut()`, or before `initialize` in a fresh process) this call
+throws `VeyraError` with `code = NOT_SIGNED_IN`; it does not return `null`. Do not show that error
+as "no card": call `initialize` with the customer and read again. See
+[Customers](#customers-signing-in-signing-out-switching).
+
 #### `setActiveToken`
 
 Select the card payments use (at most one; `Token.isSelected` marks it), by its `tokenUniqueReference`. Selecting it also arms it for tap-to-pay (unless your app has [closed its pay session](#arming-and-disarming-tap-to-pay-pay-session)). The selection happens on the phone — nothing is sent — and it returns a `TokenSelection` instead of throwing (only a [setup error](#1-setup-errors-thrown) throws). Tap events and refusals are observed separately, once, not per selection:
