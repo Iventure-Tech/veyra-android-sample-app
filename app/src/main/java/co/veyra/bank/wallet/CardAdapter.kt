@@ -112,6 +112,12 @@ class CardAdapter : ListAdapter<CardItem, RecyclerView.ViewHolder>(CardDiffCallb
             binding.pendingActivationBadge?.let { badge ->
                 // The requires-online (frozen) badge wins over pending-activation.
                 when {
+                    // The card's payment data is not on this phone: it can only be removed and
+                    // added again, so this wins over every other badge.
+                    token.cardDataMissing -> {
+                        badge.visibility = View.VISIBLE
+                        badge.text = itemView.context.getString(R.string.card_data_missing_badge)
+                    }
                     token.requiresOnline -> {
                         badge.visibility = View.VISIBLE
                         badge.text = itemView.context.getString(R.string.requires_online_badge)
@@ -130,7 +136,7 @@ class CardAdapter : ListAdapter<CardItem, RecyclerView.ViewHolder>(CardDiffCallb
                 else R.drawable.card_gradient_grey
             )
 
-            if (token.requiresOnline) {
+            if (token.requiresOnline || token.cardDataMissing) {
                 // A frozen card is not tappable — no pay affordance reachable from it.
                 binding.root.setOnClickListener(null)
                 binding.root.isClickable = false
@@ -218,7 +224,8 @@ class CardDiffCallback : DiffUtil.ItemCallback<CardItem>() {
                 oldItem.token.tokenUniqueReference == newItem.token.tokenUniqueReference &&
                 oldItem.pendingActivation == newItem.pendingActivation &&
                 oldItem.token.isActive == newItem.token.isActive &&
-                oldItem.token.requiresOnline == newItem.token.requiresOnline
+                oldItem.token.requiresOnline == newItem.token.requiresOnline &&
+                oldItem.token.cardDataMissing == newItem.token.cardDataMissing
             else -> oldItem == newItem
         }
     }
