@@ -1720,6 +1720,8 @@ payButtons.isEnabled = selected?.requiresOnline != true
 
 **`deviceNotBound`** — `true` when the backend refused to issue payment keys for this card to this device: the card was added on another phone, or on this one before the app was reinstalled or its data wiped. The SDK stops asking for keys for that card. Render it greyed-out and non-tappable with "Add this card again on this phone" — **not** "go online": while it is `true`, `requiresOnline` is always `false`, because connecting cannot fix it. Removing the card and adding it again on this phone is the only remedy, and removal is the only thing that clears the flag.
 
+**`cardDataMissing`** — `true` when the card's payment data is no longer on this phone. The card stays in `getTokens()` so you can show it, but it cannot pay and cannot be selected. Render it greyed-out and non-tappable with "Remove this card and add it again".
+
 #### Handling token states in your UI
 
 A card is not simply "there or not" — it can be awaiting activation, frozen for a refresh, or suspended server-side. Derive one display state per card, in this precedence order, every time you render the wallet:
@@ -1729,6 +1731,7 @@ A card is not simply "there or not" — it can be awaiting activation, frozen fo
 | 1 | **Needs activation** | `token.requiresActivation` | Show the card with an **"Activate"** badge/button that launches the [activation flow](#activation). Pay actions hidden. | `activate` succeeding, or `observeActivation` firing `onActivated`. |
 | 2 | **Requires online** | `requiresOnline == true` | **Grey the card out and make it non-tappable**; overlay a "Connect to the internet" hint; disable every pay affordance (tap surface, scan-to-pay, show-QR buttons). | Nothing you call — the SDK refreshes the card itself the next time the device is online. Re-read the list and the flag has cleared. |
 | 2 | **Not bound to this device** | `deviceNotBound == true` (`requiresOnline` is then always `false`) | Grey the card out and make it non-tappable; overlay "Add this card again on this phone" — **not** a connect hint; disable every pay affordance. | Only removing the card and adding it again on this phone. Going online does not help. |
+| 2 | **Payment data missing** | `cardDataMissing == true` (`isActive` and `requiresOnline` are then `false`) | Grey the card out and make it non-tappable; overlay "Remove this card and add it again"; disable every pay affordance. `setActiveToken` answers `CARD_DATA_MISSING` for it. | Only removing the card (`deactivateToken`) and adding it again. |
 | 3 | **Inactive server-side** (suspended, expired) | `token.isActive == false`, with `token.status` saying **why** (`SUSPENDED` / `PENDING_ACTIVATION` / `EXPIRED` — a pay attempt ends `NOT_SENT` / `TOKEN_NOT_ACTIVE`) | Grey the card out; word the indicator from `status` — "Suspended — contact your bank" vs "Expired — re-add the card". Disable pay affordances; don't offer retry — the state is issuer-controlled. | A later automatic status sync seeing the card active again. |
 | 4 | **Payable** | None of the above | Normal rendering; pay affordances enabled for the selected card (`isSelected`). | — |
 
@@ -1796,6 +1799,16 @@ val active: Token? = wallet.getActiveToken()
 Synchronous, and a read of stored state rather than a network call. It returns `null` both when no
 card has ever been selected and when the selected card has since been removed, so treat `null` as
 "prompt the customer to choose" rather than as an error.
+
+The selection is stored on the phone for the signed-in customer. It survives repeated `initialize`
+calls, a new activity and an app restart, and a read straight after `setActiveToken` sees it: no
+delay is needed. The first card added to an empty wallet is selected for you, and a card is fully
+stored before `digitise` delivers its result (`DigitiseResult.tokenStored` says so).
+
+With nobody signed in (after `signOut()`, or before `initialize` in a fresh process) this call
+throws `VeyraError` with `code = NOT_SIGNED_IN`; it does not return `null`. Do not show that error
+as "no card": call `initialize` with the customer and read again. See
+[Customers](#customers-signing-in-signing-out-switching).
 
 #### `setActiveToken`
 
@@ -2456,7 +2469,7 @@ were renamed too: see [Migrating from 3.0.0 — type and field names](#migrating
 | `Token.tokenId` | Removed — use `Token.tokenUniqueReference`, the identifier every wallet call takes |
 | `getToken(tokenId)` | `getToken(tokenUniqueReference)` |
 | `setActiveToken(tokenId, activity, onTransactionStarted, onTransactionCompleted, onActivationFailed, onRequireOnline, onAmountExceedCardLimit, onDeviceNotBound)` | `setActiveToken(tokenUniqueReference)`. Tap events: `observeTapEvents { WalletTapEvent -> }` once. Refusals: `observePaymentRefusals(tokenUniqueReference, …)`. `onActivationFailed`: the returned `TokenSelection` (`CARD_DATA_MISSING`) |
-| `hasProvisioningData(tokenId)` | Removed — `getTokens()` returns only cards that can pay, and `setActiveToken` answers `CARD_DATA_MISSING` for one whose data is gone |
+| `hasProvisioningData(tokenId)` | Removed — `getTokens()` flags such a card with `cardDataMissing`, and `setActiveToken` answers `CARD_DATA_MISSING` for one whose data is gone |
 | `payScannedContext(ctx) { Result<MpmPushOutcome> -> }` | `payScannedContext(ctx) { Result<PaymentOutcome> -> }` — same fields |
 | `refreshTransactionStatus(hash)` / `refreshCreditConfirmation(hash)` → `TransactionRefresh` (`.transaction`) | → `VeyraLookup<TransactionSummary>` (`.value`) — the type iOS and React Native return |
 | `getLastReceipts(limit)` | `getReceipts(limit)` |
@@ -3629,7 +3642,8 @@ data class Token(
     val requiresActivation: Boolean,        // added, but must be activated before it can pay
     val activationMethods: List<ActivationMethodInfo>?,  // how to activate, while requiresActivation
     val requiresOnline: Boolean,            // true: card can't pay until the wallet has been online — grey it out
-    val deviceNotBound: Boolean             // true: keys refused to this device — re-add the card here; requiresOnline is then false
+    val deviceNotBound: Boolean,            // true: keys refused to this device — re-add the card here; requiresOnline is then false
+    val cardDataMissing: Boolean            // true: the card's payment data is not on this phone — remove it and add it again
 )
 
 data class ActivationMethodInfo(val medium: String, val contact: String?)
