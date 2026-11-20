@@ -449,7 +449,9 @@ class PayActivity : AppCompatActivity() {
                     }
                     // No pay affordance while the active card must go online first —
                     // both rails (scan-to-pay and show-QR) are disabled; the card renders frozen.
-                    val activeRequiresOnline = tokens.firstOrNull { it.isSelected }?.requiresOnline == true
+                    // The same goes for a card whose payment data is missing: it cannot pay.
+                    val activeRequiresOnline = tokens.firstOrNull { it.isSelected }
+                        ?.let { it.requiresOnline || it.cardDataMissing } == true
                     binding.scanToPayFab.isEnabled = !activeRequiresOnline
                     binding.scanToPayFab.alpha = if (activeRequiresOnline) 0.4f else 1f
                     binding.showQrFab.isEnabled = !activeRequiresOnline
