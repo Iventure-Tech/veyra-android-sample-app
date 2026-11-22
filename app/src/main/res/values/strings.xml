@@ -281,5 +281,11 @@
     <string name="scan_pay_auth_subtitle">Pay %1$s to %2$s</string>
     <string name="lookup_order">Look up an order</string>
     <string name="lookup_order_hint">Your order id</string>
+
+    <!-- Asked once, before the first payment or card added (LocationAsk). -->
+    <string name="location_ask_title">Help protect your payments</string>
+    <string name="location_ask_message">Veyra Bank sends your phone\'s location with each payment and card you add. It helps check that each payment is really yours. You can change this at any time in Settings.</string>
+    <string name="location_ask_continue">Continue</string>
+    <string name="location_ask_not_now">Not now</string>
 </resources>
 

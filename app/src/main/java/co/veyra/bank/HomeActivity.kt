@@ -35,6 +35,9 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var switchCustomerButton: Button
     private lateinit var signInOutButton: Button
 
+    /** Location, asked once before the first payment or card added (see [LocationAsk]). */
+    private val locationAsk = LocationAsk(this)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_home)
@@ -58,11 +61,12 @@ class HomeActivity : AppCompatActivity() {
             reflectMerchantState()
         }
 
+        // Both sides start payments (and Pay adds cards), so location is asked for before either opens.
         cardGetPaid.setOnClickListener {
-            startActivity(Intent(this, GetPaidActivity::class.java))
+            locationAsk.beforePayment { startActivity(Intent(this, GetPaidActivity::class.java)) }
         }
         cardPay.setOnClickListener {
-            startActivity(Intent(this, PayActivity::class.java))
+            locationAsk.beforePayment { startActivity(Intent(this, PayActivity::class.java)) }
         }
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener { anchor ->
             showMerchantMenu(anchor)
