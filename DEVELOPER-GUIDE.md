@@ -64,10 +64,10 @@ Granting location is the one thing your app controls.
 
 | Group | Signals |
 |---|---|
-| Phone and app | OS version, security patch level, OS build (fingerprint, type, tags), model, manufacturer, your app's id, version and build, its signing certificate digest, the SDK version, uptime; on card calls, when the app was first installed |
+| Phone and app | form factor (phone, tablet, watch or other), OS version, security patch level, OS build (fingerprint, type, tags), model, manufacturer, your app's id, version and build, its signing certificate digest, the SDK version, uptime; on card calls, when the app was first installed |
 | Integrity | rooted (and what was found), emulator, debugger attached, a hooking framework in the process, developer options, USB debugging |
 | Location | position, accuracy, age of the fix, provider, mock location (only with your app's location permission) |
-| Network | network type (Wi-Fi, cellular), VPN active, the phone's public IP address; SIM state, country and operator |
+| Network | network type (Wi-Fi, cellular), VPN active, the phone's public IP address; SIM state, country and operator code (mobile country and network code) |
 | During the call | a phone or VoIP call in progress, screen mirroring or casting, accessibility services on (with their package names), another app drawing over your screen, a screen lock set |
 | Per call | tap: the NFC exchange's duration and command count; customer-QR charge: time from scan to submit; scan-to-pay: time from scan to confirm, where the amount came from, how the customer confirmed, a screenshot taken while paying; key refresh: biometric enrolment changed, payments since the last refresh |
 
@@ -117,6 +117,27 @@ reaches your callback unchanged, exceptions included. If you set your own `Windo
 usual; the SDK wraps it again on the next resume. Only two times are kept, the last touch and the last
 covered touch; nothing about where or what was touched.
 
+### Payment evidence on a tap or customer QR
+
+The customer's phone also proves itself on each payment. On a tap, and in the customer QR, the wallet
+adds a short sealed record to the card data: the phone's evidence for this payment, signed by a key the
+SDK makes for the card in the phone's secure hardware and sealed so only Veyra can open it. The
+merchant's phone carries it unread; the SoftPOS SDK forwards it with the payment. Veyra checks the
+signature and that it belongs to this payment, then uses it as it uses the rest of the evidence: a
+payment whose evidence is missing or invalid is held to low-value purchases, and the two phones'
+positions are compared.
+
+- **Nothing to call.** The key is made when a card is added and renewed at each key refresh. A card
+  added with an SDK before 3.0.9 carries no evidence until its next key refresh.
+- **How the customer unlocked.** The evidence says whether the last authentication was a biometric or
+  the screen lock, and how long ago, on Android 11 and later. The first tap after a card's key is made
+  reports it as unknown.
+- **Both sides need 3.0.9.** A merchant app on an older SoftPOS SDK ignores the record, and the payment
+  goes ahead without evidence. Nothing to change in a tap or QR flow, and the record never slows a tap:
+  it is built before the phone is presented.
+- **What's in it:** the same facts as the table above (including location, when your app has it), the
+  form factor, and the authentication method and age.
+
 ### Your privacy disclosures
 
 Declare this in Google Play's Data safety form and your privacy policy, as data collected for fraud
@@ -126,7 +147,8 @@ prevention and security and sent to Veyra with the payment:
 - device and app information: model, OS build, app id and version, signing certificate digest;
 - the phone's public IP address, which Cloudflare also sees when the SDK looks it up;
 - the package names of accessibility services that are switched on;
-- the device-state facts in the table above.
+- the device-state facts in the table above, which also travel, sealed, inside the card data of each
+  tap and customer QR.
 
 The SDK reads nothing on other apps' screens and nothing about their content.
 
