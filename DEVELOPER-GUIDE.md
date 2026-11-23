@@ -3225,6 +3225,7 @@ Wallet SDK only, grouped by call.
 | Add card (`digitise`) | `APPROVED` | `APPROVED` | — | The card is added and active |
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | — (or why step-up is needed) | Added, but the customer must activate it; `activationMethods` lists how |
 | Add card | `DECLINED` | `DECLINED` | The issuer's reason | The issuer refused this account; show the reason (see [the issuer's causes](#add-a-card--the-issuers-decision-and-causes)) |
+| Add card | `DECLINED` | `DECLINED` | `SUSPECTED_FRAUD` | Veyra's fraud checks refused this add card before anything was created; no card is stored. Don't retry automatically; tell the customer the card can't be added and to contact their bank |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | The Veyra token service could not complete it; start a new add card |
 | Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer (Table A). The card may have been created without reaching the phone: switch it off with `deactivateDigitise(result.clientRequestId)`, then start a new add card |
 | Add card | `FAILED` | any other value | `UNRECOGNISED_RESPONSE_CODE` | A code this SDK version doesn't know; the card was discarded (Table A). Start a new add card |
