@@ -353,7 +353,7 @@ Who is signed in is **your app's** to remember, not the SDK's. The SDK holds it 
 - **Same customer again — nothing happens.** Repeated `initialize` calls with the same id stop nothing and download nothing.
 - **A different customer — the SDK switches.** The previous customer's work (key refreshes, status polls, pending-payment checks, background workers) is stopped, and the new customer's cards and merchant are opened from the device.
 - **Sign out with `signOut()`** (`VeyraWalletSdk.signOut()`, `VeyraSoftPOSSdk.signOut()`, or `VeyraSdk.signOut()` in a combined app). It stops every loop, poll, worker and observer for the customer. Their cards, keys, history, merchant and transactions **stay on the device**: when they sign in again nothing is downloaded for a card that still has its keys, and a card without keys gets them in the background after sign-in.
-- **Register observers again after `initialize`.** A sign-out and a switch to another customer both drop every observer registration (`softpos.observeTransactionResolved`, `softpos.observeMerchantStatusChanged`, and the wallet's `observeTransactionResolved`, `observeTokenStatusChanged`, `observeTokenKeyStateChanged`, `observeTapEvents`, credit confirmations, refusal handlers). Register them right after each `initialize` call that signs a customer in.
+- **Register observers again after `initialize`.** A sign-out and a switch to another customer both drop every observer registration (`softpos.observeTransactionResolved`, `softpos.observeMerchantStatusChanged`, and the wallet's `observeTransactionResolved`, `observeCreditConfirmation`, `observeTokenStatusChanged`, `observeTokenKeyStateChanged`, `observeTapEvents`, refusal handlers). Register them right after each `initialize` call that signs a customer in.
 - **Nobody signed in means no data.** After `signOut()`, and in a fresh process where your app has not called `initialize` yet (the app was killed, the phone restarted), there are no cards and no merchant, and an NFC tap from a terminal is answered "application not found" — no payment is made. A wallet or SoftPOS call that needs the customer's data — cards, payments, the stored merchant, transactions — throws `VeyraError` with `code = NOT_SIGNED_IN`; catch it to send the user to your sign-in. A request already on its way when the customer signs out still completes for that customer: its answer is kept with their data, and you hear about it when they sign in again. Initialise with the customer as soon as your app knows who they are.
 - **The init-free reads take the customer.** `VeyraSoftPOSSdk.getStoredMerchantData(context, customerId)` and `VeyraSoftPOSSdk.isMerchantRegistered(context, customerId)` read that customer's merchant without signing anyone in.
 - **Re-registering a merchant needs no clear.** A successful registration overwrites the customer's stored merchant.
@@ -661,6 +661,7 @@ val softposConfig = VeyraSoftPosSdkConfig.builder(
 | `paymentAppProviderId` | **Mandatory** | Your payment app provider id, issued at onboarding (the same identifier as the wallet config's). Sent on merchant registration/update; the gateway resolves your acquirer id and MCC from it. Must not be blank. |
 | `enableNfc(Boolean)` | Optional | Arm the NFC reader capability at init. Default `true`. |
 | `requestTimeoutSeconds(Int?)` | Optional | The longest the SoftPOS SDK waits for one backend call, in seconds (5–60). Unset means 60 s. See [Request timeout](#request-timeout). |
+| `statusPollFirstGapSeconds(Int?)` | Optional | How often the SoftPOS SDK checks an open payment's status in the first 2 minutes after its status last changed, in seconds. Unset means 3 s; a value below 2 is raised to 2, and the SDK logs one warning. See [How the SDK waits](#gettransactions--gettransaction-softpos). |
 
 That is the whole configuration. The merchant's identity — merchant id, name and location, category code, country code, terminal id — is not configurable: it comes from the merchant stored by [`register`](#register), so the terminal data always carries the merchant the gateway registered. The acquirer id is learned from the gateway's registration/update/status responses (resolved from your payment app provider) and stored with the merchant; it is never app-supplied.
 
@@ -693,6 +694,7 @@ val walletConfig = VeyraWalletSdkConfig.builder(
 | `allowedAcquirerIds(List<String>)` | Optional | Provision context: acquirer IDs to restrict the token to. |
 | `allowedMerchantIds(List<String>)` | Optional | Provision context: merchant IDs to restrict to. |
 | `requestTimeoutSeconds(Int?)` | Optional | The longest the wallet SDK waits for one backend call, in seconds (5–60). Unset means 60 s. See [Request timeout](#request-timeout). |
+| `statusPollFirstGapSeconds(Int?)` | Optional | How often the wallet SDK checks an open payment's status (and an approved payment's credit confirmation) in the first 2 minutes after its status last changed, in seconds. Unset means 3 s; a value below 2 is raised to 2, and the SDK logs one warning. See [How the wallet SDK waits](#how-the-wallet-sdk-waits). |
 | `requireAdditionalQrAuthenticationPrompt(Boolean)` | Optional | Default `true`: show the authentication sheet before every QR payment. `false` skips it when the phone's secure hardware confirms a recent unlock. See [Skipping the sheet after a recent unlock](#skipping-the-sheet-after-a-recent-unlock). |
 
 > **Note:** there is **no** `paymentApplicationInstanceId` parameter. The SDK generates and persists an install-scoped instance ID itself and sends it on every eligibility/digitise request — read it via `getPaymentApplicationInstanceId()`. A restricted provision-context dimension that a payment then falls outside of is declined by the server.
@@ -1200,11 +1202,22 @@ label.
 
 **Each attempt is its own row.** A sale retried after `RETRY` (or another card after a decline) leaves one row per attempt, each with its own `merchantTransactionReference` and the **same** `merchantOrderId`. To show a sale's history, group the rows by `merchantOrderId`; to say what happened to the order, apply [the order's status rule](#an-orders-status-comes-from-all-its-attempts) to the group — or ask the SDK with [`paymentStatus(merchantOrderId)`](#looking-up-a-payment), which also sees attempts made on another phone.
 
-**How the SDK waits for a `PENDING` or `ACCEPTED` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own, with **exponential backoff**: the first re-checks come within seconds (most payments settle at once) and the interval doubles to a steady state of roughly **once an hour**. It keeps that up for **30 days** from the transaction date, and then stops asking.
+**How the SDK waits for a `PENDING` or `ACCEPTED` row.** You do not have to poll, schedule anything, or keep a screen open — the SDK asks on its own. Each payment is timed from **when its status last changed** (when it was taken, and again at each change, `PENDING` → `ACCEPTED` say), and the wait is counted from when the previous answer came back, so the SDK never has two checks out for one payment:
+
+| Since the last status change | The SDK checks every |
+|---|---|
+| under 2 minutes | 3 s, or the `statusPollFirstGapSeconds` you set (at least 2 s) |
+| 2–5 minutes | 10 s |
+| 5–10 minutes | 30 s |
+| 10–60 minutes | 5 minutes |
+| 1–24 hours | 30 minutes |
+| after that | once a day |
+
+A check that fails (no network, a timeout) doesn't restart the clock, and waits twice the gap. A payment handed to a person for reconciliation is checked at most every 2 minutes. The SDK keeps this up for **30 days** from the transaction date, then stops asking. When the app returns to the foreground, every open payment is checked once at once. `observeTransactionResolved` fires when a check finds `ACCEPTED` (or the payment's own answer was `ACCEPTED`) and again at the final status, so your app needs no polling loop of its own.
 
 **Stopping is not an outcome.** When the 30 days elapse the row keeps whatever status it has — still `PENDING`, which is still true — and the SDK simply takes it off the poll list. It never writes `FAILED`, `DECLINED` or any other verdict of its own: only the backend decides what a payment was. The same holds for an `ACCEPTED` row. So treat a long-`PENDING` row as *unresolved*, not as failed, however old it is.
 
-**Let the merchant ask on demand — `refreshTransactionStatus`.** The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30 days**. Polling never invents an outcome — a row that ages out simply stops being asked about and stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the merchant can ask on demand, which is the route for anything still pending after the window closes.
+**Let the merchant ask on demand — `refreshTransactionStatus`.** The SDK checks a pending transaction for you on the schedule above, and **stops after 30 days**. Polling never invents an outcome — a row that ages out simply stops being asked about and stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the merchant can ask on demand, which is the route for anything still pending after the window closes.
 
 A failed poll — device offline, gateway unreachable, an unreadable answer — changes nothing at all: the SDK backs off and asks again, and the row is left exactly as it was. "We could not reach the server" is never recorded as "the payment failed".
 
@@ -1246,10 +1259,10 @@ background sweep writes, so an on-demand check and a background check can never 
 
 #### `refreshCreditConfirmation`
 
-The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
-days**, finalising the row as `UNABLE_TO_CONFIRM` — which means "we stopped asking", never "the funds
-were not received". Expose **`refreshCreditConfirmation`** in your UI so the merchant can ask on
-demand; it works after the window closes, and a later `RECEIVED` replaces the give-up state.
+The SDK checks for beneficiary credit confirmation on the same schedule, timed from the approval, and
+**stops after 30 days**, finalising the row as `UNABLE_TO_CONFIRM` — which means "we stopped asking",
+never "the funds were not received". Expose **`refreshCreditConfirmation`** in your UI so the merchant
+can ask on demand; it works after the window closes, and a later `RECEIVED` replaces the give-up state.
 
 **Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
 this rail. `true` means the SDK is polling and you may offer the manual check; `false`/`null` means
@@ -2289,7 +2302,7 @@ val lastFive = wallet.getTransactions(tokenUniqueReference, limit = 5)
 
 Did the money actually reach the merchant's bank? The wallet asks the same question the merchant's own SDK asks about that sale, from the payer's side — **settlement confirmation only**, it never changes or restates the payment outcome.
 
-**The SDK does the polling; your app renders the stored row.** After a payment is approved, the SDK asks the gateway on an exponential backoff for up to **30 days**, app-scoped: it keeps going across every screen, and no screen starts or stops it. There is deliberately **no wallet callback** for this — the stored row is the whole surface. Read it when a transaction detail view appears, and re-read while it is up if you want the line to flip live.
+**The SDK does the checking; your app renders the stored row and listens.** After a payment is approved, the SDK asks the gateway on the [status schedule](#how-the-wallet-sdk-waits), timed from the approval, for up to **30 days**, app-scoped: it keeps going across every screen, and no screen starts or stops it. The answer is written to the stored row and announced through [`observeCreditConfirmation`](#observecreditconfirmation). Read the row when a transaction detail view appears, and update it from the observer while it is up.
 
 These three fields are the **eligibility contract**: they are how you decide whether to render a
 credit line at all, and whether you may call `refreshCreditConfirmation` (below). They are not merely
@@ -2310,7 +2323,20 @@ Two things to get right, because they are easy to get wrong in the user's favour
 
 The same three core fields, with the same meanings, exist on the SoftPOS side of the SDK — so an app that implements both halves reads one contract.
 
-**Cadence, stated plainly:** the wallet's periodic sweep rides WorkManager, whose floor is **15 minutes**, so the backoff ladder is measured in sweep cycles and the practical resolution is coarser than the merchant SDK's ten-second loop. A one-shot chain runs immediately after a payment resolves, so a credit that lands promptly is usually picked up within seconds; after that, expect minutes, not seconds.
+#### How the wallet SDK waits
+
+The wallet uses the same schedule as the SoftPOS SDK, for an open payment (`PENDING` or `ACCEPTED`) and for an approved payment's credit confirmation. Each payment is timed from **when its status last changed** (when it was made, and again at each change; for a credit confirmation, the approval), and the wait is counted from when the previous answer came back, so the SDK never has two checks out for one payment:
+
+| Since the last status change | The SDK checks every |
+|---|---|
+| under 2 minutes | 3 s, or the `statusPollFirstGapSeconds` you set (at least 2 s) |
+| 2–5 minutes | 10 s |
+| 5–10 minutes | 30 s |
+| 10–60 minutes | 5 minutes |
+| 1–24 hours | 30 minutes |
+| after that | once a day |
+
+A check that fails (no network, a timeout) doesn't restart the clock, and waits twice the gap. A payment handed to a person for reconciliation is checked at most every 2 minutes. The checks run while the app runs, across every screen; when the app returns to the foreground every open payment is checked once at once. The SDK keeps this up for **30 days** from the transaction date, then stops asking: an open payment keeps its status, and a credit confirmation is finalised `UNABLE_TO_CONFIRM`.
 
 #### `reconcilePendingTransactions`
 
@@ -2344,9 +2370,9 @@ The **per-transaction** counterpart to `reconcilePendingTransactions`, which ask
 row and reports only whether it could run — this one answers about the row the customer is actually looking at, keyed
 by its `transactionHash`.
 
-The SDK polls a pending transaction for you with **exponential backoff**, and **stops after 30
-days**. Polling never invents an outcome — a row that ages out simply stops being asked about and
-stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the customer can ask on demand,
+The SDK checks a pending transaction for you on the [status schedule](#how-the-wallet-sdk-waits), and
+**stops after 30 days**. Checking never invents an outcome — a row that ages out simply stops being
+asked about and stays `PENDING`. Expose **`refreshTransactionStatus`** in your UI so the customer can ask on demand,
 which is the route for anything still pending after the window closes.
 
 The same five rules as the merchant method above apply: show it only while the row is `PENDING` or `ACCEPTED`; it
@@ -2356,9 +2382,10 @@ changes the payment; and there is no SDK-side throttle, so disable the button wh
 
 #### `refreshCreditConfirmation`
 
-The SDK polls for beneficiary credit confirmation with **exponential backoff** and **stops after 30
-days**, finalising the row as `UNABLE_TO_CONFIRM` — which means "we stopped asking", never "the funds
-were not received". Expose **`refreshCreditConfirmation`** in your UI so the user can ask on demand;
+The SDK checks for beneficiary credit confirmation on the [status schedule](#how-the-wallet-sdk-waits),
+timed from the approval, and **stops after 30 days**, finalising the row as `UNABLE_TO_CONFIRM` — which
+means "we stopped asking", never "the funds were not received". Expose **`refreshCreditConfirmation`**
+in your UI so the user can ask on demand;
 it works after the window closes, and a later `RECEIVED` replaces the give-up state.
 
 **Check `isCreditConfirmationSupported` on the transaction first.** Not every merchant's bank is on
@@ -2385,8 +2412,8 @@ val refresh: VeyraLookup<TransactionSummary> = wallet.refreshCreditConfirmation(
 - **Only a confirmation is written.** Anything else leaves the row exactly as it was.
 - **Settlement only.** Nothing on this path can change `authorizationStatus`, `responseCode` or
   `responseStatusReason`.
-- **Still no callback** — the returned row and the stored history are the wallet's whole credit
-  surface, by design.
+- **A confirmation it finds fires [`observeCreditConfirmation`](#observecreditconfirmation)**, exactly
+  as the background check does.
 - **A failed check changes nothing.** When it cannot be made the result carries a `failureReason`
   (e.g. `NO_NETWORK_CONNECTION` when the device is offline) beside the unchanged row. Leave the credit
   line reading "not confirmed yet".
@@ -2439,6 +2466,7 @@ exist on iOS and React Native.
 |---|---|---|
 | `observeTokenStatusChanged { }` / `stopObservingTokenStatusChanged()` | A token's status changed — suspended, reactivated, expired, deactivated | `TokenStatusChangedEvent` |
 | `observeTransactionResolved { }` / `stopObservingTransactionResolved()` | A pending payment reached its final outcome | `WalletTransactionResolvedEvent` |
+| `observeCreditConfirmation { }` / `stopObservingCreditConfirmation()` | The merchant's bank confirmed it received an approved payment's funds, or the SDK gave up after 30 days | `WalletCreditConfirmationEvent` |
 | `observeTokenKeyStateChanged { }` / `stopObservingTokenKeyStateChanged()` | A token ran out of payment keys, or got them back | `TokenKeyStateEvent` |
 | `observePaymentRefusals(tokenUniqueReference, …)` / `stopObservingPaymentRefusals(tokenUniqueReference)` | A payment with that token was refused before anything was sent | `WalletPaymentRefusal` (each callback) |
 
@@ -2497,6 +2525,30 @@ Otherwise it fires only on a genuine `PENDING` (or `ACCEPTED`) → final transit
 later write that backfills merchant details onto an already-final row, both wake nothing. Register
 once after each `initialize` (a sign-out or customer switch drops it), no replay (read `getTransactions` on appear), last registration wins, delivered
 on the main thread. `stopObservingTransactionResolved()` stops it.
+
+#### `observeCreditConfirmation`
+
+Fires when the merchant's bank confirms it received the funds for one of this wallet's approved
+payments, or once when the SDK gives up after 30 days. It fires from the SDK's background check and
+from [`refreshCreditConfirmation`](#refreshcreditconfirmation-1), after the answer is written to the
+stored row:
+
+```kotlin
+wallet.observeCreditConfirmation { confirmation: WalletCreditConfirmationEvent ->
+    // confirmation.transactionHash       — which payment (match your row on this)
+    // confirmation.tokenUniqueReference  — the card that paid
+    // confirmation.creditTransactionId   — the credit's id (NIP session id / batch reference)
+    // confirmation.status                — "RECEIVED", or "UNABLE_TO_CONFIRM" (a give-up, not "not received")
+    // confirmation.amountMinorUnits, confirmation.bankReference, confirmation.creditedAt — RECEIVED only, may be null
+}
+```
+
+Settlement only: the payment's own status is unchanged (it stays `APPROVED`). Only a change fires: the
+same answer again wakes nothing. Register once after each `initialize` (a sign-out or customer
+switch drops it), no replay (read the row's `creditConfirmationStatus` on appear), last registration
+wins, delivered on the main thread. `stopObservingCreditConfirmation()` stops it. The same channel
+exists on iOS (`VeyraWallet.shared.observeCreditConfirmation { … }`) and React Native
+(`wallet.observeCreditConfirmation(listener)`).
 
 #### `observeTokenKeyStateChanged`
 
@@ -3371,7 +3423,7 @@ a decline** — the payment may well have completed, so the one thing you must n
 
 1. **Stay on the confirmation screen** and show "processing". Do not navigate away and do not print a
    receipt yet.
-2. **Let the SDK resolve it.** It stores the transaction and polls with backoff; you do not have to.
+2. **Let the SDK resolve it.** It stores the transaction and checks it on the status schedule; you do not have to.
 3. **Finish when it settles** — from `observeTransactionResolved` (below), or by reading the row with
    `getTransaction(reference)` / `getTransactions()`.
 
