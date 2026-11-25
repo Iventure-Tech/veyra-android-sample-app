@@ -1,13 +1,11 @@
 package co.veyra.bank.softpos
 
 import co.veyra.bank.R
-import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -32,7 +30,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import android.widget.ArrayAdapter
@@ -415,22 +412,6 @@ class GetPaidActivity : AppCompatActivity() {
         private const val CREDIT_WATCH_INTERVAL_MS = 3000L
     }
 
-    /** Runtime location access so payment_device_info can include lat/lng (manifest alone is not enough). */
-    private val requestLocationPermissions = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (!granted) {
-            Toast.makeText(
-                this,
-                "Location permission denied — latitude/longitude may be omitted from the payment request.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-        navigateToContactlessAndStartPayment()
-    }
-    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_get_paid)
@@ -1423,26 +1404,12 @@ class GetPaidActivity : AppCompatActivity() {
         }
     }
 
-    /** Tap-to-pay chosen: runtime location first (payment_device_info wants lat/lng), then arm. */
+    /**
+     * Tap-to-pay chosen: arm. Location was asked for before this screen opened (Home, LocationAsk), and the
+     * payment goes ahead either way.
+     */
     private fun startTapToPay() {
-        val hasLocation = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        if (hasLocation) {
-            navigateToContactlessAndStartPayment()
-        } else {
-            requestLocationPermissions.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
-        }
+        navigateToContactlessAndStartPayment()
     }
 
     private fun navigateToContactlessAndStartPayment() {

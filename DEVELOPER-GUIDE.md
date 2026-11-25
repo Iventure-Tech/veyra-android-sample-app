@@ -34,7 +34,7 @@ A combined app is always in exactly one **mode** — none, receiving (SoftPOS) o
 | NFC hardware | Required for tap acceptance | Required for tap-to-pay (QR rails work without) |
 | Google Play services | Not required — the SoftPOS SDK performs no Play Integrity calls | Required for attested operations (add card, key refresh) |
 | Screen lock | — | Required on the customer's phone to add a card — see [Screen lock and the card's payment keys](#screen-lock-and-the-cards-payment-keys) |
-| Permissions | `INTERNET`, `NFC`, location (merged from the SDK manifests; location is a *runtime* permission — request it before opening your tap screen) | `INTERNET`, `NFC` (merged) |
+| Permissions | `INTERNET`, `NFC`, `ACCESS_NETWORK_STATE`, location (merged from the SDK manifests; location is a *runtime* permission — ask for it before the first payment, see [Location](#location)) | `INTERNET`, `NFC`, `ACCESS_NETWORK_STATE`, `DETECT_SCREEN_CAPTURE` (merged); add location to your own manifest and ask for it before the first payment |
 
 The SDK manifests merge everything they need into your app (permissions, the NFC feature flag, the wallet HCE service, backup-exclusion rules). Your app must add on `<application>`:
 
@@ -43,6 +43,114 @@ android:networkSecurityConfig="@xml/network_security_config"
 ```
 
 (the config XML ships inside the SDK). **No NFC intent filters or tech-filter meta-data are needed** — tap acceptance uses reader mode, which delivers cards via callback. In a combined app the HCE service's enabled state is owned by the SDK's mode manager — **never toggle `PaymentCardEmulationService` yourself**.
+
+---
+
+## Device evidence for fraud checks
+
+From SDK 3.0.9, every call that starts or supports a payment, or adds a card, carries a block of
+evidence about the phone. On the merchant's phone that is the tap, the customer-QR charge, the QR
+create and registration; on the customer's phone, eligibility, add card, activation, key refresh,
+scan-to-pay and show-QR. The SDK collects and sends it itself: there is nothing to call, and nothing
+turns it off. On every call where the phone proves itself (all but eligibility), its hardware key signs
+the evidence with the request, so it can't be altered on the way.
+
+The fraud checks trust a phone that sends its evidence more than one that doesn't. A signal the SDK
+can't read is sent as unavailable with its reason (`NOT_SUPPORTED_ON_PLATFORM`, `PERMISSION_DENIED`,
+`TIMEOUT`, `NO_BASELINE` or `ERROR`), never guessed, and a missing signal counts against the payment.
+Granting location is the one thing your app controls.
+
+### What is sent
+
+| Group | Signals |
+|---|---|
+| Phone and app | form factor (phone, tablet, watch or other), OS version, security patch level, OS build (fingerprint, type, tags), model, manufacturer, your app's id, version and build, its signing certificate digest, the SDK version, uptime; on card calls, when the app was first installed |
+| Integrity | rooted (and what was found), emulator, debugger attached, a hooking framework in the process, developer options, USB debugging |
+| Location | position, accuracy, age of the fix, provider, mock location (only with your app's location permission) |
+| Network | network type (Wi-Fi, cellular), VPN active, the phone's public IP address; SIM state, country and operator code (mobile country and network code) |
+| During the call | a phone or VoIP call in progress, screen mirroring or casting, accessibility services on (with their package names), another app drawing over your screen, a screen lock set |
+| Per call | tap: the NFC exchange's duration and command count; customer-QR charge: time from scan to submit; scan-to-pay: time from scan to confirm, where the amount came from, how the customer confirmed, a screenshot taken while paying; key refresh: biometric enrolment changed, payments since the last refresh |
+
+`NO_BASELINE` is normal: it means there was nothing yet to compare with (no touch seen yet, a first
+key refresh). Android before 14 sends the screenshot signal as `NOT_SUPPORTED_ON_PLATFORM`.
+
+### Location
+
+The SDK never asks for a permission. It sends the phone's location when your app already holds it,
+and `PERMISSION_DENIED` when it doesn't.
+
+- **Declare it.** The SoftPOS SDK's manifest merges `ACCESS_FINE_LOCATION` and
+  `ACCESS_COARSE_LOCATION`. A wallet-only app adds both to its own manifest.
+- **Ask before the first payment or card added, with a short explanation first.** The use isn't
+  obvious to the user, and Google Play asks for an in-app explanation before the prompt in that case.
+  Ask for both permissions together, so Android 12 and later offer "precise" and "approximate". Never
+  block the payment on the answer. The sample does this once, from its home screen, in
+  [`LocationAsk.kt`](app/src/main/java/co/veyra/bank/LocationAsk.kt).
+- **Precise is better.** The fraud checks compare where the merchant's and the customer's phones are,
+  within a couple of hundred metres. Approximate location can be off by kilometres.
+- **A fresh fix at payment start.** When a payment starts, and whenever the merchant's app comes to
+  the foreground, the SDK asks Android for a current position (GPS when available) and gives up after
+  2 seconds; the payment never waits for it. Without one, the last known position goes, with its age.
+
+### Permissions the SDK merges for the evidence
+
+| Permission | From | Why |
+|---|---|---|
+| `ACCESS_NETWORK_STATE` | both SDKs | network type and VPN state |
+| `DETECT_SCREEN_CAPTURE` | wallet SDK | tells the SDK a screenshot was taken during scan-to-pay (Android 14 and later) |
+
+Both are granted at install, with no prompt.
+
+### The public IP lookup
+
+A phone can't read its own public IP, so the SDK asks Cloudflare
+(`https://www.cloudflare.com/cdn-cgi/trace`) at start, when the app comes to the foreground and when
+the network changes, and keeps the answer for 5 minutes. It is the one request the SDK makes outside
+your connection to Veyra, and a payment never waits for it. If your network allow-lists outbound
+hosts, add `www.cloudflare.com`; if it is blocked, the IP goes as `TIMEOUT` or `ERROR`.
+
+### Overlay detection
+
+Android marks a touch when another app's window covers it, the trick behind tap-jacking. To see
+that mark, the SDK wraps each activity window's `Window.Callback` with a pass-through: every event
+reaches your callback unchanged, exceptions included. If you set your own `Window.Callback`, set it as
+usual; the SDK wraps it again on the next resume. Only two times are kept, the last touch and the last
+covered touch; nothing about where or what was touched.
+
+### Payment evidence on a tap or customer QR
+
+The customer's phone also proves itself on each payment. On a tap, and in the customer QR, the wallet
+adds a short sealed record to the card data: the phone's evidence for this payment, signed by a key the
+SDK makes for the card in the phone's secure hardware and sealed so only Veyra can open it. The
+merchant's phone carries it unread; the SoftPOS SDK forwards it with the payment. Veyra checks the
+signature and that it belongs to this payment, then uses it as it uses the rest of the evidence: a
+payment whose evidence is missing or invalid is held to low-value purchases, and the two phones'
+positions are compared.
+
+- **Nothing to call.** The key is made when a card is added and renewed at each key refresh. A card
+  added with an SDK before 3.0.9 carries no evidence until its next key refresh.
+- **How the customer unlocked.** The evidence says whether the last authentication was a biometric or
+  the screen lock, and how long ago, on Android 11 and later. The first tap after a card's key is made
+  reports it as unknown.
+- **Both sides need 3.0.9.** A merchant app on an older SoftPOS SDK ignores the record, and the payment
+  goes ahead without evidence. Nothing to change in a tap or QR flow, and the record never slows a tap:
+  it is built before the phone is presented.
+- **What's in it:** the same facts as the table above (including location, when your app has it), the
+  form factor, and the authentication method and age.
+
+### Your privacy disclosures
+
+Declare this in Google Play's Data safety form and your privacy policy, as data collected for fraud
+prevention and security and sent to Veyra with the payment:
+
+- location, precise or approximate, when your app has the permission;
+- device and app information: model, OS build, app id and version, signing certificate digest;
+- the phone's public IP address, which Cloudflare also sees when the SDK looks it up;
+- the package names of accessibility services that are switched on;
+- the device-state facts in the table above, which also travel, sealed, inside the card data of each
+  tap and customer QR.
+
+The SDK reads nothing on other apps' screens and nothing about their content.
 
 ---
 
@@ -3117,6 +3225,7 @@ Wallet SDK only, grouped by call.
 | Add card (`digitise`) | `APPROVED` | `APPROVED` | — | The card is added and active |
 | Add card | `APPROVED` | `APPROVE_REQUIRE_AUTH` | — (or why step-up is needed) | Added, but the customer must activate it; `activationMethods` lists how |
 | Add card | `DECLINED` | `DECLINED` | The issuer's reason | The issuer refused this account; show the reason (see [the issuer's causes](#add-a-card--the-issuers-decision-and-causes)) |
+| Add card | `DECLINED` | `DECLINED` | `SUSPECTED_FRAUD` | Veyra's fraud checks refused this add card before anything was created; no card is stored. Don't retry automatically; tell the customer the card can't be added and to contact their bank |
 | Add card | `FAILED` | — | `INTERNAL_ERROR` | The Veyra token service could not complete it; start a new add card |
 | Add card | `FAILED` | — | `NO_RESPONSE_RECEIVED` / `UPSTREAM_ERROR` | No answer (Table A). The card may have been created without reaching the phone: switch it off with `deactivateDigitise(result.clientRequestId)`, then start a new add card |
 | Add card | `FAILED` | any other value | `UNRECOGNISED_RESPONSE_CODE` | A code this SDK version doesn't know; the card was discarded (Table A). Start a new add card |
