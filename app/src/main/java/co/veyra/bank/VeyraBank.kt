@@ -16,6 +16,9 @@ object VeyraBank {
 
     fun ensureInitialized(activity: AppCompatActivity): VeyraSdk =
         VeyraSdk.initialize(activity, customerId(activity), VeyraSdkConfig(softposConfig(activity), walletConfig(activity)), provider())
+            // App-scope payment events, re-registered on every sign-in (the SDKs drop them on
+            // sign-out and on a customer switch).
+            .also(PaymentEventLog::register)
 
     /**
      * How both SDKs reach Veyra: one provider, chosen in the git-ignored veyra.properties. Pass the
