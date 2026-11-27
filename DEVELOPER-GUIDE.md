@@ -986,7 +986,7 @@ To cancel a payment, call `softpos.cancelPayment(merchantOrderId)` with its orde
 | Call | What it does | Returns |
 |---|---|---|
 | [`createPaymentContext(amountMinorUnits, currency = "566", merchantOrderId, onExpired = null)`](#createpaymentcontext) (`suspend`) | Merchant-presented QR (MPM): creates a gateway-signed payment context for the stored merchant; render its payload as the QR. `onExpired` fires once when the QR lapses. | `PaymentContextQr` |
-| [`contextStatus(txRef: String)`](#contextstatus) (`suspend`) | Polls the QR's payment context until it settles or expires. | `VeyraLookup<PaymentContextStatus>` |
+| [`contextStatus(txRef: String)`](#contextstatus) (`suspend`) | Asks the gateway once for the QR's state. **Not needed while a QR is on screen:** the SDK checks a displayed QR by itself and writes each answer onto the sale's stored row, so your screen reads the row (`getTransaction(txRef)`) instead. | `VeyraLookup<PaymentContextStatus>` |
 | `cancelQrExpiry()` | Stops the expiry watch `createPaymentContext` armed (call on settle and on screen teardown). | `Unit` |
 | [`inspectCustomerQr(payload: String)`](#inspectcustomerqr) | Customer-presented QR (CPM): decodes and validates a scanned payload. Nothing is sent. | `CustomerQrInspection` |
 | [`chargeCustomerQr(scanned: ScannedCustomerQr, merchantOrderId: String)`](#chargecustomerqr) (`suspend`) | Charges the confirmed customer QR for the amount it carries. | `CustomerQrChargeOutcome` |
@@ -1006,7 +1006,7 @@ The merchant keys the amount, the SDK creates a **gateway-signed payment context
 | `merchantOrderId` | **Mandatory** | Your order id for the sale — the same rules as on a tap (non-blank; reusable until the order is paid or possibly paid). Several QRs may carry the same order id until one of them is paid. |
 | `onExpired` | Optional | Fired **once, on the main thread**, when the QR reaches its expiry — blank or replace the code so it can't be scanned once lapsed (a dimmed QR is still machine-readable). A new create supersedes the watch; `cancelQrExpiry()` stops it. |
 
-Always returns a `PaymentContextQr` — never `null`, never a throw for anything that happens to the request. Check `created` (or `responseStatus == "APPROVED"`) first: then `txRef` (poll key), `mpmPayload` (**render this string verbatim as the QR**), `expiry` (ISO-8601) and `kid` are set. Otherwise `txRef` and `mpmPayload` are `null` and `responseStatus` / `responseStatusReason` say why:
+Always returns a `PaymentContextQr` — never `null`, never a throw for anything that happens to the request. Check `created` (or `responseStatus == "APPROVED"`) first: then `txRef` (the sale's reference: the key to its stored row), `mpmPayload` (**render this string verbatim as the QR**), `expiry` (ISO-8601) and `kid` are set. Otherwise `txRef` and `mpmPayload` are `null` and `responseStatus` / `responseStatusReason` say why:
 
 | `responseStatus` | Typical reasons | What to do |
 |---|---|---|
@@ -1016,7 +1016,19 @@ Always returns a `PaymentContextQr` — never `null`, never a throw for anything
 
 ##### `contextStatus`
 
-Poll `softpos.contextStatus(txRef)` (`suspend`) on a short interval (the sample uses 2.5 s). It answers a `VeyraLookup<PaymentContextStatus>`: the QR's status in `value`, or a `failureReason` (`NO_NETWORK_CONNECTION`, `UPSTREAM_ERROR`…) when the poll could not be made — keep the QR on screen and poll again; a failed poll never changes the QR's state and never throws. States: `PENDING` (QR live) → `IN_FLIGHT` (wallet push settling) → `APPROVED` / `DECLINED` (settled — `responseCode` carries the rail outcome) or `EXPIRED`. Convenience: `isSettled` (`APPROVED || DECLINED`), `isApproved`. On settlement the payment is also recorded in the merchant's local history under the same `txRef`, so receipts work like any other rail. **An accepted push does not settle the QR.** When the customer's bank debits them and queues the credit, the context stays unsettled while the SDK writes `ACCEPTED` onto the sale's stored row. Read the row (`softpos.getTransaction(txRef)`) in the same poll; when its status is `ACCEPTED`, take the QR down and show "payment accepted" — see [An `ACCEPTED` payment](#an-accepted-payment-the-customer-is-debited-the-credit-is-still-to-come).
+**Do not poll while the QR is on screen. The SDK does.** From the moment `createPaymentContext` answers, the SDK checks the QR with the gateway by itself, as often as the gateway tells it to, across every screen, and writes each answer onto the sale's stored row. Your QR screen re-reads that row with `softpos.getTransaction(txRef)` (a read of the phone's own store: nothing is sent; the sample reads it once a second) and shows what it says:
+
+| The stored row | What happened | What the screen does |
+|---|---|---|
+| `status` `PENDING`, `isQrClaimed` `null` or `false` | Nobody has claimed the QR (`false`: a wallet claimed it, its payment was never sent to the bank, and the QR is payable again) | Keep the QR on screen |
+| `status` `PENDING`, `isQrClaimed` `true` | **A wallet has claimed the QR and its payment has no outcome yet.** Nobody else can pay this code | **Take the QR down** and show "payment pending"; keep reading the row |
+| `status` `ACCEPTED` | The customer was debited and the credit is queued. Not final | Take the QR down and show "payment accepted" (see [An `ACCEPTED` payment](#an-accepted-payment-the-customer-is-debited-the-credit-is-still-to-come)); keep reading the row |
+| `status` `APPROVED` / `DECLINED` / `FAILED` | The payment ended | Take the QR down; result screen (and receipt when approved) |
+| No row (`getTransaction` returns `null`) | The QR expired unpaid. An expired QR is never recorded | Blank the QR (your `onExpired` callback has usually done so already) and offer a new one |
+
+`isQrClaimed` (`Boolean?`) is on `MerchantTransaction` for merchant-QR sales: `true` once a wallet has claimed the QR, `false` when that claim was released, `null` while no claim has been seen (and on every other rail). A claimed-pending page that later reads `isQrClaimed` `false` (or no row) tells the merchant nothing was charged and offers a new QR.
+
+`softpos.contextStatus(txRef)` (`suspend`) is still there for a **single, on-demand** question: it answers a `VeyraLookup<PaymentContextStatus>`, the QR's status in `value`, or a `failureReason` (`NO_NETWORK_CONNECTION`, `UPSTREAM_ERROR`…) when the request could not be made; it never throws. States: `PENDING` (QR live) → `IN_FLIGHT` (a wallet claimed it) → `APPROVED` / `DECLINED` (settled — `responseCode` carries the rail outcome) or `EXPIRED`. Convenience: `isSettled` (`APPROVED || DECLINED`), `isApproved`. Never call it on a timer: that only repeats the requests the SDK already sends.
 
 ```kotlin
 val created = softpos.createPaymentContext(
@@ -1033,16 +1045,20 @@ if (!created.created) {
 
 renderQrPayload(created.mpmPayload!!)        // encode the string verbatim into a QR bitmap
 val txRef = created.txRef!!
+// Watch the stored row. A local read: the SDK does the asking.
 while (isActive) {
-    delay(2500)
-    val status = softpos.contextStatus(txRef).value ?: continue    // poll not made: ask again
+    delay(1000)
+    val row = softpos.getTransaction(txRef)
     when {
-        status.isSettled -> {
+        row == null -> { blankQr(); break }                       // expired unpaid
+        row.status == "ACCEPTED" -> { hideQr(); showAccepted(); /* keep watching for the final status */ }
+        row.status in setOf("APPROVED", "DECLINED", "FAILED") -> {
             softpos.cancelQrExpiry()
-            showResult(approved = status.isApproved, code = status.responseCode)
+            showResult(approved = row.status == "APPROVED", code = row.responseCode)
             break
         }
-        status.state == "EXPIRED" -> { blankQr(); break }
+        row.isQrClaimed == true -> { hideQr(); showPending() }    // claimed, no outcome yet
+        // else: unclaimed. The QR stays up.
     }
 }
 // teardown (screen leave): softpos.cancelQrExpiry()
@@ -1082,9 +1098,11 @@ then the QR stays locked, so an unknown outcome can never lead to a second debit
 
 What this means for your app:
 
-- **Merchant (`softpos.contextStatus(txRef)`).** Keep polling while the state is `PENDING` or `IN_FLIGHT`.
-  `IN_FLIGHT` can go back to `PENDING` when a payment ended `RETRY`, because the QR is
-  payable again, so keep it on screen. On `DECLINED`, take the QR down: it can't be paid again.
+- **Merchant (the stored row, `softpos.getTransaction(txRef)`).** While a wallet holds the QR
+  (`IN_FLIGHT`) the row reads `isQrClaimed` `true`: take the QR down and show "payment pending".
+  If that payment ended `RETRY` the QR is payable again and the row reads `isQrClaimed` `false`:
+  tell the merchant nothing was charged and show the QR again or a new one. On `DECLINED`, the
+  QR can't be paid again.
   Create a new QR with `createPaymentContext` for the same order id. That is allowed after a decline,
   failure or retry; it is refused with `94` / `DUPLICATE_MERCHANT_ORDER_ID` only while the order
   is `APPROVED`, `ACCEPTED` or `PENDING`.
@@ -1190,7 +1208,9 @@ val tx = softpos.getTransaction(reference)              // or null
 // on MPM rows it can be null for a few seconds after the settle while the SDK learns it),
 // creditConfirmationStatus ("RECEIVED" once the merchant's bank confirmed the
 // funds, "UNABLE_TO_CONFIRM" only as the 30-day give-up; null while unconfirmed — show
-// nothing or "not confirmed yet", never "not received")
+// nothing or "not confirmed yet", never "not received"),
+// isQrClaimed (merchant QR only: true once a wallet has claimed the QR, false when that claim
+// was released and the QR is payable again, null while no claim has been seen)
 ```
 
 Each row records the rail that actually took the payment. Display `railLabel` — the SDK derives it
@@ -2119,7 +2139,7 @@ The SDK raises the authentication sheet itself — **one gesture per QR**; regen
 wallet.showQrToPay(amountMinorUnits, onExpired = { blankQr() }) { result ->
     val qr = result.getOrElse { setupError -> throw setupError }   // VeyraError only
     if (qr.responseStatus == ResponseStatus.APPROVED && qr.payload != null) {
-        renderQr(qr.payload); pollForSettlement(qr)
+        renderQr(qr.payload); watchStoredRow(qr)
     } else {
         // NOT_SENT: no QR was made — AUTH_CANCELLED / AUTH_FAILED / AUTH_UNAVAILABLE, NO_ACTIVE_CARD,
         // CARD_CANNOT_SHOW_QR, ONLINE_REQUIRED, TOKEN_NOT_ACTIVE, DEVICE_NOT_BOUND…
@@ -2130,28 +2150,42 @@ wallet.showQrToPay(amountMinorUnits, onExpired = { blankQr() }) { result ->
 wallet.cancelQrExpiry()
 ```
 
-The result (`PaymentQr`): `responseStatus` / `responseStatusReason` / `message` (the outcome — `APPROVED`, or `NOT_SENT` with the reason, when `payload` and the other QR fields are `null`), `payload` (**render as the QR**), `amountMinorUnits`, `currencyCode` (ISO 4217 numeric, three digits, e.g. `"566"`), `expiresAtEpochMillis`, `transactionHash` — this render's unique hash. To show "paid ✓" on the customer's screen, check **this QR's own payment** while the QR is up: call [`refreshTransactionStatus`](#refreshtransactionstatus-1) with its `transactionHash` — one request per check — and stop on a final status:
+The result (`PaymentQr`): `responseStatus` / `responseStatusReason` / `message` (the outcome — `APPROVED`, or `NOT_SENT` with the reason, when `payload` and the other QR fields are `null`), `payload` (**render as the QR**), `amountMinorUnits`, `currencyCode` (ISO 4217 numeric, three digits, e.g. `"566"`), `expiresAtEpochMillis`, `transactionHash` — this render's unique hash.
+
+**Do not poll while the QR is on screen. The SDK does.** The QR's history row is created `PENDING` as soon as the QR is shown, and the SDK checks that payment with the gateway by itself, as often as the gateway tells it to. Your screen re-reads the row from `wallet.getTransactions(tokenUniqueReference, …)` (a local read: nothing is sent; the sample reads it once a second), finds it by `transactionHash`, and shows what it says:
+
+| The stored row | What happened | What the screen does |
+|---|---|---|
+| `authorizationStatus` `PENDING`, `isCharged` `null` | No merchant has charged the QR yet | Keep the QR on screen |
+| `authorizationStatus` `PENDING`, `isCharged` `true` | **A merchant charged the QR and the payment has no outcome yet** | **Take the QR down** and show "payment pending - don't pay again"; keep reading the row |
+| `authorizationStatus` `ACCEPTED` | Debited, credit queued. Not final | Take the QR down and show "payment accepted"; keep reading the row |
+| `authorizationStatus` `APPROVED` / `DECLINED` / `FAILED` | The payment ended | Show the result |
+
+`isCharged` (`Boolean?`) is on `TransactionSummary`: `true` once the gateway has returned a payment for this QR's hash (a merchant charged it), `null` until then and on rows from other rails. It is never `false`.
 
 ```kotlin
 val hash = qr.transactionHash ?: return
+val card = qr.tokenUniqueReference ?: return
 while (isActive) {
-    delay(3000)
-    // failureReason set when the check could not be made (offline, throttled…): just ask again next time
-    val row = wallet.refreshTransactionStatus(hash).value
-    when (row?.authorizationStatus) {
+    delay(1000)
+    // A local read. The newest rows are enough: this payment was recorded moments ago.
+    val row = wallet.getTransactions(card, limit = 20)
+        .firstOrNull { it.transactionHash.equals(hash, ignoreCase = true) } ?: continue
+    when (row.authorizationStatus) {
         "APPROVED" -> { onSettled(true); break }
         "DECLINED", "FAILED" -> { onSettled(false); break }
-        // Debited, credit queued: the QR is spent. Take it down, say "payment accepted", keep asking.
+        // Debited, credit queued: the QR is spent. Take it down, say "payment accepted", keep watching.
         "ACCEPTED" -> onAccepted()
-        else -> Unit   // PENDING (the QR's own row exists from the moment it is shown), RETRY, or not found yet: keep the QR up
+        // Still open: charged means the QR is used. Take it down and keep watching.
+        else -> if (row.isCharged == true) onChargedPending()
     }
 }
 ```
 
-The QR's history row is created `PENDING` as soon as the QR is shown, so finding the row is not
-the answer — only a final status is. **Don't loop `reconcilePendingTransactions` here:** it asks
-about every open payment on the device back-to-back, so on a short loop it gets the wallet
-throttled (`429`) by the gateway.
+Finding the row is not the answer (it exists from the moment the QR is shown): only `isCharged`
+or a status says the QR was used. **Don't loop `refreshTransactionStatus` or
+`reconcilePendingTransactions` here:** they repeat requests the SDK already sends, and on a short
+loop they get the wallet throttled (`429`) by the gateway.
 
 #### Scan to pay (merchant QR)
 
@@ -2340,7 +2374,7 @@ A check that fails (no network, a timeout) doesn't restart the clock, and waits 
 
 #### `reconcilePendingTransactions`
 
-Reconcile still-`PENDING` (and `ACCEPTED`) rows against the backend. It asks about **every** open row on the device, so call it on an occasion — on returning to the foreground, on pull-to-refresh, when history is opened — **never on a loop**. A screen waiting for one payment (a [shown QR](#show-qr-to-pay-customer-presented), say) calls [`refreshTransactionStatus`](#refreshtransactionstatus-1) with that payment's hash instead: one request rather than one per open row. If the gateway throttles (`429`), the pass stops there and the remaining rows wait for the SDK's next sweep.
+Reconcile still-`PENDING` (and `ACCEPTED`) rows against the backend. It asks about **every** open row on the device, so call it on an occasion — on returning to the foreground, on pull-to-refresh, when history is opened — **never on a loop**. A screen waiting for one payment (a [shown QR](#show-qr-to-pay-customer-presented), say) sends nothing: it reads that payment's stored row, which the SDK keeps up to date. A "check now" button for one payment calls [`refreshTransactionStatus`](#refreshtransactionstatus-1) with its hash: one request rather than one per open row. If the gateway throttles (`429`), the pass stops there and the remaining rows wait for the SDK's next sweep.
 
 ```kotlin
 wallet.reconcilePendingTransactions { result: ReconcileResult ->
@@ -3396,7 +3430,7 @@ softpos.observeTransactionResolved { resolution ->
     }
 }
 
-// Merchant QR: in your contextStatus poll, while the context is not settled
+// Merchant QR: in your watch of the sale's stored row
 if (softpos.getTransaction(txRef)?.status == ResponseStatus.ACCEPTED) {
     hideQr()                               // it can no longer be paid
     showAccepted(null)
@@ -3405,7 +3439,7 @@ if (softpos.getTransaction(txRef)?.status == ResponseStatus.ACCEPTED) {
 
 **A merchant QR.** While the customer's push is only accepted the context is not settled: `isSettled`
 stays `false`, and the QR can no longer be paid. The SDK writes `ACCEPTED` onto the stored row, so read
-the row (`getTransaction(reference)`) while you poll, take the QR down, and show the accepted state.
+the row (`getTransaction(reference)`) while the QR is up, take the QR down, and show the accepted state.
 
 **`TRANSACTION_IN_PROCESS_ESCALATED`** can replace the reason on an accepted payment that automated
 reconciliation has handed to a person. The status stays `ACCEPTED`: keep showing it as accepted, tell
@@ -3588,11 +3622,14 @@ and they never contradict one.
 
 #### QR context lifecycle — `contextStatus().state`
 
+The SDK reads this state for a displayed QR and writes it onto the sale's stored row; your screen
+reads the row (see [`contextStatus`](#contextstatus)) rather than asking for the state itself.
+
 | State | Meaning | What to do |
 |---|---|---|
-| `PENDING` | QR live, unpaid | Keep polling. |
-| `IN_FLIGHT` | A wallet claimed it; settling | Keep polling. |
-| `APPROVED` / `DECLINED` | Settled — the triple carries the payment's outcome | Stop polling; result screen + receipt. |
+| `PENDING` | QR live, unpaid | Keep the QR on screen. The stored row reads `isQrClaimed` `null` (or `false` after a released claim). |
+| `IN_FLIGHT` | A wallet claimed it; settling | Take the QR down and show "payment pending". The stored row reads `isQrClaimed` `true`. |
+| `APPROVED` / `DECLINED` | Settled — the triple carries the payment's outcome | Result screen + receipt. The stored row carries the final status. |
 | `EXPIRED` | Lapsed unpaid (your `onExpired` callback has blanked the QR) | Offer a fresh QR. An expired context is never recorded in history. |
 
 `state` is the *QR's* lifecycle; `responseStatus` is the *payment's* outcome. Branch on
@@ -3918,7 +3955,8 @@ data class TransactionSummary(
     val isCreditConfirmationSupported: Boolean?, // THE GATE: true ⇒ SDK is polling, render the line
     val creditConfirmationStatus: String?,       // null = no answer yet / "RECEIVED" / "UNABLE_TO_CONFIRM"
     val creditedAt: String?,                     // when the bank posted the credit (RECEIVED only)
-    val bankReference: String?                   // the bank's own reference   (RECEIVED only)
+    val bankReference: String?,                  // the bank's own reference   (RECEIVED only)
+    val isCharged: Boolean?                      // shown QR: true once a merchant has charged it; null until then
 ) { fun toJson(): String; companion object { fun fromJson(json: String): TransactionSummary? } }
 
 data class TransactionReceipt(
@@ -4101,7 +4139,8 @@ data class MerchantTransaction(             // history row
     val responseStatusReason: String?,      // the stated cause ("INSUFFICIENT_FUNDS"...); display, never parse
     val creditTransactionId: String?,       // merchant-bank credit id; null unless approved + supported
     val isCreditConfirmationSupported: Boolean?, // true ⇒ SDK is polling; show "confirming credit…" until resolved
-    val creditConfirmationStatus: String?   // "RECEIVED" / final "UNABLE_TO_CONFIRM"; null while unconfirmed
+    val creditConfirmationStatus: String?,  // "RECEIVED" / final "UNABLE_TO_CONFIRM"; null while unconfirmed
+    val isQrClaimed: Boolean?               // merchant QR: true = a wallet claimed it; false = claim released; null = none seen
 )
 
 data class TransactionResolvedEvent(        // observeTransactionResolved payload (a pending or accepted sale settled, or became accepted)
@@ -4279,8 +4318,8 @@ Merchant registered & ACTIVE? ──no──► register / activate first
         │                                       └─ Result → result screen
         │
         ├─────────── Show a QR ─────────────► createPaymentContext
-        │                                       render mpmPayload; poll contextStatus
-        │                                       until APPROVED / DECLINED / EXPIRED
+        │                                       render mpmPayload; watch the stored row
+        │                                       until claimed / final / expired
         │                                       (onExpired blanks the code)
         │
         └────── Scan the customer's QR ─────► inspectCustomerQr → confirm the QR's own amount

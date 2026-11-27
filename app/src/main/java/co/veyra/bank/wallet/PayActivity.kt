@@ -17,6 +17,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import co.veyra.bank.CardRequestIds
+import co.veyra.bank.QrRowStates
 import co.veyra.bank.R
 import co.veyra.bank.databinding.ActivityPayBinding
 import co.veyra.bank.outcomeText
@@ -334,22 +335,27 @@ class PayActivity : AppCompatActivity() {
             }
             override fun onFinish() { /* SDK onExpired handles the blank + label */ }
         }.also { it.start() }
-        // Check this payment's status every 3s while the QR is up, so the outcome lands within
-        // seconds of the merchant charging — not on the SDK's backoff schedule. Stops on settle or
-        // when the dialog is dismissed.
-        val settlePoll = startCpmSettlePolling(
+        // Watch this payment's stored row while the dialog is up, so the outcome lands on screen as
+        // soon as the SDK has it. The SDK checks the payment with the gateway by itself, as often as
+        // the gateway asks it to; this reads the phone's own store and sends nothing. Stops on a
+        // final status or when the dialog is dismissed.
+        // The code is used once the merchant has charged it, so it comes down while the wait goes on.
+        val takeQrDown = { message: String ->
+            onQrExpired = null
+            sdk.cancelQrExpiry()
+            countdown.visibility = android.view.View.GONE
+            outcome.visibility = android.view.View.VISIBLE
+            outcome.text = message
+            outcome.setTextColor(android.graphics.Color.parseColor("#E65100"))
+            blankQr()
+        }
+        val settlePoll = watchCpmPayment(
+            tokenUniqueReference,
             transactionHash,
-            onAccepted = {
-                // The merchant charged this QR and the bank accepted it: debited, credit queued.
-                // Not final, but the QR is used, so it comes down while the wait continues.
-                onQrExpired = null
-                sdk.cancelQrExpiry()
-                countdown.visibility = android.view.View.GONE
-                outcome.visibility = android.view.View.VISIBLE
-                outcome.text = getString(R.string.payment_accepted_wallet_message)
-                outcome.setTextColor(android.graphics.Color.parseColor("#E65100"))
-                blankQr()
-            },
+            // The merchant charged this QR and the payment has no outcome yet.
+            onCharged = { takeQrDown(getString(R.string.payment_charged_pending_wallet_message)) },
+            // The bank accepted it: debited, credit queued. Not final.
+            onAccepted = { takeQrDown(getString(R.string.payment_accepted_wallet_message)) },
         ) { approved, merchant ->
             // Settled — stop the expiry watch so it can't later overwrite the outcome with "Expired".
             onQrExpired = null
@@ -370,35 +376,49 @@ class PayActivity : AppCompatActivity() {
     }
 
     /**
-     * Check THIS payment's status on a 3s loop while a CPM QR is displayed and report the
-     * terminal outcome. It asks about this render's own [transactionHash] only — one request
-     * per check. `reconcilePendingTransactions` asks about every pending payment on the device,
-     * so calling it on a loop sends a burst of requests each time and gets the wallet throttled
-     * (429) by the gateway. The hash is unique per render, so only the row for this QR can
-     * settle the display. "QR payment" is the pre-backfill placeholder — don't show it as a
-     * merchant name.
+     * Watch the stored row of the payment behind a displayed CPM QR and report what happens to it:
+     * charged (the merchant scanned and charged the code; no outcome yet), accepted (debited, credit
+     * queued) and the final outcome. It reads the SDK's own store on a short local timer and makes
+     * no network call: the SDK keeps the row up to date, checking with the gateway as often as the
+     * gateway asks. The hash is unique per render, so only the row for this QR can move the
+     * display. "QR payment" is the placeholder until the gateway names the merchant, so don't
+     * show it as a merchant name.
      */
-    private fun startCpmSettlePolling(
+    private fun watchCpmPayment(
+        tokenUniqueReference: String,
         transactionHash: String,
+        onCharged: () -> Unit,
         onAccepted: () -> Unit,
         onSettled: (approved: Boolean, merchantName: String?) -> Unit,
     ): kotlinx.coroutines.Job = lifecycleScope.launch {
+        var charged = false
         var accepted = false
         while (isActive) {
-            kotlinx.coroutines.delay(3000)
-            // A check that could not be made carries a failureReason; this loop just asks again.
-            val row = sdk.refreshTransactionStatus(transactionHash).value
-            // The row stays PENDING until the merchant charges — only a final status
-            // settles the display; anything else keeps the QR up and polling.
-            if (row != null && row.authorizationStatus?.uppercase() in setOf("APPROVED", "DECLINED", "FAILED")) {
-                val name = row.merchantName?.takeIf { it != "QR payment" }
-                onSettled(row.authorizationStatus == "APPROVED", name)
-                return@launch
-            }
-            // ACCEPTED is not final: say so once, and keep asking until the final status.
-            if (!accepted && row?.authorizationStatus?.uppercase() == ResponseStatus.ACCEPTED) {
-                accepted = true
-                onAccepted()
+            kotlinx.coroutines.delay(CPM_ROW_WATCH_INTERVAL_MS)
+            // A local read. The newest rows are enough: this payment was recorded moments ago.
+            val row = withContext(Dispatchers.IO) { sdk.getTransactions(tokenUniqueReference, 20) }
+                .firstOrNull { it.transactionHash.equals(transactionHash, ignoreCase = true) }
+                ?: continue
+            when (QrRowStates.shownQr(row.authorizationStatus, row.isCharged)) {
+                // Not charged yet: the QR stays up to be scanned.
+                QrRowStates.ShownQr.WAITING -> Unit
+                // Only a final status settles the display.
+                QrRowStates.ShownQr.FINAL -> {
+                    val name = row.merchantName.takeIf { it != "QR payment" }
+                    onSettled(row.authorizationStatus.equals("APPROVED", ignoreCase = true), name)
+                    return@launch
+                }
+                // ACCEPTED is not final: say so once, and keep watching for the final status.
+                QrRowStates.ShownQr.ACCEPTED -> if (!accepted) {
+                    accepted = true
+                    onAccepted()
+                }
+                // The merchant's charge has reached the gateway and has no outcome yet: the code
+                // is used. Say so once, and keep watching.
+                QrRowStates.ShownQr.CHARGED_PENDING -> if (!charged) {
+                    charged = true
+                    onCharged()
+                }
             }
         }
     }
@@ -743,5 +763,8 @@ class PayActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "PayActivity"
         private const val MENU_REMOVE_TOKEN = 1
+        // How often the shown-QR dialog re-reads its payment's stored row. A read of the phone's
+        // own store: nothing is sent. How often the gateway is asked is the SDK's business.
+        private const val CPM_ROW_WATCH_INTERVAL_MS = 1000L
     }
 }

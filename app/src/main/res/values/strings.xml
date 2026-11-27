@@ -146,6 +146,7 @@
     <string name="payment_accepted">Payment Accepted</string>
     <string name="payment_accepted_merchant_message">Payment accepted - customer debited. Wait for approval before releasing goods</string>
     <string name="payment_accepted_merchant_detail">Not final yet. Do not release goods until this payment is approved. The app keeps checking and will show the result here.</string>
+    <string name="payment_charged_pending_wallet_message">The merchant has charged this code - payment pending. Don\'t pay again; the result will show here and in your transactions.</string>
     <string name="payment_accepted_wallet_message">Payment accepted - waiting for credit approval</string>
     <string name="payment_accepted_wallet_detail">You have been debited and the merchant\'s bank is being credited. Don\'t pay again - the result will show in your transactions.</string>
     <string name="payment_approved_after_accepted">Transaction approved</string>
@@ -272,6 +273,8 @@
     <string name="qr_create_failed">Could not create the payment code — please try again.</string>
     <string name="qr_expired">This payment code has expired — please start a new payment.</string>
     <string name="qr_paid_by_customer">Customer paid by QR</string>
+    <string name="qr_claimed_pending_merchant_message">A customer has scanned this code and the payment is being processed. Wait for approval before releasing goods</string>
+    <string name="qr_claim_released_message">The customer\'s payment was not sent to their bank and nothing was charged. Show a new code to try again.</string>
     <string name="scan_verifying">Verifying…</string>
     <string name="scan_rejected">This code could not be verified — do not pay it.</string>
     <string name="scan_expired">This payment code has expired — ask the merchant for a fresh one.</string>
