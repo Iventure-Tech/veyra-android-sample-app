@@ -40,6 +40,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import co.veyra.bank.CancelAction
 import co.veyra.bank.DUPLICATE_MERCHANT_ORDER_ID
+import co.veyra.bank.QrRowStates
 import co.veyra.bank.cancelAction
 import co.veyra.bank.cancelRefusedTooLate
 import co.veyra.bank.duplicateOrderText
@@ -404,7 +405,9 @@ class GetPaidActivity : AppCompatActivity() {
         // 60s: a cashier needs long enough to read the outcome to the customer, and an approved
         // sale may still be waiting on the merchant bank's credit confirmation.
         private const val AUTO_NAVIGATE_DELAY_MS = 60_000L
-        private const val QR_POLL_INTERVAL_MS = 2500L
+        // How often the QR page re-reads the sale's stored row. A read of the phone's own store:
+        // nothing is sent. How often the gateway is asked is the SDK's business, not this screen's.
+        private const val QR_ROW_WATCH_INTERVAL_MS = 1000L
         // How the MPM result page watches the stored row for credit-confirmation
         // state (the supported flag lands within the SDK reconciler's first status probe;
         // the confirmation itself whenever the merchant's bank answers). The watch runs while
@@ -1069,8 +1072,9 @@ class GetPaidActivity : AppCompatActivity() {
     
     /**
      * The MPM QR rail: obtain a gateway-signed payment context
-     * for the sale, render its payload as the QR, and poll the context lifecycle until the
-     * customer's push settles — the outcome lands on the same Result screen as a tap.
+     * for the sale, render its payload as the QR, and watch the sale's stored row until the
+     * customer's push is claimed, settles or the QR expires. The outcome lands on the same Result
+     * screen as a tap. The SDK does the asking; this screen never checks the QR with the gateway.
      */
     private fun startQrContextPayment() {
         stopQrContextPayment()
@@ -1086,8 +1090,8 @@ class GetPaidActivity : AppCompatActivity() {
         }
         qrPaymentJob = lifecycleScope.launch {
             // The SDK owns the expiry timer; blank the QR the moment it fires (an expired
-            // QR must not stay scannable), instead of waiting for the server-polled
-            // EXPIRED state up to one poll interval later.
+            // QR must not stay scannable), instead of waiting for the SDK's next check to
+            // drop the row.
             // Always an outcome: APPROVED with the QR, the gateway's refusal
             // (DUPLICATE_MERCHANT_ORDER_ID…), or one the SDK originated (NOT_SENT / PENDING).
             val created = sdk.createPaymentContext(
@@ -1123,17 +1127,25 @@ class GetPaidActivity : AppCompatActivity() {
             lastOriginalTransactionReference = txRef
             renderQrPayload(payload)
 
-            // Poll the context lifecycle until the push settles (or the QR expires).
+            // Watch the sale's stored row until the QR is used or gone. The SDK checks the QR with
+            // the gateway by itself, as often as the gateway asks it to, and writes each answer
+            // onto the row. This loop reads the phone's own store and sends nothing.
             while (isActive) {
-                delay(QR_POLL_INTERVAL_MS)
-                // A poll that could not be made carries a reason and no state: just ask again.
-                val status = sdk.contextStatus(txRef).value ?: continue
-                when {
-                    // The customer's bank accepted the push: debited, credit queued. The context
-                    // is not settled, so take the QR down and wait on the result page, which
-                    // reads the SDK's stored row until the final status arrives.
-                    status.responseStatus?.trim()?.uppercase() == ResponseStatus.ACCEPTED ||
-                        sdk.getTransaction(txRef)?.status == ResponseStatus.ACCEPTED -> {
+                delay(QR_ROW_WATCH_INTERVAL_MS)
+                val row = sdk.getTransaction(txRef)
+                when (QrRowStates.merchantQr(row != null, row?.status, row?.isQrClaimed)) {
+                    QrRowStates.MerchantQr.WAITING -> Unit
+                    // The QR expired unpaid: the SDK drops the row, because no payment happened.
+                    QrRowStates.MerchantQr.GONE -> {
+                        qrImage.visibility = View.GONE
+                        placeholder.visibility = View.VISIBLE
+                        placeholder.text = getString(R.string.qr_expired)
+                        scheduleAutoNavigate()
+                        break
+                    }
+                    // The customer's bank accepted the push: debited, credit queued. Not final, so
+                    // take the QR down and wait on the result page until the final status arrives.
+                    QrRowStates.MerchantQr.ACCEPTED -> {
                         showPage(PAGE_PAYMENT_RESULT)
                         showAcceptedResult(
                             reference = txRef,
@@ -1142,37 +1154,103 @@ class GetPaidActivity : AppCompatActivity() {
                         )
                         break
                     }
-                    status.isSettled -> {
+                    QrRowStates.MerchantQr.FINAL -> {
                         showPage(PAGE_PAYMENT_RESULT)
-                        showPaymentResult(
-                            isSuccess = status.isApproved,
-                            title = getString(
-                                if (status.isApproved) R.string.payment_successful else R.string.declined,
-                            ),
-                            message = getString(R.string.qr_paid_by_customer),
-                            amountMinorUnits = currentAmountMinorUnits,
-                            details = "Ref: $txRef\nResponse: ${status.responseCode ?: "-"}",
-                        )
-                        // showPage cleared any pending auto-return; re-arm the 60s hold for this
-                        // outcome — approved or not.
-                        scheduleAutoNavigate()
-                        // An approved MPM sale waits on credit confirmation too —
-                        // driven off the SDK's stored row, see watchCreditConfirmationForQr.
-                        // The settle itself can't say whether the bank supports confirmation, so
-                        // the hold above runs meanwhile; the watch cancels it the moment the
-                        // stored row says the bank does support it.
-                        if (status.isApproved) watchCreditConfirmationForQr(txRef)
+                        showQrSaleSettled(checkNotNull(row), currentAmountMinorUnits)
                         break
                     }
-                    status.state == "EXPIRED" -> {
-                        qrImage.visibility = View.GONE
-                        placeholder.visibility = View.VISIBLE
-                        placeholder.text = getString(R.string.qr_expired)
-                        scheduleAutoNavigate()
+                    // A wallet has claimed the QR and its payment has no outcome yet: nobody else
+                    // can pay this code, so it comes down and the result page waits for the outcome.
+                    QrRowStates.MerchantQr.CLAIMED_PENDING -> {
+                        showPage(PAGE_PAYMENT_RESULT)
+                        showClaimedPendingResult(txRef, currentAmountMinorUnits)
                         break
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * A merchant QR sale reached its final status: approved, or not (declined, failed). An approved
+     * sale may still wait on credit confirmation.
+     */
+    private fun showQrSaleSettled(row: MerchantTransaction, amountMinorUnits: Long) {
+        val approved = row.status == ResponseStatus.APPROVED
+        lastOriginalTransactionReference = row.merchantTransactionReference
+        showPaymentResult(
+            isSuccess = approved,
+            title = getString(if (approved) R.string.payment_successful else R.string.declined),
+            message = getString(R.string.qr_paid_by_customer),
+            amountMinorUnits = amountMinorUnits,
+            details = "Ref: ${row.merchantTransactionReference}\nResponse: ${row.responseCode ?: "-"}",
+        )
+        showViewReceiptButton()
+        // The 60s hold for this outcome, approved or not.
+        scheduleAutoNavigate()
+        // An approved sale waits on credit confirmation too, driven off the SDK's stored row (see
+        // watchCreditConfirmationForQr). The row learns whether the bank supports confirmation
+        // moments after the approval, so the hold above runs meanwhile; the watch cancels it the
+        // moment the stored row says the bank does support it.
+        if (approved) watchCreditConfirmationForQr(row.merchantTransactionReference)
+    }
+
+    /**
+     * Claimed-PENDING: a customer's wallet has claimed the QR and its payment has no outcome yet.
+     * The QR is used, so it is off the screen; the page says the payment is pending, tells the
+     * merchant to wait before releasing goods, and offers no receipt and no retry (the order ID is
+     * held while a payment is under way).
+     *
+     * Like an accepted sale, the page only renders the SDK's stored row: it stays up (no
+     * auto-return) and moves on the moment the row says more.
+     */
+    private fun showClaimedPendingResult(reference: String, amountMinorUnits: Long) {
+        lastSuccessfulResponse = null
+        showPaymentResult(
+            isSuccess = null,
+            title = getString(R.string.payment_pending),
+            message = getString(R.string.qr_claimed_pending_merchant_message),
+            amountMinorUnits = amountMinorUnits,
+            details = getString(R.string.payment_accepted_merchant_detail) + "\nReference: $reference",
+        )
+        viewReceiptButton.visibility = View.GONE
+        cancelAutoNavigate()
+        acceptedWatchJob = lifecycleScope.launch {
+            while (currentPage == PAGE_PAYMENT_RESULT) {
+                delay(QR_ROW_WATCH_INTERVAL_MS)
+                val row = sdk.getTransaction(reference)
+                if (currentPage != PAGE_PAYMENT_RESULT) break
+                when (QrRowStates.merchantQr(row != null, row?.status, row?.isQrClaimed)) {
+                    QrRowStates.MerchantQr.CLAIMED_PENDING -> Unit
+                    // Debited, credit queued: the accepted page takes over the wait.
+                    QrRowStates.MerchantQr.ACCEPTED -> {
+                        acceptedWatchJob = null
+                        showAcceptedResult(reference, message = null, amountMinorUnits = amountMinorUnits)
+                        return@launch
+                    }
+                    QrRowStates.MerchantQr.FINAL -> {
+                        acceptedWatchJob = null
+                        showQrSaleSettled(checkNotNull(row), amountMinorUnits)
+                        return@launch
+                    }
+                    // The wallet's payment was never sent to its bank, so the gateway released
+                    // the QR (or it has since expired unpaid). Nothing was charged.
+                    QrRowStates.MerchantQr.WAITING, QrRowStates.MerchantQr.GONE -> {
+                        acceptedWatchJob = null
+                        showPaymentResult(
+                            isSuccess = false,
+                            title = getString(R.string.payment_failed),
+                            message = getString(R.string.qr_claim_released_message),
+                            amountMinorUnits = amountMinorUnits,
+                            details = "",
+                            retry = { showPage(PAGE_QR_WAITING) },
+                        )
+                        scheduleAutoNavigate()
+                        return@launch
+                    }
+                }
+            }
+            acceptedWatchJob = null
         }
     }
 
